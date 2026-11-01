@@ -87,7 +87,7 @@ jobs:
           pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
           mkdir -p out artifacts
           go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w ${static} \
-            -X ${pkg}.Name=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
             -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
           cp LICENSE README.md out/
           name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"

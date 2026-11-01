@@ -69,6 +69,7 @@ vet: ## Run go vet and fail when a go fix modernizer would rewrite code (as CI d
 rmctl: ## Build the rmctl binary into bin/ with version information
 	@go build -trimpath -o bin/rmctl \
 	  -ldflags "-X github.com/altessa-s/go-atlas-core/runtime/appinfo.Name=rmctl \
+	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Project=rmctl \
 	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
 	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Commit=$$(git rev-parse --short HEAD 2>/dev/null)" \
 	  ./cmd/rmctl
