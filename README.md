@@ -97,6 +97,23 @@ It takes one PDF, asks first ("Replace the PDF of /Books/Paper, keeping its anno
 `--dry-run` prints the plan — the old and new page counts, the pages kept, appended and dropped, and the annotated pages affected — and the
 JSON answer carries it as `content_plan`. It excludes `--replace`, `--notebook`, `--tag` and `--cover`.
 
+## Running a program on changes
+
+`rmctl watch --exec PROGRAM [-- ARG...]` runs a program whenever the library changes, while it still prints the events:
+
+- **Batches.** Events within `--debounce` (2s) of the first one of a batch make one run. Runs happen one at a time, in order; while one
+  runs, up to 16 batches wait, and past that a batch joins the last one waiting, so no event is lost.
+- **No shell, no interpolation.** The program runs as given, with the arguments after `--`. `--shell` hands `--exec` to `sh -c` instead
+  (the arguments after `--` become `$0`, `$1`, …). Names are never put into the command line: the events reach the program only through its
+  environment — `RMCTL_EVENT`, `RMCTL_ID`, `RMCTL_NAME`, `RMCTL_PATH`, `RMCTL_KIND`, `RMCTL_THIS_DEVICE` and `RMCTL_TIME` of the batch's
+  last event, `RMCTL_COUNT` and `RMCTL_PROFILE` — and as JSON on its standard input: `{"profile": ..., "events": [{"time", "event", "id",
+  "name", "path", "kind", "this_device"}, ...]}`. Names and paths come from the library, unmasked; an item no longer in it has none.
+- **Filters.** `--only document|folder` and `--under /Folder` keep the events of documents or folders, or of items below a folder; an item
+  no longer in the library passes only when neither is given. Paths are read once per batch, which the cache makes one request.
+- **Failures.** A run may take `--exec-timeout` (5m) and is then stopped. Its standard output and error go to rmctl's standard error. A run
+  that fails or times out is noted with its exit status, and `watch` goes on.
+- **Ctrl-C** gives a run under way 5 seconds to finish, then stops it; batches still waiting are dropped. `watch` then exits 130.
+
 ## Editing in place
 
 `rename`, `pin`, `unpin` and `tag add|rm` change a document or folder without uploading it again: they write only the `.metadata`
@@ -111,7 +128,7 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
