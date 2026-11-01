@@ -145,16 +145,35 @@ stand on it may: `cloud` implements the cloud ports over its client, `secretfile
 adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So may the composition root, `internal/wiring` and
 `cmd/rmctl`, which build the client.
 
-| Package | Layer | Role |
-|---|---|---|
-| `internal/domain` | entities | Items, the tree, paths, `.metadata` and `.content`. No I/O. |
-| `internal/port` | contracts | Driven ports the use cases need, input ports the command line calls. |
-| `internal/app/library` | use case support | Loads the tree, commits a change to the root with conflict replay. |
-| `internal/app/{account,browse,fetch,write,watch,inspect,pages,archives,secrets}` | use cases | One input port each; `pages.Reader` is shared with `browse`. |
-| `internal/adapter/{cloud,secretfile,keychain,vault,localfs,pdf,blobcache,config,ids,clock,rmpages,rmdocs}` | adapters | Implement the driven ports; only `rmpages` imports rmlines-go, only `rmdocs` imports rmdoc-go. |
-| `internal/wiring` | composition root | Builds the adapters and hands them to the use cases. |
-| `cmd/rmctl` | command line | Cobra commands over the input ports only. |
-| `internal/porttest`, `internal/clouddouble` | tests | Port doubles, and an emulated cloud the real transport talks to. |
+**Entities and ports**
+
+- `internal/domain` — items, the tree, paths, `.metadata` and `.content`. No I/O.
+- `internal/port` — the driven ports the use cases need and the input ports the command line calls.
+
+**Use cases**
+
+- `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict.
+- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets` — one input port each;
+  `pages.Reader` is shared with `browse`.
+
+**Adapters** (`internal/adapter/…`)
+
+- `cloud` — the cloud ports over the rmcloud-go client.
+- `secretfile`, `keychain`, `vault` — token storage in a file or the macOS Keychain, and `vault`, which presents either to the
+  secrets port.
+- `localfs`, `blobcache`, `pdf` — the local file system, downloaded files kept by hash, and a PDF's page count through pdfcpu.
+- `rmpages`, `rmdocs` — `.rm` pages through rmlines-go and `.rmdoc` archives through rmdoc-go; nothing else imports those two.
+- `config`, `ids`, `clock` — profile resolution from config.toml, random v4 UUIDs, and time over go-atlas-core.
+
+**Composition root and command line**
+
+- `internal/wiring` — builds the adapters and hands them to the use cases.
+- `cmd/rmctl` — Cobra commands over the input ports only.
+
+**Tests**
+
+- `internal/porttest` — doubles of the ports.
+- `internal/clouddouble` — an emulated cloud the real transport talks to.
 
 ## Development
 
