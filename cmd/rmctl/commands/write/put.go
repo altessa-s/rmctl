@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -56,6 +57,8 @@ type putFlags struct {
 	cover    string
 	notebook bool
 	device   string
+	// plan is what --content-only will do, found before the question.
+	plan *port.ContentPlan
 }
 
 // split separates the files from the destination folder. --to names the
@@ -92,6 +95,9 @@ func (f *putFlags) validate(cmd *cobra.Command, files []string) error {
 	if f.notebook && (f.opts.Replace || f.opts.Cover != "") {
 		return cliutil.Usagef("%s: --replace and --cover are for PDF and EPUB, not --notebook", cmd.CommandPath())
 	}
+	if err := f.validatePDFOnly(cmd, files); err != nil {
+		return err
+	}
 	for _, file := range files {
 		switch {
 		case isArchive(file) && f.notebook:
@@ -110,6 +116,33 @@ func (f *putFlags) validate(cmd *cobra.Command, files []string) error {
 	return nil
 }
 
+// validatePDFOnly checks the flags that only a PDF takes: --content-only,
+// with --drop-annotations, and --current-page.
+func (f *putFlags) validatePDFOnly(cmd *cobra.Command, files []string) error {
+	cmdPath := cmd.CommandPath()
+	switch {
+	case f.opts.DropAnnotations && !f.opts.ContentOnly:
+		return cliutil.Usagef("%s: --drop-annotations goes with --content-only", cmdPath)
+	case f.opts.CurrentPage < 0:
+		return cliutil.Usagef("%s: --current-page counts from 1", cmdPath)
+	case f.opts.CurrentPage > 0 && f.notebook:
+		return cliutil.Usagef("%s: --current-page is for a PDF, not --notebook", cmdPath)
+	case !f.opts.ContentOnly:
+	case f.opts.Replace || f.notebook:
+		return cliutil.Usagef("%s: --content-only replaces a PDF's content and keeps the rest; it excludes --replace and --notebook", cmdPath)
+	case len(f.opts.Tags) > 0 || f.cover != "":
+		return cliutil.Usagef("%s: --content-only keeps the document's tags and cover; --tag and --cover are for new documents and --replace", cmdPath)
+	case len(files) != 1:
+		return cliutil.Usagef("%s: --content-only replaces the content of one document; %d files were given", cmdPath, len(files))
+	}
+	for _, file := range files {
+		if (f.opts.ContentOnly || f.opts.CurrentPage > 0) && !strings.EqualFold(filepath.Ext(file), ".pdf") {
+			return cliutil.Usagef("%s: %s: --content-only and --current-page are for a PDF", cmdPath, file)
+		}
+	}
+	return nil
+}
+
 func (f *putFlags) question(files []string, dest string) string {
 	what := filepath.Base(files[0])
 	if len(files) > 1 {
@@ -121,6 +154,9 @@ func (f *putFlags) question(files []string, dest string) string {
 	if f.opts.Replace {
 		return fmt.Sprintf("Upload %s into %s, replacing documents of the same name?", what, dest)
 	}
+	if f.plan != nil {
+		return fmt.Sprintf("Replace the PDF of %s, keeping its annotations on %d pages?", path.Join(dest, f.plan.Document.Name), f.plan.Annotated)
+	}
 	return fmt.Sprintf("Upload %s into %s?", what, dest)
 }
 
@@ -131,6 +167,8 @@ type putResult struct {
 	Imported []importedView    `json:"imported,omitempty"`
 	DryRun   bool              `json:"dry_run,omitzero"`
 	Error    string            `json:"error,omitempty"`
+	// ContentPlan is what --content-only did to the document's pages.
+	ContentPlan *contentPlanView `json:"content_plan,omitempty"`
 	// uploaded is the item a PDF, an EPUB or a notebook became, for the
 	// text line.
 	uploaded domain.Item
@@ -167,6 +205,13 @@ func newPut(env *cliutil.Env) *cobra.Command {
 			annotations are not. --dry-run checks every file and the folder and sends
 			nothing; it needs no --yes.
 
+			--content-only replaces only the PDF of the PDF document of the same name in
+			the folder and keeps its annotations, tags and settings: pages keep their
+			identifiers, extra pages of the new PDF are appended, and pages the new PDF
+			no longer has are dropped, which is refused when they carry annotations
+			unless --drop-annotations. It takes one PDF and asks first; --dry-run
+			prints the plan. --current-page N opens a PDF on page N.
+
 			--notebook makes a notebook of typed text from a markdown or text file:
 			headings, bold lines, bullets and numbered lists become the tablet's own
 			paragraph styles, and --device lays it out for that tablet.
@@ -178,6 +223,8 @@ func newPut(env *cliutil.Env) *cobra.Command {
 			rmctl put paper.pdf --to /Papers --replace --yes
 			rmctl put *.pdf /Inbox --dry-run
 			rmctl put notes.md /Notes --notebook --device move --yes
+			rmctl put paper-v2.pdf /Papers --name Paper --content-only --dry-run
+			rmctl put paper.pdf /Papers --current-page 3 --yes
 		`),
 		Args: cliutil.Args(cobra.MinimumNArgs(1)),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
@@ -197,6 +244,9 @@ func newPut(env *cliutil.Env) *cobra.Command {
 				return err
 			}
 			if !f.opts.DryRun {
+				if err = f.planContent(cmd, svc, files, dest); err != nil {
+					return cliutil.PagesErr("put", err)
+				}
 				if err = cliutil.Confirm(cmd, env, f.question(files, dest)); err != nil {
 					return err
 				}
@@ -212,6 +262,11 @@ func newPut(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().BoolVar(&f.opts.DryRun, "dry-run", false, "check the files and the folder; upload nothing")
 	cmd.Flags().BoolVar(&f.notebook, "notebook", false, "make notebooks of typed text from .md, .markdown or .txt files")
 	cmd.Flags().StringVar(&f.device, "device", string(domain.DeviceRM2), "tablet a notebook is laid out for: rm2, pure, pro, move")
+	cmd.Flags().BoolVar(&f.opts.ContentOnly, "content-only", false,
+		"replace the PDF of the document of the same name and keep its annotations")
+	cmd.Flags().BoolVar(&f.opts.DropAnnotations, "drop-annotations", false,
+		"with --content-only, drop the annotations of pages the new PDF no longer has")
+	cmd.Flags().IntVar(&f.opts.CurrentPage, "current-page", 0, "the page a PDF opens on, from 1")
 	return cmd
 }
 
@@ -282,11 +337,19 @@ func putFile(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putF
 	if isArchive(file) {
 		return importOne(cmd, svc, f, file, dest)
 	}
+	var plan *contentPlanView
+	if f.opts.ContentOnly {
+		f.opts.OnContentPlan = func(p port.ContentPlan) {
+			v := planView(p)
+			plan = &v
+			notePlan(cmd.ErrOrStderr(), p, f.opts.DryRun)
+		}
+	}
 	it, err := putOne(cmd, env, svc, f, file, dest)
 	if err != nil {
 		return putResult{}, err
 	}
-	r := putResult{File: file, DryRun: f.opts.DryRun, uploaded: it}
+	r := putResult{File: file, DryRun: f.opts.DryRun, uploaded: it, ContentPlan: plan}
 	if it.ID != "" {
 		v := cliutil.View(nil, it)
 		r.Item = &v
@@ -334,16 +397,22 @@ func putRows(f *putFlags, r putResult, dest string) [][]output.Cell {
 		it.Name = strings.TrimSuffix(filepath.Base(r.File), filepath.Ext(r.File))
 	}
 	verb := "upload"
-	if f.notebook {
+	switch {
+	case f.notebook:
 		verb = "make"
+	case f.opts.ContentOnly:
+		verb = "replace content"
 	}
 	return [][]output.Cell{row(verb, it, "")}
 }
 
 // past is a verb of putRows as done.
 func past(verb string) string {
-	if verb == "make" {
+	switch verb {
+	case "make":
 		return "made"
+	case "replace content":
+		return "replaced content"
 	}
 	return verb + "ed"
 }
@@ -469,4 +538,63 @@ func importOne(cmd *cobra.Command, svc cliutil.Services, f *putFlags, file, dest
 		r.Imported = append(r.Imported, v)
 	}
 	return r, nil
+}
+
+// planContent finds what --content-only will do, before the question that
+// names it: a dry run of the one file.
+func (f *putFlags) planContent(cmd *cobra.Command, svc cliutil.Services, files []string, dest string) error {
+	if !f.opts.ContentOnly || svc.Writer == nil {
+		return nil
+	}
+	opts := f.opts
+	opts.DryRun = true
+	opts.OnContentPlan = func(p port.ContentPlan) { f.plan = &p }
+	_, err := svc.Writer.Put(cmd.Context(), files[0], dest, opts, nil)
+	if err != nil && f.plan != nil {
+		notePlan(cmd.ErrOrStderr(), *f.plan, true)
+	}
+	return err
+}
+
+// contentPlanView is a --content-only plan as --json prints it.
+type contentPlanView struct {
+	OldPages    int                 `json:"old_pages"`
+	NewPages    int                 `json:"new_pages"`
+	OldOriginal int                 `json:"old_pdf_pages"`
+	NewOriginal int                 `json:"new_pdf_pages"`
+	Kept        int                 `json:"kept"`
+	Appended    int                 `json:"appended"`
+	Dropped     int                 `json:"dropped"`
+	Annotated   int                 `json:"annotated_kept"`
+	Lost        []annotatedPageView `json:"annotated_dropped"`
+}
+
+type annotatedPageView struct {
+	Page  int    `json:"page"`
+	ID    string `json:"id"`
+	Files int    `json:"annotation_files"`
+}
+
+func planView(p port.ContentPlan) contentPlanView {
+	v := contentPlanView{
+		OldPages: p.OldPages, NewPages: p.NewPages, OldOriginal: p.OldOriginal, NewOriginal: p.NewOriginal,
+		Kept: p.Kept, Appended: p.Appended, Dropped: p.Dropped, Annotated: p.Annotated, Lost: []annotatedPageView{},
+	}
+	for _, l := range p.Lost {
+		v.Lost = append(v.Lost, annotatedPageView{Page: l.Number, ID: l.ID, Files: l.Files})
+	}
+	return v
+}
+
+// notePlan tells what --content-only does to the pages, on the error stream.
+func notePlan(w io.Writer, p port.ContentPlan, dry bool) {
+	verb := "keeps"
+	if dry {
+		verb = "would keep"
+	}
+	cliutil.Notef(w, "%s: %d pages (a PDF of %d) become %d (a PDF of %d): %s %d, append %d, drop %d; annotations stay on %d pages",
+		p.Document.Name, p.OldPages, p.OldOriginal, p.NewPages, p.NewOriginal, verb, p.Kept, p.Appended, p.Dropped, p.Annotated)
+	for _, l := range p.Lost {
+		cliutil.Notef(w, "  page %d (%s) is dropped with %d annotation files", l.Number, l.ID, l.Files)
+	}
 }

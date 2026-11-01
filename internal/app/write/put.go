@@ -29,6 +29,9 @@ const (
 	DefaultJobs = 4
 )
 
+// extPDF is the extension of a PDF upload.
+const extPDF = "pdf"
+
 // zipMagic starts every EPUB, which is a ZIP archive.
 const zipMagic = "PK\x03\x04"
 
@@ -58,6 +61,9 @@ func (s *Service) Put(ctx context.Context, local, dest string, opts port.PutOpti
 	if strings.TrimSpace(name) == "" {
 		return domain.Item{}, domain.ErrEmptyName
 	}
+	if err = checkPutOptions(local, up, opts); err != nil {
+		return domain.Item{}, err
+	}
 	tree, _, err := s.lib.Load(ctx)
 	if err != nil {
 		return domain.Item{}, err
@@ -65,6 +71,9 @@ func (s *Service) Put(ctx context.Context, local, dest string, opts port.PutOpti
 	parent, err := destination(tree, dest)
 	if err != nil {
 		return domain.Item{}, err
+	}
+	if opts.ContentOnly {
+		return s.putContent(ctx, tree, parent, name, up, opts, progress)
 	}
 	var old domain.Item
 	replacing := false
@@ -97,7 +106,7 @@ func (s *Service) Put(ctx context.Context, local, dest string, opts port.PutOpti
 		return domain.Item{}, fmt.Errorf("upload %s: %w", local, err)
 	}
 	content := s.content(up, tagsOf(opts.Tags, now.UnixMilli()), opts.Cover)
-	meta := domain.NewDocumentMetadata(name, parent, now)
+	meta := opened(domain.NewDocumentMetadata(name, parent, now), opts.CurrentPage)
 	list := []named{{name: string(id) + ".content", body: content}, {name: string(id) + ".metadata", body: meta.Bytes()}}
 	if up.pages > 0 {
 		list = append(list, named{name: string(id) + ".pagedata", body: domain.Pagedata(up.pages)})
@@ -115,7 +124,7 @@ func (s *Service) Put(ctx context.Context, local, dest string, opts port.PutOpti
 	_, err = s.lib.Commit(ctx, func(ctx context.Context, tree *domain.Tree, state port.RootState) ([]domain.Record, error) {
 		final, finalFiles, finalMeta := rec, files, meta
 		if checkDestination(tree, parent, domain.RootID) != nil {
-			finalMeta = domain.NewDocumentMetadata(name, domain.RootID, now)
+			finalMeta = opened(domain.NewDocumentMetadata(name, domain.RootID, now), opts.CurrentPage)
 			var rerr error
 			if final, finalFiles, rerr = s.rewriteMetadata(ctx, domain.Item{ID: id, Files: files}, finalMeta); rerr != nil {
 				return nil, rerr
@@ -130,13 +139,45 @@ func (s *Service) Put(ctx context.Context, local, dest string, opts port.PutOpti
 	return result, nil
 }
 
+// checkPutOptions refuses what an upload of up cannot honor: a content
+// replacement or an opening page of anything but a PDF, a content
+// replacement that is also a replacement, an opening page beyond the PDF.
+func checkPutOptions(local string, up upload, opts port.PutOptions) error {
+	pdfOnly := func(what string) error {
+		return fmt.Errorf("%s: %w: %s is for a PDF", local, domain.ErrUnsupportedFile, what)
+	}
+	switch {
+	case opts.ContentOnly && up.ext != extPDF:
+		return pdfOnly("--content-only")
+	case opts.CurrentPage != 0 && up.ext != extPDF:
+		return pdfOnly("--current-page")
+	case opts.ContentOnly && opts.Replace:
+		return fmt.Errorf("%s: --content-only and --replace exclude each other: %w", local, domain.ErrUnsupportedFile)
+	case opts.CurrentPage < 0, !opts.ContentOnly && opts.CurrentPage > up.pages:
+		return pageOutOfRange(local, opts.CurrentPage, up.pages)
+	}
+	return nil
+}
+
+func pageOutOfRange(local string, page, pages int) error {
+	return fmt.Errorf("page %d of %s, which has %d pages: %w", page, local, pages, domain.ErrNoSuchPage)
+}
+
+// opened is meta opening on page, from 1; 0 leaves it as it is.
+func opened(meta domain.Metadata, page int) domain.Metadata {
+	if page <= 0 {
+		return meta
+	}
+	return meta.OpenedAt(page - 1)
+}
+
 // content is the .content of a fresh upload.
 func (s *Service) content(up upload, tags []domain.Tag, cover port.Cover) []byte {
 	coverPage := domain.CoverLastOpened
 	if cover == port.CoverFirst {
 		coverPage = domain.CoverFirstPage
 	}
-	if up.ext != "pdf" {
+	if up.ext != extPDF {
 		return domain.NewEPUBContentWithCover(up.size, tags, coverPage)
 	}
 	pages := make([]string, up.pages)
@@ -205,7 +246,7 @@ func (s *Service) replace(ctx context.Context, old domain.Item, up upload, opts 
 		if merr != nil {
 			return nil, merr
 		}
-		meta = meta.Rewritten(up.pages, now)
+		meta = opened(meta.Rewritten(up.pages, now), opts.CurrentPage)
 		content := domain.ReplacedContent(oldContent, s.content(up, tags, opts.Cover))
 		list := []named{{name: string(cur.ID) + ".content", body: content}, {name: string(cur.ID) + ".metadata", body: meta.Bytes()}}
 		if up.pages > 0 {
@@ -257,7 +298,7 @@ func (s *Service) inspect(local string) (upload, error) {
 	}
 	up := upload{path: local, size: size, ext: strings.ToLower(strings.TrimPrefix(filepath.Ext(local), "."))}
 	switch up.ext {
-	case "pdf":
+	case extPDF:
 		pages, err := s.pdf.Pages(local)
 		if err != nil {
 			return upload{}, unsupported(err.Error())

@@ -184,6 +184,15 @@ func (m Metadata) Rewritten(pages int, now time.Time) Metadata {
 	return out
 }
 
+// OpenedAt is the metadata with the document opening on page, counted from
+// 0: the page the tablet shows first, and the one a cover of the last page
+// read shows.
+func (m Metadata) OpenedAt(page int) Metadata {
+	out := m.clone()
+	out.set("lastOpenedPage", page)
+	return out
+}
+
 // Edited is the metadata marked changed, the way the tablet marks an edit of
 // a document's pages or files: see edited.
 func (m Metadata) Edited(now time.Time) Metadata { return m.clone().edited(now) }

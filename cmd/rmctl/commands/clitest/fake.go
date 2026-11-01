@@ -8,6 +8,7 @@ import (
 	"context"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -19,6 +20,8 @@ import (
 // Fake implements every input port over a fixed library. Err, when set, is
 // returned by every call; the call is still recorded.
 type Fake struct {
+	// ContentPlan is what a put --content-only hears it will do.
+	ContentPlan *port.ContentPlan
 	// CacheAt is what Cache.Status answers, CacheErr fails Status and
 	// Clear, and Offline marks the services as offline.
 	CacheAt  port.CacheReport
@@ -279,7 +282,17 @@ func (f *Fake) Put(_ context.Context, local, dest string, o port.PutOptions, pro
 	if o.Replace && o.OnReplace != nil && f.ReplaceOld.ID != "" {
 		o.OnReplace(f.ReplaceOld)
 	}
-	err := f.record("Put", local, dest, o.Name, strings.Join(o.Tags, ","), string(o.Cover), opt(o.Replace, "replace"), opt(o.DryRun, "dry-run"))
+	if o.ContentOnly && o.OnContentPlan != nil && f.ContentPlan != nil {
+		o.OnContentPlan(*f.ContentPlan)
+	}
+	args := []string{local, dest, o.Name, strings.Join(o.Tags, ","), string(o.Cover), opt(o.Replace, "replace"), opt(o.DryRun, "dry-run")}
+	if o.ContentOnly {
+		args = append(args, "content-only", opt(o.DropAnnotations, "drop"))
+	}
+	if o.CurrentPage > 0 {
+		args = append(args, "page="+strconv.Itoa(o.CurrentPage))
+	}
+	err := f.record("Put", args...)
 	if err == nil {
 		err = f.PutErr[local]
 	}

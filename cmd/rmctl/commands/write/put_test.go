@@ -260,3 +260,73 @@ func (f *failingUnmark) services() cliutil.Services {
 	s.Pages = f
 	return s
 }
+
+func contentPlanFake() *clitest.Fake {
+	return &clitest.Fake{ContentPlan: &port.ContentPlan{
+		Document: clitest.Item(clitest.Spec{ID: "d-paper", Name: "Paper", Kind: domain.KindPDF}),
+		OldPages: 3, NewPages: 2, OldOriginal: 3, NewOriginal: 2, Kept: 2, Dropped: 1, Annotated: 2,
+		Lost: []port.AnnotatedPage{{Number: 3, ID: "p3", Files: 1}},
+	}}
+}
+
+func TestPutContentOnly(t *testing.T) {
+	t.Parallel()
+	f := contentPlanFake()
+	r := run(t, f, clitest.Options{Terminal: true, Stdin: "n\n"}, "put", "Paper.pdf", "/Books", "--content-only", "--drop-annotations")
+	if !errors.Is(r.Error, cliutil.ErrDeclined) || !strings.Contains(r.Err, "Replace the PDF of /Books/Paper, keeping its annotations on 2 pages? [y/N]") {
+		t.Fatalf("%v %q", r.Error, r.Err)
+	}
+	if calls := f.Calls(); len(calls) != 1 || !strings.Contains(calls[0], "dry-run content-only drop") {
+		t.Fatalf("the plan before the question: %v", calls)
+	}
+	f = contentPlanFake()
+	r = run(t, f, clitest.Options{}, "put", "Paper.pdf", "/Books", "--content-only", "--drop-annotations", "--current-page", "2", "--yes", "--json")
+	if r.Code != 0 || !strings.Contains(r.Out, `"content_plan": {`) || !strings.Contains(r.Out, `"annotated_dropped": [`) ||
+		!strings.Contains(r.Out, `"page": 3`) || !strings.Contains(r.Err, "page 3 (p3) is dropped with 1 annotation files") {
+		t.Fatalf("%d %v\n%s\n%s", r.Code, r.Error, r.Out, r.Err)
+	}
+	if calls := f.Calls(); !strings.HasSuffix(calls[len(calls)-1], " content-only drop page=2") {
+		t.Fatalf("%v", calls)
+	}
+	r = run(t, contentPlanFake(), clitest.Options{}, "put", "Paper.pdf", "/Books", "--content-only", "--yes")
+	if r.Code != 0 || !strings.HasPrefix(r.Out, "replaced content\t") || !strings.Contains(r.Err, "Paper: 3 pages (a PDF of 3) become 2 (a PDF of 2): keeps 2") {
+		t.Fatalf("%q %q", r.Out, r.Err)
+	}
+	r = run(t, contentPlanFake(), clitest.Options{}, "put", "Paper.pdf", "/Books", "--content-only", "--dry-run")
+	if r.Code != 0 || !strings.HasPrefix(r.Out, "would replace content\t") || !strings.Contains(r.Err, "would keep 2") {
+		t.Fatalf("%q %q", r.Out, r.Err)
+	}
+	// A plan that fails is the command's failure, with the plan told.
+	failing := contentPlanFake()
+	failing.PutErr = map[string]error{"Paper.pdf": domain.ErrAnnotationsDropped}
+	r = run(t, failing, clitest.Options{}, "put", "Paper.pdf", "/Books", "--content-only", "--yes")
+	if r.Code != cliutil.CodeError || !errors.Is(r.Error, domain.ErrAnnotationsDropped) || !strings.Contains(r.Err, "would keep") {
+		t.Fatalf("%d %v %q", r.Code, r.Error, r.Err)
+	}
+}
+
+func TestPutPDFOnlyFlagRefusals(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"put", "a.epub", "--content-only"},
+		{"put", "a.rmdoc", "--content-only"},
+		{"put", "a.pdf", "--content-only", "--replace"},
+		{"put", "a.md", "--content-only", "--notebook"},
+		{"put", "a.pdf", "--content-only", "--tag", "x"},
+		{"put", "a.pdf", "--content-only", "--cover", "first"},
+		{"put", "a.pdf", "b.pdf", "--content-only"},
+		{"put", "a.pdf", "--drop-annotations"},
+		{"put", "a.pdf", "--current-page", "-1"},
+		{"put", "a.epub", "--current-page", "2"},
+		{"put", "a.md", "--notebook", "--current-page", "2"},
+	} {
+		f := &clitest.Fake{}
+		if r := run(t, f, clitest.Options{}, append(args, "--yes")...); r.Code != cliutil.CodeUsage || len(f.Calls()) != 0 {
+			t.Errorf("%v: %d %v %v", args, r.Code, r.Error, f.Calls())
+		}
+	}
+	f := &clitest.Fake{}
+	if r := run(t, f, clitest.Options{}, "put", "a.pdf", "--current-page", "2", "--yes"); r.Code != 0 || !strings.HasSuffix(f.Calls()[0], "page=2") {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+}

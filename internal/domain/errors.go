@@ -36,6 +36,17 @@ var (
 	ErrUnsupportedFile = errors.New("unsupported file")
 	// ErrEmptyName means a name or path is empty.
 	ErrEmptyName = errors.New("the name is empty")
+	// ErrNoContentTarget means put --content-only found no document of the
+	// name in the folder: there is nothing whose annotations to keep.
+	ErrNoContentTarget = errors.New("no document of this name in the folder to replace the PDF of; upload it without --content-only")
+	// ErrNotPDFDocument means put --content-only was pointed at a document
+	// that is not a PDF.
+	ErrNotPDFDocument = errors.New("the document is not a PDF; only a PDF's content can be replaced")
+	// ErrAnnotationsDropped means the new PDF has fewer pages and some of the
+	// pages it no longer has carry annotations.
+	ErrAnnotationsDropped = errors.New("the new PDF has fewer pages, and pages it no longer has carry annotations; pass --drop-annotations to drop them")
+	// ErrNoSuchPage means a page number is beyond a document's pages.
+	ErrNoSuchPage = errors.New("no such page")
 )
 
 // AmbiguousError means a path or an identifier prefix names several items.

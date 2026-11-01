@@ -107,6 +107,45 @@ type PutOptions struct {
 	// OnReplace, when set, hears of the document Replace is about to
 	// replace, before anything is uploaded: its annotations will not survive.
 	OnReplace func(old domain.Item)
+	// ContentOnly replaces only the PDF of the PDF document of the same name
+	// in the folder, keeping its pages' annotations; there must be one.
+	// DropAnnotations lets it drop the annotations of pages the new PDF no
+	// longer has, which it otherwise refuses.
+	ContentOnly     bool
+	DropAnnotations bool
+	// OnContentPlan, when set, hears what ContentOnly will do, before
+	// anything is uploaded, and also when it refuses.
+	OnContentPlan func(ContentPlan)
+	// CurrentPage is the page a PDF opens on, from 1; 0 leaves it to the
+	// tablet.
+	CurrentPage int
+}
+
+// ContentPlan is what a ContentOnly upload does to a document's pages.
+type ContentPlan struct {
+	// Document is the document whose PDF is replaced.
+	Document domain.Item
+	// OldPages and NewPages are the document's pages before and after;
+	// OldOriginal and NewOriginal the pages of the old and the new PDF.
+	OldPages, NewPages       int
+	OldOriginal, NewOriginal int
+	// Kept, Appended and Dropped count the pages that stay, the pages added
+	// for the new PDF's extra pages, and the pages whose PDF page is gone.
+	Kept, Appended, Dropped int
+	// Annotated counts the kept pages that carry annotations, which stay.
+	Annotated int
+	// Lost are the dropped pages that carry annotations.
+	Lost []AnnotatedPage
+}
+
+// AnnotatedPage is a page with annotations.
+type AnnotatedPage struct {
+	// Number is the page's place in the document, from 1, and ID its
+	// identifier.
+	Number int
+	ID     string
+	// Files counts its annotation files: the .rm, and old-style highlights.
+	Files int
 }
 
 // Writer changes the library. Every method commits one new root.

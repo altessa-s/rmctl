@@ -70,13 +70,38 @@ that is a ZIP without DRM. The cover is the page last read unless the first page
 the folder and uploads nothing. Replacing the document of the same name in the folder keeps its identifier, its name and its tags; its
 pages are new, so its annotations do not survive, and rmctl says so before it replaces anything.
 
+**`--current-page N`** (a PDF, counted from 1) is the page the document opens on: it is recorded as the `.metadata`'s `lastOpenedPage`
+(N-1), and with `--content-only` on a document whose `.content` keeps its pages in `cPages`, as `cPages.lastOpened` too. A page beyond
+the PDF is refused. EPUBs are paginated by the tablet, so they take no page number.
+
+**`--cover first|last`** maps to the `.content`'s `coverPageNumber`: `first` is 0, the first page; `last` is -1, the page last read, the
+tablet's default. The tablet knows no third state, so there is no `--cover none`.
+
+**`--content-only`** replaces only the PDF of the PDF document of the same name in the folder (the one `--replace` would pick) and keeps
+everything else: its identifier, name, folder, tags, pin, cover and reading settings, every page's annotations (`<id>/<page>.rm`, per-page
+metadata, old-style highlights), and every `.content` and `.metadata` field rmctl does not have to change. It changes the PDF, the
+`.content`'s page list (`pages` and `redirectionPageMap`, or `cPages.pages` and `cPages.original`), `pageCount`, `originalPageCount` and
+`sizeInBytes`, the `.pagedata` (one template line per page), and the `.metadata`'s `lastModified` and `version`; cached thumbnails are
+dropped for the tablet to draw again. Annotations hang on page identifiers, which map to the PDF's pages:
+
+- **The same number of pages, or more:** every page keeps its identifier and its place; each extra page of the new PDF gets a new page,
+  appended. Pages added on the tablet with no PDF page under them stay where they are.
+- **Fewer pages:** the pages whose PDF page is gone are dropped. If any of them carries annotations, the upload is refused (exit 1),
+  naming each such page and its annotation files; `--drop-annotations` drops them deliberately. Without annotations they simply go.
+- **No document of that name, or one that is not a PDF:** refused. With nothing to keep, `--content-only` is most likely a mistake; upload
+  without it.
+
+It takes one PDF, asks first ("Replace the PDF of /Books/Paper, keeping its annotations on N pages?"), and is one commit like any write.
+`--dry-run` prints the plan — the old and new page counts, the pages kept, appended and dropped, and the annotated pages affected — and the
+JSON answer carries it as `content_plan`. It excludes `--replace`, `--notebook`, `--tag` and `--cover`.
+
 ## Commands
 
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
 | Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw]` |
-| Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--replace] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
+| Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
 | Global flags | `--format table\|plain\|json`, `--json`, `--color auto\|always\|never`, `--offline`, `--no-cache`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--version` |
