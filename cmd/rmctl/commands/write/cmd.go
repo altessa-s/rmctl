@@ -23,11 +23,13 @@ const GroupID = "write"
 // withDest is the argument count of a command given its destination too.
 const withDest = 2
 
-// Commands are mkdir, put, mv, trash, restore, rm, mput and unmark.
+// Commands are mkdir, put, mv, rename, trash, restore, rm, pin, unpin,
+// tag, mput and unmark.
 func Commands(env *cliutil.Env) []*cobra.Command {
 	return []*cobra.Command{
-		newMkdir(env), newPut(env), newMv(env),
+		newMkdir(env), newPut(env), newMv(env), newRename(env),
 		newBatch(env, trashSpec()), newBatch(env, restoreSpec()), newRm(env),
+		newPin(env, true), newPin(env, false), newTag(env),
 		newMput(env), newUnmark(env),
 	}
 }

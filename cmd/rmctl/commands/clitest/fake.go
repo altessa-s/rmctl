@@ -20,6 +20,8 @@ import (
 // Fake implements every input port over a fixed library. Err, when set, is
 // returned by every call; the call is still recorded.
 type Fake struct {
+	// Unchanged makes Rename, Pin and Tag report every item unchanged.
+	Unchanged bool
 	// ContentPlan is what a put --content-only hears it will do.
 	ContentPlan *port.ContentPlan
 	// CacheAt is what Cache.Status answers, CacheErr fails Status and
@@ -327,6 +329,36 @@ func (f *Fake) items(queries []string) []domain.Item {
 		}
 	}
 	return out
+}
+
+// edited reports the items queries name as edited, or unchanged.
+func (f *Fake) edited(queries []string) []port.Edited {
+	items := f.items(queries)
+	out := make([]port.Edited, 0, len(items))
+	for _, it := range items {
+		out = append(out, port.Edited{Item: it, Changed: !f.Unchanged})
+	}
+	return out
+}
+
+func (f *Fake) Rename(_ context.Context, query, name string) (port.Edited, error) {
+	if err := f.record("Rename", query, name); err != nil {
+		return port.Edited{}, err
+	}
+	out := f.edited([]string{query})
+	if len(out) == 0 {
+		return port.Edited{}, domain.ErrNotFound
+	}
+	out[0].Item.Name = name
+	return out[0], nil
+}
+
+func (f *Fake) Pin(_ context.Context, queries []string, on bool) ([]port.Edited, error) {
+	return f.edited(queries), f.record("Pin", append([]string{strconv.FormatBool(on)}, queries...)...)
+}
+
+func (f *Fake) Tag(_ context.Context, queries []string, add, remove []string) ([]port.Edited, error) {
+	return f.edited(queries), f.record("Tag", append([]string{"+" + strings.Join(add, ","), "-" + strings.Join(remove, ",")}, queries...)...)
 }
 
 func (f *Fake) Upload(_ context.Context, dir, dest string, o port.UploadOptions) (port.MirrorReport, error) {
