@@ -20,7 +20,15 @@ rmctl find 'go|rust' --tag reading --json
 
 ## Install
 
-Requires Go 1.27 or newer, and a C23 compiler for the page and archive commands (see below):
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew install altessa-s/tap/rmctl
+```
+
+Every release also attaches archives for macOS, Linux and Windows.
+
+From source, with Go 1.27 or newer and a C23 compiler for the page and archive commands (see below):
 
 ```sh
 go install github.com/altessa-s/rmctl/cmd/rmctl@latest
