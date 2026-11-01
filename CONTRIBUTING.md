@@ -188,6 +188,18 @@ goroutines end the test binary with go-atlas-core's leak check, which covers the
 `b.Loop()`, build fixtures outside the loop, and stay fast enough for `make bench-compare`, which the `Benchmarks` workflow runs on every pull
 request.
 
+## Output formats
+
+Commands never print an answer themselves. They build an `output.Result`: the JSON view (the `--json` shape, held stable by the JSON
+golden files) and an `output.Doc` of `Table`, `Record`, `Tree` and `Body` blocks made of typed cells (`output.Text`, `ID`, `Size`, `Time`,
+`Count`, `Bool`, `Path`), and hand it to `env.Emit`; a command whose rows arrive one by one uses `env.Stream`. `cliutil` picks the renderer
+from `--format`, `--json`, `RMCTL_FORMAT` and the terminal.
+
+A new format is a type with `Render(w io.Writer, r output.Result, s output.Style) error`, registered with `output.Register("name", …)`;
+it may also implement `output.Streamer` to write streamed rows as they come, or get them as one table at the end. No command changes. The
+plain format's rules are in the package documentation of `cmd/rmctl/commands/output`; change them only with the README's Output section.
+Table output is tested with golden files run as a terminal (`clitest.Options{OutTerminal: true}`, `--color never`).
+
 ## The Keychain
 
 `internal/adapter/keychain` holds the logic and is tested everywhere against an in-memory Keychain; the calls into Security.framework

@@ -75,7 +75,11 @@ linters:
             - github.com/spf13/pflag
             - github.com/MakeNowJust/heredoc
             - golang.org/x/term
-            # Advisory file locks for editing config.toml. Only internal/adapter/config.
+            # Display widths of names in tables: wide and combining runes.
+            # Only cmd/rmctl/commands/output.
+            - github.com/mattn/go-runewidth
+            # Advisory file locks for editing config.toml (internal/adapter/config),
+            # and ANSI color on the Windows console (cmd/rmctl).
             - golang.org/x/sys
             # Counting the pages of an uploaded PDF. Only internal/adapter/pdf.
             - github.com/pdfcpu/pdfcpu

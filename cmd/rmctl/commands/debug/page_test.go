@@ -15,7 +15,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-func pagesDoc() port.DocumentText {
+func pagesFixture() port.DocumentText {
 	return port.DocumentText{
 		Item: clitest.Item(clitest.Spec{ID: "d-notes", Name: "Notes", Kind: domain.KindNotebook}),
 		Pages: []domain.Page{
@@ -35,28 +35,31 @@ func pagesDoc() port.DocumentText {
 
 func TestPage(t *testing.T) {
 	t.Parallel()
-	r := run(t, &clitest.Fake{Document: pagesDoc()}, "page", "/Notes", "--page", "1,2")
+	r := run(t, &clitest.Fake{Document: pagesFixture()}, "page", "/Notes", "--page", "1,2")
 	if r.Code != cliutil.CodeOK {
 		t.Fatalf("%d %v", r.Code, r.Error)
 	}
 	clitest.Golden(t, "page", r.Out)
+	tbl := clitest.Exec(t, (&clitest.Fake{Document: pagesFixture()}).Services(), clitest.Options{OutTerminal: true}, build,
+		"debug", "page", "/Notes", "--raw", "--color", "never")
+	clitest.Golden(t, "page-table", tbl.Out)
 	if strings.Contains(r.Out, "Secret") || strings.Contains(r.Out, "marked words") {
 		t.Fatalf("the user's text without --raw:\n%s", r.Out)
 	}
-	raw := run(t, &clitest.Fake{Document: pagesDoc()}, "page", "/Notes", "--raw")
-	if !strings.Contains(raw.Out, "¶ [2] Secret plan") || !strings.Contains(raw.Out, "▌ 1:9 yellow marked words") {
+	raw := run(t, &clitest.Fake{Document: pagesFixture()}, "page", "/Notes", "--raw")
+	if !strings.Contains(raw.Out, "\n2\tSecret plan\n") || !strings.Contains(raw.Out, "\n1:9\tyellow\tmarked words\n") {
 		t.Fatalf("%s", raw.Out)
 	}
 }
 
 func TestPageJSON(t *testing.T) {
 	t.Parallel()
-	r := run(t, &clitest.Fake{Document: pagesDoc()}, "page", "d-notes", "--json")
+	r := run(t, &clitest.Fake{Document: pagesFixture()}, "page", "d-notes", "--json")
 	clitest.Golden(t, "page-json", r.Out)
 	if strings.Contains(r.Out, "Secret") {
 		t.Fatal("the user's text without --raw")
 	}
-	raw := run(t, &clitest.Fake{Document: pagesDoc()}, "page", "d-notes", "--json", "--raw")
+	raw := run(t, &clitest.Fake{Document: pagesFixture()}, "page", "d-notes", "--json", "--raw")
 	if !strings.Contains(raw.Out, `"text": "Secret plan"`) || !strings.Contains(raw.Out, `"text": "marked words"`) {
 		t.Fatalf("%s", raw.Out)
 	}
@@ -78,10 +81,10 @@ func TestPageErrors(t *testing.T) {
 
 func TestCounts(t *testing.T) {
 	t.Parallel()
-	if got := counts(map[string]int{"b": 1, "a": 1, "c": 3}); got != "c 3, a 1, b 1" {
+	if got := counts(map[string]int{"b": 1, "a": 1, "c": 3}); got != "c 3,a 1,b 1" {
 		t.Fatal(got)
 	}
-	if counts(nil) != "-" || paper(domain.PageStats{PaperWidth: 1}) != "-" {
+	if counts(nil) != "" || paper(domain.PageStats{PaperWidth: 1}) != "" {
 		t.Fatal("empty")
 	}
 }

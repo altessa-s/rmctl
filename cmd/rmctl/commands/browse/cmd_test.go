@@ -7,9 +7,12 @@ package browse
 import (
 	"bytes"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/clitest"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
@@ -28,10 +31,11 @@ func TestLs(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"top level", []string{"ls"}, "Books/  f-books\nNotes [notebook]  d-notes\n"},
-		{"folder by path", []string{"ls", "/Books"}, "Novel [epub] *  d-novel\nPaper [pdf]  d-paper\n"},
-		{"document lists itself", []string{"ls", "d-paper"}, "Paper [pdf]  d-paper\n"},
-		{"all includes the trash", []string{"ls", "--all"}, "Books/  f-books\nNotes [notebook]  d-notes\nOld [pdf] (trashed)  d-old\n"},
+		{"top level", []string{"ls"}, "Books\tfolder\tf-books\tfalse\tfalse\nNotes\tnotebook\td-notes\tfalse\tfalse\n"},
+		{"folder by path", []string{"ls", "/Books"}, "Novel\tepub\td-novel\ttrue\tfalse\nPaper\tpdf\td-paper\tfalse\tfalse\n"},
+		{"document lists itself", []string{"ls", "d-paper"}, "Paper\tpdf\td-paper\tfalse\tfalse\n"},
+		{"all includes the trash", []string{"ls", "--all"},
+			"Books\tfolder\tf-books\tfalse\tfalse\nNotes\tnotebook\td-notes\tfalse\tfalse\nOld\tpdf\td-old\tfalse\ttrue\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,13 +51,13 @@ func TestLs(t *testing.T) {
 func TestLsLong(t *testing.T) {
 	t.Parallel()
 	r := run(t, &clitest.Fake{}, "ls", "-l", "/Books")
-	want := "2026-10-31 12:00   4.1 KiB  Novel [epub] *  d-novel\n"
+	want := "Novel\tepub\t2026-10-31T12:00:00Z\t4205\td-novel\ttrue\tfalse\n"
 	if r.Code != 0 || !strings.HasPrefix(r.Out, want) {
 		t.Fatalf("%d %q", r.Code, r.Out)
 	}
 	r = run(t, &clitest.Fake{}, "ls", "-l")
-	if !strings.Contains(r.Out, "-                  ") {
-		t.Fatalf("a missing time is not a dash: %q", r.Out)
+	if !strings.Contains(r.Out, "Books\tfolder\t2026-10-31T12:00:00Z\t-\t") || !strings.Contains(r.Out, "Notes\tnotebook\t-\t") {
+		t.Fatalf("a folder's size or a missing time is not a dash: %q", r.Out)
 	}
 }
 
@@ -69,12 +73,12 @@ func TestLsJSON(t *testing.T) {
 func TestTree(t *testing.T) {
 	t.Parallel()
 	r := run(t, &clitest.Fake{}, "tree")
-	want := "Books/  f-books\n  Novel [epub] *  d-novel\n  Paper [pdf]  d-paper\nNotes [notebook]  d-notes\n"
+	want := "Books\tfolder\tf-books\n  Novel\tepub\td-novel\n  Paper\tpdf\td-paper\nNotes\tnotebook\td-notes\n"
 	if r.Code != 0 || r.Out != want {
 		t.Fatalf("%d %q", r.Code, r.Out)
 	}
 	r = run(t, &clitest.Fake{}, "tree", "/Books", "--all")
-	if r.Out != "Novel [epub] *  d-novel\nPaper [pdf]  d-paper\n" {
+	if r.Out != "Novel\tepub\td-novel\nPaper\tpdf\td-paper\n" {
 		t.Fatalf("%q", r.Out)
 	}
 	r = run(t, &clitest.Fake{}, "tree", "--json")
@@ -100,7 +104,7 @@ func TestTreeNotesOddities(t *testing.T) {
 	if !strings.Contains(r.Err, "1 items repeat an identifier") || !strings.Contains(r.Err, "items name a parent that leads nowhere") {
 		t.Fatalf("notes %q", r.Err)
 	}
-	for _, id := range []string{"  a\n", "  s\n", "  x\n", "  y\n"} {
+	for _, id := range []string{"\ta\n", "\ts\n", "\tx\n", "\ty\n"} {
 		if strings.Count(r.Out, id) != 1 {
 			t.Fatalf("%q not shown exactly once:\n%s", id, r.Out)
 		}
@@ -118,13 +122,13 @@ func TestTreeRefusesADocument(t *testing.T) {
 func TestStat(t *testing.T) {
 	t.Parallel()
 	r := run(t, &clitest.Fake{}, "stat", "/Books/Novel")
-	for _, want := range []string{"id        d-novel\n", "path      /Books/Novel\n", "kind      epub\n", "tags      [fiction]\n", "file      d-novel.epub"} {
+	for _, want := range []string{"id\td-novel\n", "path\t/Books/Novel\n", "kind\tepub\n", "tags\tfiction\n", "\n\nd-novel.metadata\t", "d-novel.epub\t4096\t"} {
 		if !strings.Contains(r.Out, want) {
 			t.Fatalf("missing %q in\n%s", want, r.Out)
 		}
 	}
 	r = run(t, &clitest.Fake{}, "stat", "d-notes")
-	if !strings.Contains(r.Out, "modified  -\n") || !strings.Contains(r.Out, "tags      -\n") {
+	if !strings.Contains(r.Out, "modified\t-\n") || !strings.Contains(r.Out, "tags\t-\n") {
 		t.Fatalf("%s", r.Out)
 	}
 	r = run(t, &clitest.Fake{}, "stat", "--json", "d-paper")
@@ -138,7 +142,7 @@ func TestFind(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{}
 	r := run(t, f, "find", "Novel|Paper", "--tag", "fiction", "--starred", "--under", "/Books", "--all")
-	if r.Code != 0 || r.Out != "/Books/Novel  d-novel\n" {
+	if r.Code != 0 || r.Out != "/Books/Novel\tepub\td-novel\ttrue\tfalse\n" {
 		t.Fatalf("%d %q %v", r.Code, r.Out, r.Error)
 	}
 	if got := f.Calls()[0]; got != "Find Novel|Paper fiction starred /Books all" {
@@ -182,10 +186,24 @@ func TestNoService(t *testing.T) {
 
 func TestPrintTreeFailingWriter(t *testing.T) {
 	t.Parallel()
-	err := PrintTree(failWriter{}, &bytes.Buffer{}, clitest.Library(), domain.RootID, false, false)
-	if err == nil {
+	cmd, env := treeCommand(t, failWriter{}, "plain")
+	if err := PrintTree(cmd, env, clitest.Library(), domain.RootID, false); err == nil {
 		t.Fatal("a failing writer went unnoticed")
 	}
+}
+
+// treeCommand is a bare command writing to out in format, for PrintTree.
+func treeCommand(tb testing.TB, out io.Writer, format string) (*cobra.Command, *cliutil.Env) {
+	tb.Helper()
+	env := cliutil.NewEnv(cliutil.Streams{Getenv: func(string) string { return "" }}, cliutil.Fixed(cliutil.Services{}))
+	cmd := &cobra.Command{Use: "x"}
+	cliutil.AddPersistentFlags(cmd, env)
+	cmd.SetOut(out)
+	cmd.SetErr(io.Discard)
+	if err := cmd.ParseFlags([]string{"--format", format}); err != nil {
+		tb.Fatal(err)
+	}
+	return cmd, env
 }
 
 type failWriter struct{}
@@ -194,17 +212,14 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
 
 func BenchmarkPrintTree(b *testing.B) {
 	lib := bigLibrary(10_000)
-	for _, asJSON := range []bool{false, true} {
-		name := "text"
-		if asJSON {
-			name = "json"
-		}
+	for _, name := range []string{"plain", "table", "json"} {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			var out bytes.Buffer
+			cmd, env := treeCommand(b, &out, name)
 			for b.Loop() {
 				out.Reset()
-				if err := PrintTree(&out, &bytes.Buffer{}, lib, domain.RootID, false, asJSON); err != nil {
+				if err := PrintTree(cmd, env, lib, domain.RootID, false); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -225,4 +240,75 @@ func bigLibrary(n int) *domain.Tree {
 		specs = append(specs, clitest.Spec{ID: "d" + strconv.Itoa(i), Name: "Document " + strconv.Itoa(i), Parent: folder, Kind: domain.KindPDF})
 	}
 	return clitest.Tree(specs...)
+}
+
+// table runs args in table format without color, as a person at a terminal
+// of width columns would see them.
+func table(t *testing.T, width int, args ...string) clitest.Result {
+	t.Helper()
+	opts := clitest.Options{OutTerminal: true, Width: width}
+	r := clitest.Exec(t, (&clitest.Fake{}).Services(), opts, Commands, append(args, "--color", "never")...)
+	if r.Code != 0 {
+		t.Fatalf("%v: %d %v", args, r.Code, r.Error)
+	}
+	return r
+}
+
+func TestTableGoldens(t *testing.T) {
+	t.Parallel()
+	for name, args := range map[string][]string{
+		"ls-long-table": {"ls", "-l", "--all"},
+		"ls-table":      {"ls", "/Books"},
+		"find-table":    {"find", "--all"},
+		"tree-table":    {"tree", "--all"},
+		"stat-table":    {"stat", "/Books/Novel"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			clitest.Golden(t, name, table(t, 0, args...).Out)
+		})
+	}
+}
+
+// A terminal is a table by default, --format plain overrides it, and a
+// narrow terminal truncates the names only.
+func TestTableIsTheTerminalDefault(t *testing.T) {
+	t.Parallel()
+	if r := table(t, 0, "ls"); !strings.HasPrefix(r.Out, "NAME    KIND      ID\n") {
+		t.Fatalf("%q", r.Out)
+	}
+	if r := table(t, 0, "ls", "--format", "plain"); strings.Contains(r.Out, "NAME") {
+		t.Fatalf("%q", r.Out)
+	}
+	r := table(t, 30, "find", "--all")
+	for line := range strings.Lines(r.Out) {
+		if w := len([]rune(strings.TrimRight(line, "\n"))); w > 30 {
+			t.Fatalf("a line of %d columns in a terminal of 30:\n%s", w, r.Out)
+		}
+	}
+	if !strings.Contains(r.Out, "…") || !strings.Contains(r.Out, "d-novel") {
+		t.Fatalf("the path, and only it, is truncated:\n%s", r.Out)
+	}
+}
+
+func TestColorGolden(t *testing.T) {
+	t.Parallel()
+	opts := clitest.Options{OutTerminal: true}
+	r := clitest.Exec(t, (&clitest.Fake{}).Services(), opts, Commands, "ls", "-l", "--all", "--color", "always")
+	if r.Code != 0 {
+		t.Fatal(r.Error)
+	}
+	clitest.Golden(t, "ls-color", r.Out)
+	// Automatic color follows the terminal, and NO_COLOR and TERM=dumb turn
+	// it off.
+	auto := clitest.Exec(t, (&clitest.Fake{}).Services(), opts, Commands, "ls")
+	if !strings.Contains(auto.Out, "\x1b[") {
+		t.Fatalf("no color on a terminal: %q", auto.Out)
+	}
+	for _, env := range []map[string]string{{"NO_COLOR": "1"}, {"TERM": "dumb"}} {
+		r := clitest.Exec(t, (&clitest.Fake{}).Services(), clitest.Options{OutTerminal: true, Env: env}, Commands, "ls")
+		if strings.Contains(r.Out, "\x1b[") {
+			t.Fatalf("%v: color %q", env, r.Out)
+		}
+	}
 }

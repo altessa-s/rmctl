@@ -6,8 +6,6 @@ package debug
 
 import (
 	"cmp"
-	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strconv"
@@ -17,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -51,10 +50,7 @@ func newPage(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return cliutil.PagesErr("debug page", err)
 			}
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(cmd.OutOrStdout(), pageViews(doc.Pages, raw))
-			}
-			return printPages(cmd.OutOrStdout(), doc.Pages, raw)
+			return env.Emit(cmd, output.Result{JSON: pageViews(doc.Pages, raw), Doc: pagesDoc(doc.Pages, raw)})
 		},
 	}
 	cmd.Flags().StringArrayVar(&pages, "page", nil, "only this page: a number from 1 or a page id (repeat or comma-separate)")
@@ -125,10 +121,11 @@ func orEmpty(m map[string]int) map[string]int {
 	return m
 }
 
-// counts writes a map as "name n, name n", largest first, names breaking ties.
+// counts writes a map as "name n,name n", largest first, names breaking
+// ties; "" when it is empty.
 func counts(m map[string]int) string {
 	if len(m) == 0 {
-		return "-"
+		return ""
 	}
 	keys := slices.SortedFunc(maps.Keys(m), func(a, b string) int {
 		if c := cmp.Compare(m[b], m[a]); c != 0 {
@@ -140,42 +137,47 @@ func counts(m map[string]int) string {
 	for _, k := range keys {
 		parts = append(parts, k+" "+strconv.Itoa(m[k]))
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, ",")
 }
 
 func paper(s domain.PageStats) string {
 	if s.PaperWidth == 0 || s.PaperHeight == 0 {
-		return "-"
+		return ""
 	}
 	return strconv.FormatFloat(s.PaperWidth, 'f', -1, 64) + "×" + strconv.FormatFloat(s.PaperHeight, 'f', -1, 64)
 }
 
-func printPages(w io.Writer, pages []domain.Page, raw bool) error {
-	var b strings.Builder
-	for i, p := range pages {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
+// pagesDoc is each page as a record of what it holds; --raw adds its
+// paragraphs and its highlights as tables.
+func pagesDoc(pages []domain.Page, raw bool) output.Doc {
+	doc := make(output.Doc, 0, len(pages))
+	for _, p := range pages {
 		s := p.Stats
-		fmt.Fprintf(&b, "page %d  %s\n", p.Number, p.ID)
-		fmt.Fprintf(&b, "  paragraphs  %d\n", len(p.Paragraphs))
-		fmt.Fprintf(&b, "  highlights  %d\n", len(p.Highlights))
-		fmt.Fprintf(&b, "  strokes     %d (%s)\n", s.Strokes, counts(s.StrokesByTool))
-		fmt.Fprintf(&b, "  colors      %s\n", counts(s.StrokesByColor))
-		fmt.Fprintf(&b, "  anchored    %d\n", s.AnchoredStrokes)
-		fmt.Fprintf(&b, "  images      %d\n", s.Images)
-		fmt.Fprintf(&b, "  skipped     %d\n", s.SkippedBlocks)
-		fmt.Fprintf(&b, "  paper       %s\n", paper(s))
+		doc = append(doc, output.Record{Fields: []output.Field{
+			{Key: "number", Value: output.Count(p.Number)},
+			{Key: "id", Value: output.ID(p.ID)},
+			{Key: "paragraphs", Value: output.Count(len(p.Paragraphs))},
+			{Key: "highlights", Value: output.Count(len(p.Highlights))},
+			{Key: "strokes", Value: output.Count(s.Strokes)},
+			{Key: "strokes_by_tool", Value: output.Text(counts(s.StrokesByTool))},
+			{Key: "strokes_by_color", Value: output.Text(counts(s.StrokesByColor))},
+			{Key: "anchored_strokes", Value: output.Count(s.AnchoredStrokes)},
+			{Key: "images", Value: output.Count(s.Images)},
+			{Key: "skipped_blocks", Value: output.Count(s.SkippedBlocks)},
+			{Key: "paper", Value: output.Text(paper(s))},
+		}})
 		if !raw {
 			continue
 		}
+		text := output.Table{Columns: []output.Column{{Title: "style", Role: output.RoleCount}, {Title: "text"}}}
 		for _, para := range p.Paragraphs {
-			fmt.Fprintf(&b, "  ¶ [%d] %s\n", para.Style, para.Text)
+			text.Rows = append(text.Rows, []output.Cell{output.Count(int(para.Style)), output.Text(para.Text)})
 		}
+		marks := output.Table{Columns: []output.Column{{Title: "highlight", Role: output.RoleID}, {Title: "color"}, {Title: "text"}}}
 		for _, h := range p.Highlights {
-			fmt.Fprintf(&b, "  ▌ %s %s %s\n", h.ID, h.Color, h.Text)
+			marks.Rows = append(marks.Rows, []output.Cell{output.ID(h.ID), output.Text(h.Color), output.Text(h.Text)})
 		}
+		doc = append(doc, text, marks)
 	}
-	_, err := io.WriteString(w, b.String())
-	return err
+	return doc
 }

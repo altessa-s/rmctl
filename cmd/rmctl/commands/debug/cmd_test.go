@@ -13,6 +13,7 @@ import (
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/clitest"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -45,11 +46,11 @@ func TestText(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"root"}, "hash        rh\ngeneration  7\nrecords     2\n"},
+		{[]string{"root"}, "hash\trh\ngeneration\t7\nrecords\t2\n"},
 		{[]string{"blob", "h", "--name", "a.metadata"}, "raw bytes"},
-		{[]string{"hashes"}, "file  a  x\nnode  b  y\n"},
+		{[]string{"hashes"}, "a\tfile\tx\nb\tnode\ty\n"},
 		{[]string{"checkfiles"}, "h9\n"},
-		{[]string{"sweep"}, "     1  content.fileType\n     2  metadata.visibleName\n"},
+		{[]string{"sweep"}, "content.fileType\t1\nmetadata.visibleName\t2\n"},
 	}
 	for _, tc := range tests {
 		r := run(t, fake(), tc.args...)
@@ -144,12 +145,17 @@ func TestErrorsAndUsage(t *testing.T) {
 	}
 }
 
-func TestWriteFilesFailingWriter(t *testing.T) {
+func TestFilesDoc(t *testing.T) {
 	t.Parallel()
-	if err := writeFiles(failWriter{}, []fileReportView{{Name: "a"}}); err == nil {
-		t.Fatal("unnoticed")
+	doc := filesDoc([]fileReportView{{Name: "a", Size: 3, Hash: "h"}, {Name: "b", Text: "{}"}})
+	var b strings.Builder
+	if err := (output.PlainRenderer{}).Render(&b, output.Result{Doc: doc}, output.Style{}); err != nil {
+		t.Fatal(err)
 	}
-	if err := writeFiles(&failAfter{n: 1}, []fileReportView{{Name: "a", Text: "x"}}); err == nil {
+	if want := "name\ta\nsize\t3\nhash\th\n\nname\tb\nsize\t0\nhash\t-\n\n{}\n"; b.String() != want {
+		t.Fatalf("%q", b.String())
+	}
+	if err := (output.PlainRenderer{}).Render(failWriter{}, output.Result{Doc: doc}, output.Style{}); err == nil {
 		t.Fatal("unnoticed")
 	}
 }

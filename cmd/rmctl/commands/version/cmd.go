@@ -5,27 +5,28 @@
 package version
 
 import (
-	"fmt"
-	"io"
-
 	"github.com/MakeNowJust/heredoc"
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/go-atlas-core/runtime/appinfo"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+
+	out "github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 )
 
 // command wraps [cobra.Command] for the "version" subcommand.
 type command struct {
 	*cobra.Command
+	env *cliutil.Env
 }
 
 // New returns the "version" [cobra.Command] with --full/-f and --output/-o
-// flags. The output formats are "text" (default) and "json"; the persistent
-// --json selects json as well.
-func New() *cobra.Command {
+// flags. --output text or json chooses the format; without it the global
+// --format, --json and $RMCTL_FORMAT do.
+func New(env *cliutil.Env) *cobra.Command {
 	version := &command{
+		env: env,
 		Command: &cobra.Command{
 			Use:   "version",
 			Short: "Display version information",
@@ -61,30 +62,49 @@ func (c *command) configure() {
 }
 
 func (c *command) run(cmd *cobra.Command, _ []string) error {
-	output, _ := cmd.Flags().GetString("output") //nolint:errcheck // the flag exists
-	full, _ := cmd.Flags().GetBool("full")       //nolint:errcheck // the flag exists
-	if cliutil.JSON(cmd) {
+	full, _ := cmd.Flags().GetBool("full") //nolint:errcheck // the flag exists
+	r := result(full)
+	if !cmd.Flags().Changed("output") {
+		return c.env.Emit(cmd, r)
+	}
+	output, _ := cmd.Flags().GetString("output")                    //nolint:errcheck // the flag exists
+	if asJSON, _ := cmd.Flags().GetBool(cliutil.FlagJSON); asJSON { //nolint:errcheck // the flag is persistent on the root
 		output = "json"
 	}
 	switch output {
 	case "json":
-		return printJSON(cmd.OutOrStdout(), full)
+		return out.JSONRenderer{}.Render(cmd.OutOrStdout(), r, out.Style{})
 	case "text":
-		return printText(cmd.OutOrStdout(), full)
+		return out.PlainRenderer{}.Render(cmd.OutOrStdout(), r, out.Style{})
 	default:
 		return cliutil.Usagef("invalid output format: %s. Valid formats are: text, json", output)
 	}
 }
 
-// printText writes the version; with full, the multi-line build summary of
-// [appinfo.AppVersion].
-func printText(w io.Writer, full bool) error {
-	text := appinfo.Version
-	if full {
-		text = appinfo.AppVersion()
+// result is the version, or with full the build information as a record.
+func result(full bool) out.Result {
+	if !full {
+		return out.Result{
+			JSON: struct {
+				Version string `json:"version"`
+			}{Version: appinfo.Version},
+			Doc: out.Doc{out.Body{Text: appinfo.Version}},
+		}
 	}
-	_, err := fmt.Fprintln(w, text)
-	return err
+	v := fullView{
+		Version:   appinfo.Version,
+		BuildTime: appinfo.BuildTime,
+		Commit:    appinfo.Commit,
+		GoVersion: appinfo.BuildGoVersion(),
+		Platform:  appinfo.BuildPlatform(),
+	}
+	return out.Result{JSON: v, Doc: out.Doc{out.Record{Fields: []out.Field{
+		{Key: "version", Value: out.Text(v.Version)},
+		{Key: "build_time", Value: out.Text(v.BuildTime)},
+		{Key: "commit", Value: out.ID(v.Commit)},
+		{Key: "go_version", Value: out.Text(v.GoVersion)},
+		{Key: "platform", Value: out.Text(v.Platform)},
+	}}}}
 }
 
 // fullView is version --full as JSON.
@@ -94,21 +114,4 @@ type fullView struct {
 	Commit    string `json:"commit"`
 	GoVersion string `json:"go_version"`
 	Platform  string `json:"platform"`
-}
-
-// printJSON writes the version as indented JSON; with full, the build
-// information too.
-func printJSON(w io.Writer, full bool) error {
-	if !full {
-		return cliutil.WriteJSON(w, struct {
-			Version string `json:"version"`
-		}{Version: appinfo.Version})
-	}
-	return cliutil.WriteJSON(w, fullView{
-		Version:   appinfo.Version,
-		BuildTime: appinfo.BuildTime,
-		Commit:    appinfo.Commit,
-		GoVersion: appinfo.BuildGoVersion(),
-		Platform:  appinfo.BuildPlatform(),
-	})
 }

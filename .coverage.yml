@@ -32,3 +32,4 @@ packages:
   - internal/app/secrets
   - internal/wiring
   - cmd/rmctl/commands
+  - cmd/rmctl/commands/output

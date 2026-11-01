@@ -69,7 +69,7 @@ func adapter(own string) rule {
 // model, and its own helpers.
 func command() rule {
 	return rule{
-		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil"},
+		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/output"},
 		forbid: []string{transport, pageFormat, archiveFormat, keychainLib, configFormat},
 	}
 }
@@ -129,7 +129,13 @@ var layers = map[string]rule{
 		"cmd/rmctl/commands/watch", "cmd/rmctl/commands/debug", "cmd/rmctl/commands/version",
 		"cmd/rmctl/commands/rmdoc",
 	}, forbid: []string{transport, pageFormat, archiveFormat}},
-	"cmd/rmctl/commands/cliutil": {allow: []string{"internal/domain", "internal/port"}, forbid: []string{transport, pageFormat, archiveFormat}},
+	"cmd/rmctl/commands/cliutil": {
+		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/output"},
+		forbid: []string{transport, pageFormat, archiveFormat},
+	},
+	// output renders answers: it knows nothing of the library, the ports or
+	// the command line.
+	"cmd/rmctl/commands/output":  {forbid: []string{"github.com/spf13/cobra", "os", transport, pageFormat, archiveFormat}},
 	"cmd/rmctl/commands/account": command(),
 	"cmd/rmctl/commands/browse":  command(),
 	"cmd/rmctl/commands/fetch":   command(),
@@ -138,7 +144,7 @@ var layers = map[string]rule{
 	"cmd/rmctl/commands/debug":   command(),
 	"cmd/rmctl/commands/version": command(),
 	"cmd/rmctl/commands/rmdoc":   command(),
-	"cmd/rmctl/commands/clitest": {allow: []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil"}},
+	"cmd/rmctl/commands/clitest": {allow: []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/output"}},
 }
 
 func forbidden(forbid []string, imp string) bool {

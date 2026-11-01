@@ -31,14 +31,14 @@ func TestE2E_KeychainRoundTrip(t *testing.T) {
 	})
 
 	out := e.ok("secrets", "migrate", "--to", "keychain", "--set-default", "--yes")
-	if !strings.Contains(out, "now chooses the keychain") {
+	if !strings.Contains(out, "default_set\ttrue\n") {
 		t.Fatalf("%q", out)
 	}
 	cfg, err := os.ReadFile(filepath.Join(os.Getenv("RMCTL_CONFIG_DIR"), "config.toml"))
 	if err != nil || !strings.Contains(string(cfg), "[profiles.default.secrets]") {
 		t.Fatalf("%q %v", cfg, err)
 	}
-	if st := e.ok("secrets", "status"); !strings.Contains(st, "backend   keychain (chosen by profile)") || !strings.Contains(st, "deviceToken") {
+	if st := e.ok("secrets", "status"); !strings.Contains(st, "backend\tkeychain\nsource\tprofile\n") || !strings.Contains(st, "deviceToken") {
 		t.Fatalf("%q", st)
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("RMCTL_CONFIG_DIR"), "default", "token.json")); !os.IsNotExist(err) {

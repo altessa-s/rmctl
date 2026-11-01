@@ -97,14 +97,14 @@ func TestPutDryRun(t *testing.T) {
 	// No --yes and no terminal: a dry run needs neither.
 	r := run(t, f, clitest.Options{}, "put", "a.pdf", "/P", "--dry-run")
 	if r.Code != cliutil.CodeOK || !slices.Equal(f.Calls(), []string{"Put a.pdf /P     dry-run"}) ||
-		r.Out != "would upload a.pdf into /P as \"Uploaded\"\n" {
+		r.Out != "would upload\tUploaded\tpdf\td-new\t-\ta.pdf\t/P\n" {
 		t.Fatalf("%d %v %q %q", r.Code, r.Error, f.Calls(), r.Out)
 	}
 	// A notebook dry run asks the use case to check the file and the folder.
 	n := &clitest.Fake{}
 	r = run(t, n, clitest.Options{}, "put", "notes.md", "/N", "--notebook", "--dry-run")
 	if r.Code != cliutil.CodeOK || !slices.Equal(n.Calls(), []string{"PlanNotebook notes.md /N  rm2"}) ||
-		r.Out != "would upload notes.md into /N as \"Notes\"\n" {
+		!strings.HasPrefix(r.Out, "would make\tNotes\tnotebook\t") {
 		t.Fatalf("%d %v %q %q", r.Code, r.Error, n.Calls(), r.Out)
 	}
 	// What would fail the upload fails the dry run.
@@ -201,7 +201,7 @@ func TestUnmark(t *testing.T) {
 	}
 	f = &clitest.Fake{Document: marked(), Unmarked: port.UnmarkReport{Item: marked().Item, Erased: 6, Highlights: 3, Strokes: 3, Pages: 3}}
 	r = run(t, f, clitest.Options{}, "unmark", "/Paper", "--yes")
-	if r.Code != cliutil.CodeOK || r.Out != "erased 6 marks (3 highlights, 3 marker strokes) on 3 pages of Paper  d-paper\n" ||
+	if r.Code != cliutil.CodeOK || r.Out != "id\td-paper\nname\tPaper\nerased\t6\nhighlights\t3\nstrokes\t3\npages\t3\n" ||
 		!slices.Equal(f.Calls(), []string{"Pages /Paper", "Unmark /Paper"}) {
 		t.Fatalf("%d %v %q %v", r.Code, r.Error, r.Out, f.Calls())
 	}

@@ -66,8 +66,10 @@ func newRoot(env *cliutil.Env) (*cobra.Command, *cliutil.Env) {
 
 			Items are named by path ("/Books/Novel") or by identifier, whole or a
 			unique prefix. Answers go to standard output and commentary to standard
-			error, so a pipe gets the answer. Writing commands ask before they change
-			anything; --yes answers for them.
+			error, so a pipe gets the answer. On a terminal an answer is a table; in a
+			pipe it is plain lines of TAB-separated fields; --format table, plain or
+			json (or RMCTL_FORMAT) chooses, and --json is --format json. Writing
+			commands ask before they change anything; --yes answers for them.
 		`),
 		Example: heredoc.Doc(`
 			# Register this machine with a one-time code from
@@ -98,7 +100,7 @@ func newRoot(env *cliutil.Env) (*cobra.Command, *cliutil.Env) {
 		{{with .Name}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 	`))
 
-	cliutil.AddPersistentFlags(root)
+	cliutil.AddPersistentFlags(root, env)
 
 	root.AddGroup(helpGroups()...)
 	root.AddCommand(account.Commands(env)...)
@@ -108,7 +110,7 @@ func newRoot(env *cliutil.Env) (*cobra.Command, *cliutil.Env) {
 	root.AddCommand(watch.New(env))
 	root.AddCommand(rmdoc.New(env))
 	root.AddCommand(debug.New(env))
-	root.AddCommand(version.New())
+	root.AddCommand(version.New(env))
 	root.SetHelpCommandGroupID(account.GroupID)
 	root.SetCompletionCommandGroupID(account.GroupID)
 	return root, env

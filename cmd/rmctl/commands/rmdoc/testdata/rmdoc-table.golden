@@ -1,0 +1,8 @@
+path       a.rmdoc
+documents  2
+
+<name:11>                notebook  n1   2  2.1 KiB
+├── n1.metadata    100 B
+└── n1/p1.rm     2.0 KiB
+(no readable .metadata)  -         bad  1      4 B
+└── bad.pdf          4 B

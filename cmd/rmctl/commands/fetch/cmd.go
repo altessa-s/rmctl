@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -28,13 +29,9 @@ type pathView struct {
 	Path string `json:"path"`
 }
 
-func printPath(cmd *cobra.Command, path string) error {
-	out := cmd.OutOrStdout()
-	if cliutil.JSON(cmd) {
-		return cliutil.WriteJSON(out, pathView{Path: path})
-	}
-	_, err := fmt.Fprintln(out, path)
-	return err
+// printPath answers with the one file a command wrote.
+func printPath(cmd *cobra.Command, env *cliutil.Env, path string) error {
+	return env.Emit(cmd, output.Result{JSON: pathView{Path: path}, Doc: output.Doc{output.Body{Text: path}}})
 }
 
 func newGet(env *cliutil.Env) *cobra.Command {
@@ -67,7 +64,7 @@ func newGet(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get: %w", err)
 			}
-			return printPath(cmd, path)
+			return printPath(cmd, env, path)
 		},
 	}
 	cmd.Flags().StringVarP(&dest, "output", "o", "", "file to write")
@@ -111,12 +108,11 @@ func newExport(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return cliutil.PagesErr("export", err)
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, exportView(report))
-			}
-			_, err = fmt.Fprintf(out, "%s (%d documents, %d files)\n", report.Path, report.Documents, report.Files)
-			return err
+			return env.Emit(cmd, output.Result{JSON: exportView(report), Doc: output.Doc{output.Record{Fields: []output.Field{
+				{Key: "path", Value: output.Path(report.Path)},
+				{Key: "documents", Value: output.Count(report.Documents)},
+				{Key: "files", Value: output.Count(report.Files)},
+			}}}})
 		},
 	}
 	cmd.Flags().StringVarP(&dest, "output", "o", "", "archive to write")
@@ -155,7 +151,7 @@ func newMget(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("mget: %w", err)
 			}
-			return cliutil.PrintReport(cmd.OutOrStdout(), cliutil.JSON(cmd), report)
+			return env.Emit(cmd, cliutil.Report(report))
 		},
 	}
 	cmd.Flags().StringVarP(&dir, "output", "o", "", "directory to write into")
@@ -165,5 +161,3 @@ func newMget(env *cliutil.Env) *cobra.Command {
 	_ = cmd.MarkFlagRequired("output") //nolint:errcheck // the flag exists
 	return cmd
 }
-
-// reportView is a recursive transfer as --json prints it.

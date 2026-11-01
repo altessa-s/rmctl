@@ -16,9 +16,11 @@ import (
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/clitest"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+
+	out "github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 )
 
-func build(*cliutil.Env) []*cobra.Command { return []*cobra.Command{New()} }
+func build(env *cliutil.Env) []*cobra.Command { return []*cobra.Command{New(env)} }
 
 func run(t *testing.T, args ...string) clitest.Result {
 	t.Helper()
@@ -54,7 +56,8 @@ func TestVersion(t *testing.T) {
 
 func TestPrintFailingWriter(t *testing.T) {
 	t.Parallel()
-	if printText(failWriter{}, false) == nil || printJSON(failWriter{}, true) == nil {
+	if (out.PlainRenderer{}).Render(failWriter{}, result(false), out.Style{}) == nil ||
+		(out.JSONRenderer{}).Render(failWriter{}, result(true), out.Style{}) == nil {
 		t.Fatal("a failing writer went unnoticed")
 	}
 }

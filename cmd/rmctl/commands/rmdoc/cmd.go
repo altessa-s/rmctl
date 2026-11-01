@@ -5,12 +5,11 @@
 package rmdoc
 
 import (
-	"fmt"
-
 	"github.com/MakeNowJust/heredoc"
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -62,32 +61,7 @@ func New(env *cliutil.Env) *cobra.Command {
 				return cliutil.PagesErr("rmdoc", err)
 			}
 			v := view(report, raw)
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, v)
-			}
-			if _, err := fmt.Fprintf(out, "%s: %d documents\n", v.Path, len(v.Documents)); err != nil {
-				return err
-			}
-			for _, d := range v.Documents {
-				name := d.Name
-				if name == "" {
-					name = "(no readable .metadata)"
-				}
-				kind := ""
-				if d.Kind != "" {
-					kind = " [" + d.Kind + "]"
-				}
-				if _, err := fmt.Fprintf(out, "%s%s  %s  %d files, %s\n", name, kind, d.ID, len(d.Entries), cliutil.Size(d.Size)); err != nil {
-					return err
-				}
-				for _, e := range d.Entries {
-					if _, err := fmt.Fprintf(out, "  %s  %s\n", e.Name, cliutil.Size(e.Size)); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
+			return env.Emit(cmd, output.Result{JSON: v, Doc: doc(v)})
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "print document names unmasked")
@@ -109,4 +83,28 @@ func view(r port.ArchiveReport, raw bool) archiveView {
 		v.Documents = append(v.Documents, dv)
 	}
 	return v
+}
+
+// doc is the archive as a record, then its documents as a tree: each with
+// its kind, identifier, file count and size, and its files below it.
+func doc(v archiveView) output.Doc {
+	rec := output.Record{Fields: []output.Field{
+		{Key: "path", Value: output.Path(v.Path)},
+		{Key: "documents", Value: output.Count(len(v.Documents))},
+	}}
+	tree := output.Tree{}
+	for _, d := range v.Documents {
+		name := output.Text(d.Name)
+		if d.Name == "" {
+			name = output.Text("(no readable .metadata)").With(output.Muted)
+		}
+		n := output.Node{Cells: []output.Cell{
+			name, output.Text(d.Kind).With(output.Muted), output.ID(d.ID), output.Count(len(d.Entries)), output.Size(d.Size),
+		}}
+		for _, e := range d.Entries {
+			n.Children = append(n.Children, output.Node{Cells: []output.Cell{output.Text(e.Name), output.Size(e.Size)}})
+		}
+		tree.Nodes = append(tree.Nodes, n)
+	}
+	return output.Doc{rec, tree}
 }

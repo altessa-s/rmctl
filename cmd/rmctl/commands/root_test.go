@@ -53,7 +53,7 @@ func TestRunDrivesAServiceAndCloses(t *testing.T) {
 	if err := Run(context.Background(), []string{"ls", "-P", "work", "-v"}, s, factory); err != nil {
 		t.Fatal(err)
 	}
-	if !closed || out.String() != "Books/  f-books\nNotes [notebook]  d-notes\n" {
+	if !closed || out.String() != "Books\tfolder\tf-books\tfalse\tfalse\nNotes\tnotebook\td-notes\tfalse\tfalse\n" {
 		t.Fatalf("closed %v out %q", closed, out.String())
 	}
 }

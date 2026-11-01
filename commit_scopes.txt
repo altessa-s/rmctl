@@ -11,6 +11,7 @@ docs                        # Documentation
 
 # Command line
 cli                         # Commands, flags, output and exit codes (cmd/rmctl)
+output                      # Answer formats and their renderers (cmd/rmctl/commands/output)
 
 # Library model (internal)
 domain                      # Items, the tree, paths, .metadata and .content

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -54,8 +55,7 @@ func newRegister(env *cliutil.Env) *cobra.Command {
 			if err = acc.Register(cmd.Context(), args[0], replace); err != nil {
 				return fmt.Errorf("register: %w", err)
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "registered")
-			return err
+			return env.Emit(cmd, output.Result{Doc: output.Doc{output.Body{Text: "registered"}}})
 		},
 	}
 	cmd.Flags().BoolVar(&replace, "replace", false, "replace a token the profile already holds")
@@ -90,8 +90,7 @@ func newLogout(env *cliutil.Env) *cobra.Command {
 			if revoke {
 				msg = "revoked and logged out"
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), msg)
-			return err
+			return env.Emit(cmd, output.Result{Doc: output.Doc{output.Body{Text: msg}}})
 		},
 	}
 	cmd.Flags().BoolVar(&revoke, "revoke", false, "remove the device from the account first")
@@ -144,27 +143,12 @@ func newAccount(env *cliutil.Env) *cobra.Command {
 				return fmt.Errorf("account: token store: %w", err)
 			}
 			view.Secrets = string(st.Backend)
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, view)
-			}
-			_, err = fmt.Fprintf(out, "registered  %s\nlevel       %s\nsync scope  %s\nsecrets     %s\n",
-				yesNo(view.Registered), orDash(view.Level), orDash(view.SyncScope), orDash(view.Secrets))
-			return err
+			return env.Emit(cmd, output.Result{JSON: view, Doc: output.Doc{output.Record{Fields: []output.Field{
+				{Key: "registered", Value: output.Bool(view.Registered)},
+				{Key: "level", Value: output.Text(view.Level)},
+				{Key: "sync_scope", Value: output.Text(view.SyncScope)},
+				{Key: "secrets", Value: output.Text(view.Secrets)},
+			}}}})
 		},
 	}
-}
-
-func yesNo(b bool) string {
-	if b {
-		return "yes"
-	}
-	return "no"
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

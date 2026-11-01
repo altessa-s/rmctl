@@ -17,6 +17,7 @@ import (
 	"github.com/altessa-s/go-atlas-core/time/clock"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -48,8 +49,11 @@ func New(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			p := printer{out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(), raw: raw, asJSON: cliutil.JSON(cmd), now: clock.Real().Now}
+			p := printer{em: env.Stream(cmd, columns(raw)), errOut: cmd.ErrOrStderr(), raw: raw, now: clock.Real().Now}
 			err = w.Watch(cmd.Context(), p.print)
+			if endErr := p.em.End(nil); err == nil {
+				err = endErr
+			}
 			if errors.Is(err, context.Canceled) && cmd.Context().Err() != nil {
 				return context.Cause(cmd.Context())
 			}
@@ -73,10 +77,29 @@ type eventView struct {
 	FromThisDevice bool   `json:"from_this_device"`
 }
 
+// columns are watch's columns: an event's time, name, document and origin,
+// and the frame when it is printed whole; --raw prints frames only.
+func columns(raw bool) []output.Column {
+	timeCol := output.Column{Title: "time", Role: output.RoleTime}
+	event := output.Column{Title: "event", Role: output.RoleKind}
+	frame := output.Column{Title: "frame"}
+	if raw {
+		return []output.Column{timeCol, event, frame}
+	}
+	return []output.Column{
+		timeCol, event,
+		{Title: "id", Role: output.RoleID},
+		{Title: "name", Role: output.RoleName},
+		{Title: "this_device", Role: output.RoleKind},
+		frame,
+	}
+}
+
 type printer struct {
-	out, errOut io.Writer
-	raw, asJSON bool
-	now         func() time.Time
+	em     output.Emitter
+	errOut io.Writer
+	raw    bool
+	now    func() time.Time
 }
 
 func (p printer) print(e port.Event) {
@@ -104,20 +127,14 @@ func (p printer) print(e port.Event) {
 	default:
 		return
 	}
-	name := cliutil.MaskName(e.VisibleName)
+	now := p.now().UTC()
 	v := eventView{
-		Time: p.now().UTC().Format(time.RFC3339), Name: e.Name, SyncComplete: e.SyncComplete,
-		DocumentID: string(e.DocumentID), VisibleName: name, FromThisDevice: e.FromThisDevice,
+		Time: now.Format(time.RFC3339), Name: e.Name, SyncComplete: e.SyncComplete,
+		DocumentID: string(e.DocumentID), VisibleName: cliutil.MaskName(e.VisibleName), FromThisDevice: e.FromThisDevice,
 	}
-	if p.asJSON {
-		_ = cliutil.WriteJSON(p.out, v) //nolint:errcheck // a closed pipe ends the next write too
-		return
-	}
-	origin := ""
-	if v.FromThisDevice {
-		origin = " (this device)"
-	}
-	_, _ = fmt.Fprintf(p.out, "%s %s %s %s%s\n", v.Time, v.Name, v.DocumentID, v.VisibleName, origin) //nolint:errcheck // see above
+	_ = p.em.Row(output.Row{JSON: v, Cells: []output.Cell{ //nolint:errcheck // a closed pipe ends the next write too
+		output.Time(now), output.Text(v.Name), output.ID(v.DocumentID), output.Text(v.VisibleName), output.Bool(v.FromThisDevice), output.Text(""),
+	}})
 }
 
 // frameView is a frame printed whole, for --raw and for a frame that did not
@@ -130,10 +147,11 @@ type frameView struct {
 
 // frame prints a socket frame as it arrived. Names inside it are not masked.
 func (p printer) frame(label string, data []byte) {
-	v := frameView{Time: p.now().UTC().Format(time.RFC3339), Event: label, Frame: string(data)}
-	if p.asJSON {
-		_ = cliutil.WriteJSON(p.out, v) //nolint:errcheck // a closed pipe ends the next write too
-		return
+	now := p.now().UTC()
+	v := frameView{Time: now.Format(time.RFC3339), Event: label, Frame: string(data)}
+	cells := []output.Cell{output.Time(now), output.Text(label), output.Text(v.Frame)}
+	if !p.raw {
+		cells = []output.Cell{output.Time(now), output.Text(label), output.ID(""), output.Text(""), output.Text(""), output.Text(v.Frame)}
 	}
-	_, _ = fmt.Fprintf(p.out, "%s %s %s\n", v.Time, v.Event, v.Frame) //nolint:errcheck // see above
+	_ = p.em.Row(output.Row{JSON: v, Cells: cells}) //nolint:errcheck // a closed pipe ends the next write too
 }

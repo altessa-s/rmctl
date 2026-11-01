@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -219,7 +220,7 @@ func runPut(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 	if (f.notebook && svc.Pages == nil) || (!f.notebook && svc.Writer == nil) {
 		return cliutil.ErrNoService
 	}
-	asJSON := cliutil.JSON(cmd)
+	stream := env.Stream(cmd, putColumns())
 	errOut := cmd.ErrOrStderr()
 	results := make([]putResult, 0, len(files))
 	failed := 0
@@ -244,16 +245,14 @@ func runPut(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 			continue
 		}
 		results = append(results, r)
-		if !asJSON {
-			if err := printResult(cmd, f, r, dest); err != nil {
+		for _, row := range putRows(f, r, dest) {
+			if err := stream.Row(output.Row{Cells: row}); err != nil {
 				return err
 			}
 		}
 	}
-	if asJSON {
-		if err := cliutil.WriteJSON(cmd.OutOrStdout(), results); err != nil {
-			return err
-		}
+	if err := stream.End(results); err != nil {
+		return err
 	}
 	if failed > 0 {
 		return fmt.Errorf("put: %d of %d files: %w", failed, len(files), ErrSomeFailed)
@@ -295,11 +294,58 @@ func putFile(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putF
 	return r, nil
 }
 
-func printResult(cmd *cobra.Command, f *putFlags, r putResult, dest string) error {
-	if isArchive(r.File) {
-		return printImport(cmd, r, dest)
+// putColumns are the columns of put's answer: what happened to each
+// document, and from which file into which folder.
+func putColumns() []output.Column {
+	return []output.Column{
+		{Title: "action", Role: output.RoleKind},
+		{Title: "name", Role: output.RoleName},
+		{Title: "kind", Role: output.RoleKind},
+		{Title: "id", Role: output.RoleID},
+		{Title: "renamed_from", Role: output.RoleID},
+		{Title: "file", Role: output.RolePath, Detail: true},
+		{Title: "folder", Role: output.RolePath, Detail: true},
 	}
-	return printPut(cmd, f, r.File, dest, r.uploaded)
+}
+
+// putRows are the rows of one file's outcome: one document uploaded, or
+// every document of an archive.
+func putRows(f *putFlags, r putResult, dest string) [][]output.Cell {
+	row := func(verb string, it domain.Item, from string) []output.Cell {
+		action := past(verb)
+		if r.DryRun {
+			action = "would " + verb
+		}
+		return []output.Cell{
+			output.Text(action), output.Text(it.Name).With(cliutil.NameCell(it, false).Flags), output.Text(string(it.Kind)),
+			output.ID(string(it.ID)), output.ID(from), output.Path(r.File), output.Path(dest),
+		}
+	}
+	if isArchive(r.File) {
+		rows := make([][]output.Cell, 0, len(r.Imported))
+		for _, d := range r.Imported {
+			it := domain.Item{ID: domain.ItemID(d.Item.ID), Name: d.Item.Name, Kind: domain.Kind(d.Item.Kind)}
+			rows = append(rows, row("import", it, d.From))
+		}
+		return rows
+	}
+	it := r.uploaded
+	if it.Name == "" {
+		it.Name = strings.TrimSuffix(filepath.Base(r.File), filepath.Ext(r.File))
+	}
+	verb := "upload"
+	if f.notebook {
+		verb = "make"
+	}
+	return [][]output.Cell{row(verb, it, "")}
+}
+
+// past is a verb of putRows as done.
+func past(verb string) string {
+	if verb == "make" {
+		return "made"
+	}
+	return verb + "ed"
 }
 
 func putOne(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFlags, file, dest string) (domain.Item, error) {
@@ -314,20 +360,6 @@ func putOne(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 	progress, done := cliutil.Progress(env.Streams, "uploading "+filepath.Base(file))
 	defer done()
 	return svc.Writer.Put(cmd.Context(), file, dest, f.opts, progress)
-}
-
-func printPut(cmd *cobra.Command, f *putFlags, file, dest string, it domain.Item) error {
-	out := cmd.OutOrStdout()
-	if f.opts.DryRun {
-		name := it.Name
-		if name == "" {
-			name = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-		}
-		_, err := fmt.Fprintf(out, "would upload %s into %s as %q\n", file, dest, name)
-		return err
-	}
-	_, err := fmt.Fprintln(out, cliutil.Line(it, false))
-	return err
 }
 
 func newUnmark(env *cliutil.Env) *cobra.Command {
@@ -372,7 +404,7 @@ func newUnmark(env *cliutil.Env) *cobra.Command {
 			}
 			if marks == 0 {
 				cliutil.Notef(cmd.ErrOrStderr(), "%s has no highlighter marks; nothing to erase", doc.Item.Name)
-				return printUnmark(cmd, port.UnmarkReport{Item: doc.Item})
+				return printUnmark(cmd, env, port.UnmarkReport{Item: doc.Item})
 			}
 			question := fmt.Sprintf("Erase %s on %d pages of %s?", markCount(marks, highlights), on, doc.Item.Name)
 			if err = cliutil.Confirm(cmd, env, question); err != nil {
@@ -382,7 +414,7 @@ func newUnmark(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return cliutil.PagesErr("unmark", err)
 			}
-			return printUnmark(cmd, report)
+			return printUnmark(cmd, env, report)
 		},
 	}
 	cmd.Flags().StringArrayVar(&pages, "page", nil, "only this page: a number from 1 or a page id (repeat or comma-separate)")
@@ -398,13 +430,16 @@ type unmarkView struct {
 	Pages      int    `json:"pages"`
 }
 
-func printUnmark(cmd *cobra.Command, r port.UnmarkReport) error {
+func printUnmark(cmd *cobra.Command, env *cliutil.Env, r port.UnmarkReport) error {
 	v := unmarkView{ID: string(r.Item.ID), Name: r.Item.Name, Erased: r.Erased, Highlights: r.Highlights, Strokes: r.Strokes, Pages: r.Pages}
-	if cliutil.JSON(cmd) {
-		return cliutil.WriteJSON(cmd.OutOrStdout(), v)
-	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "erased %s on %d pages of %s  %s\n", markCount(v.Erased, v.Highlights), v.Pages, v.Name, v.ID)
-	return err
+	return env.Emit(cmd, output.Result{JSON: v, Doc: output.Doc{output.Record{Fields: []output.Field{
+		{Key: "id", Value: output.ID(v.ID)},
+		{Key: "name", Value: output.Text(v.Name)},
+		{Key: "erased", Value: output.Count(v.Erased)},
+		{Key: "highlights", Value: output.Count(v.Highlights)},
+		{Key: "strokes", Value: output.Count(v.Strokes)},
+		{Key: "pages", Value: output.Count(v.Pages)},
+	}}}})
 }
 
 // markCount names marks as highlights and marker strokes.
@@ -434,25 +469,4 @@ func importOne(cmd *cobra.Command, svc cliutil.Services, f *putFlags, file, dest
 		r.Imported = append(r.Imported, v)
 	}
 	return r, nil
-}
-
-func printImport(cmd *cobra.Command, r putResult, dest string) error {
-	out := cmd.OutOrStdout()
-	for _, d := range r.Imported {
-		var err error
-		switch {
-		case r.DryRun && d.From != "":
-			_, err = fmt.Fprintf(out, "would import %s (new id %s, was %s: taken) from %s into %s\n", d.Item.Name, d.Item.ID, d.From, r.File, dest)
-		case r.DryRun:
-			_, err = fmt.Fprintf(out, "would import %s (%s) from %s into %s\n", d.Item.Name, d.Item.ID, r.File, dest)
-		case d.From != "":
-			_, err = fmt.Fprintf(out, "imported %s (new id %s, was %s)\n", d.Item.Name, d.Item.ID, d.From)
-		default:
-			_, err = fmt.Fprintf(out, "imported %s (%s)\n", d.Item.Name, d.Item.ID)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }

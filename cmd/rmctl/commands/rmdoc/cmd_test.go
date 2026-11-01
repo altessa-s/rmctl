@@ -32,11 +32,13 @@ func TestRmdoc(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{Inspected: inspected()}
 	r := clitest.Exec(t, f.Services(), clitest.Options{}, build, "rmdoc", "a.rmdoc")
-	if r.Code != cliutil.CodeOK || strings.Contains(r.Out, "Secret") || !strings.Contains(r.Out, "a.rmdoc: 2 documents") ||
-		!strings.Contains(r.Out, "<name:11> [notebook]  n1  2 files") || !strings.Contains(r.Out, "  n1/p1.rm  ") ||
-		!strings.Contains(r.Out, "(no readable .metadata)  bad  1 files") {
-		t.Fatalf("%d %v\n%s", r.Code, r.Error, r.Out)
+	want := "path\ta.rmdoc\ndocuments\t2\n\n<name:11>\tnotebook\tn1\t2\t2148\n  n1.metadata\t100\n  n1/p1.rm\t2048\n" +
+		"(no readable .metadata)\t-\tbad\t1\t4\n  bad.pdf\t4\n"
+	if r.Code != cliutil.CodeOK || r.Out != want {
+		t.Fatalf("%d %v\n%q", r.Code, r.Error, r.Out)
 	}
+	tbl := clitest.Exec(t, f.Services(), clitest.Options{OutTerminal: true}, build, "rmdoc", "a.rmdoc", "--color", "never")
+	clitest.Golden(t, "rmdoc-table", tbl.Out)
 	r = clitest.Exec(t, f.Services(), clitest.Options{}, build, "rmdoc", "a.rmdoc", "--raw", "--json")
 	if r.Code != cliutil.CodeOK || !strings.Contains(r.Out, `"name": "Secret plan"`) {
 		t.Fatalf("%d %v\n%s", r.Code, r.Error, r.Out)

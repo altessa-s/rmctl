@@ -1,0 +1,16 @@
+id        d-novel
+name      Novel *
+path      /Books/Novel
+kind      epub
+size      4.1 KiB
+modified  2026-10-31 12:00
+created   -
+trashed   no
+pinned    yes
+tags      fiction
+hash      h-d-novel
+
+FILE                 SIZE  HASH
+────────────────  ───────  ──────────────
+d-novel.metadata    109 B  h-meta-d-novel
+d-novel.epub      4.0 KiB  h-epub-d-novel

@@ -26,11 +26,13 @@ func TestSecretsStatus(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{SecretsAt: status()}
 	r := run(t, f, "secrets", "status")
-	want := "profile   work\nbackend   keychain (chosen by profile)\nlocation  Keychain service io.altessa.rmctl, accounts work/…\n" +
-		"config    /c/config.toml\npresent   deviceToken, userToken\n"
+	want := "profile\twork\nbackend\tkeychain\nsource\tprofile\nlocation\tKeychain service io.altessa.rmctl, accounts work/…\n" +
+		"config_file\t/c/config.toml\npresent\tdeviceToken,userToken\n"
 	if r.Code != cliutil.CodeOK || r.Out != want {
 		t.Fatalf("%d %v %q", r.Code, r.Error, r.Out)
 	}
+	tbl := clitest.Exec(t, f.Services(), clitest.Options{OutTerminal: true}, Commands, "secrets", "status", "--color", "never")
+	clitest.Golden(t, "secrets-status-table", tbl.Out)
 	j := run(t, &clitest.Fake{SecretsAt: port.SecretsStatus{Profile: "default", Backend: port.SecretsFile}}, "secrets", "status", "--json")
 	clitest.Golden(t, "secrets-status", j.Out)
 	if e := run(t, &clitest.Fake{SecretsErr: port.ErrKeychainUnsupported}, "secrets", "status"); e.Code != cliutil.CodeError ||
@@ -54,7 +56,8 @@ func TestSecretsMigrate(t *testing.T) {
 	}
 	r := run(t, f, "secrets", "migrate", "--to", "keychain", "--replace", "--yes")
 	if r.Code != cliutil.CodeOK || !slices.Equal(f.Calls(), []string{"Migrate keychain replace"}) ||
-		r.Out != "moved deviceToken from the file to Keychain\n" || !strings.Contains(r.Err, "backend = \"keychain\"") {
+		!strings.Contains(r.Out, "moved\tdeviceToken\n") || !strings.Contains(r.Out, "default_set\tfalse\n") ||
+		!strings.Contains(r.Err, "backend = \"keychain\"") {
 		t.Fatalf("%d %v %v %q %q", r.Code, r.Error, f.Calls(), r.Out, r.Err)
 	}
 	set := moved
@@ -62,7 +65,7 @@ func TestSecretsMigrate(t *testing.T) {
 	f = &clitest.Fake{Migration: set}
 	r = run(t, f, "secrets", "migrate", "--to", "keychain", "--set-default", "--yes")
 	if r.Code != cliutil.CodeOK || !slices.Equal(f.Calls(), []string{"Migrate keychain  set-default"}) ||
-		!strings.Contains(r.Out, "/c/config.toml now chooses the keychain") || r.Err != "" {
+		!strings.Contains(r.Out, "default_set\ttrue\n") || r.Err != "" {
 		t.Fatalf("%d %v %v %q %q", r.Code, r.Error, f.Calls(), r.Out, r.Err)
 	}
 	overridden := moved

@@ -44,10 +44,10 @@ func TestE2E_SecretsFromTheConfigFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("[secrets]\nbackend = \"file\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out := e.ok("secrets", "status"); !strings.Contains(out, "chosen by config") {
+	if out := e.ok("secrets", "status"); !strings.Contains(out, "source\tconfig\n") {
 		t.Fatalf("%q", out)
 	}
-	if out := e.ok("account"); !strings.Contains(out, "secrets     file") {
+	if out := e.ok("account"); !strings.Contains(out, "secrets\tfile\n") {
 		t.Fatalf("%q", out)
 	}
 }

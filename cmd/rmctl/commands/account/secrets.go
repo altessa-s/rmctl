@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -77,12 +78,14 @@ func newSecretsStatus(env *cliutil.Env) *cobra.Command {
 			if v.Present == nil {
 				v.Present = []string{}
 			}
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(cmd.OutOrStdout(), v)
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "profile   %s\nbackend   %s (chosen by %s)\nlocation  %s\nconfig    %s\npresent   %s\n",
-				v.Profile, v.Backend, v.Source, v.Location, v.ConfigFile, orDash(strings.Join(v.Present, ", ")))
-			return err
+			return env.Emit(cmd, output.Result{JSON: v, Doc: output.Doc{output.Record{Fields: []output.Field{
+				{Key: "profile", Value: output.Text(v.Profile)},
+				{Key: "backend", Value: output.Text(v.Backend)},
+				{Key: "source", Value: output.Text(v.Source)},
+				{Key: "location", Value: output.Path(v.Location)},
+				{Key: "config_file", Value: output.Path(v.ConfigFile)},
+				{Key: "present", Value: output.Text(strings.Join(v.Present, ","))},
+			}}}})
 		},
 	}
 }
@@ -125,7 +128,7 @@ func newSecretsMigrate(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("secrets migrate: %w", err)
 			}
-			return printMigration(cmd, m)
+			return printMigration(cmd, env, m)
 		},
 	}
 	cmd.Flags().StringVar(&to, "to", "", "where to move the tokens: file or keychain")
@@ -146,19 +149,20 @@ type migrationView struct {
 	Override    string   `json:"override,omitempty"`
 }
 
-func printMigration(cmd *cobra.Command, m port.SecretsMigration) error {
+func printMigration(cmd *cobra.Command, env *cliutil.Env, m port.SecretsMigration) error {
 	v := migrationView{
 		From: string(m.From), To: string(m.To), Location: m.Location, Moved: m.Moved,
 		DefaultSet: m.DefaultSet, ConfigFile: m.ConfigFile, ConfigLines: m.ConfigLines, Override: m.Override,
 	}
-	if cliutil.JSON(cmd) {
-		return cliutil.WriteJSON(cmd.OutOrStdout(), v)
-	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "moved %s from the %s to %s\n", strings.Join(v.Moved, ", "), v.From, v.Location); err != nil {
-		return err
-	}
-	if v.DefaultSet {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s now chooses the %s for this profile\n", v.ConfigFile, v.To)
+	err := env.Emit(cmd, output.Result{JSON: v, Doc: output.Doc{output.Record{Fields: []output.Field{
+		{Key: "from", Value: output.Text(v.From)},
+		{Key: "to", Value: output.Text(v.To)},
+		{Key: "location", Value: output.Path(v.Location)},
+		{Key: "moved", Value: output.Text(strings.Join(v.Moved, ","))},
+		{Key: "default_set", Value: output.Bool(v.DefaultSet)},
+		{Key: "config_file", Value: output.Path(v.ConfigFile)},
+	}}}})
+	if err != nil || v.DefaultSet || env.JSON(cmd) {
 		return err
 	}
 	cliutil.Notef(cmd.ErrOrStderr(), "rmctl keeps looking in the %s until %s says otherwise; add:\n%s", v.From, v.ConfigFile, v.ConfigLines)

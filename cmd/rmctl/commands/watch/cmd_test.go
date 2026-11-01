@@ -16,6 +16,7 @@ import (
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/clitest"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -39,9 +40,9 @@ func TestWatchMasksNames(t *testing.T) {
 	if r.Code != cliutil.CodeError || !strings.HasPrefix(r.Error.Error(), "watch: ") {
 		t.Fatalf("%d %v", r.Code, r.Error)
 	}
-	if strings.Contains(r.Out, "Secret") || !strings.Contains(r.Out, " SyncComplete d-1 <name:11>.pdf\n") ||
-		!strings.Contains(r.Out, " DocAdded d-2 <name:5> (this device)\n") ||
-		!strings.Contains(r.Out, " unreadable frame not json\n") {
+	if strings.Contains(r.Out, "Secret") || !strings.Contains(r.Out, "\tSyncComplete\td-1\t<name:11>.pdf\tfalse\t-\n") ||
+		!strings.Contains(r.Out, "\tDocAdded\td-2\t<name:5>\ttrue\t-\n") ||
+		!strings.Contains(r.Out, "\tunreadable frame\t-\t-\t-\tnot json\n") {
 		t.Fatalf("out %q", r.Out)
 	}
 	if r.Err != "connected\ndropped: eof — reconnecting\ndropped — reconnecting\n" {
@@ -50,13 +51,13 @@ func TestWatchMasksNames(t *testing.T) {
 }
 
 // --raw prints every frame whole: the wrapper and the messageid included,
-// names unmasked. An event with no frame still prints its frame field empty.
+// names unmasked. An event with no frame prints "-" for it.
 func TestWatchRaw(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{Events: events, WatchErr: errors.New("socket gone")}
 	r := clitest.Exec(t, f.Services(), clitest.Options{}, build, "watch", "--raw")
 	if r.Code != cliutil.CodeError || !strings.Contains(r.Out, `"messageid":"m-1"`) || !strings.Contains(r.Out, "Secret plan.pdf") ||
-		!strings.Contains(r.Out, " unreadable frame not json\n") {
+		!strings.Contains(r.Out, "\tunreadable frame\tnot json\n") || !strings.Contains(r.Out, "\tDocAdded\t-\n") {
 		t.Fatalf("%d %v out %q", r.Code, r.Error, r.Out)
 	}
 }
@@ -64,9 +65,16 @@ func TestWatchRaw(t *testing.T) {
 func TestWatchRawJSON(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
-	p := printer{out: &out, errOut: &bytes.Buffer{}, raw: true, asJSON: true, now: func() time.Time { return time.Unix(0, 0) }}
+	em, err := output.Stream(&out, output.JSONRenderer{}, columns(true), output.Style{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := printer{em: em, errOut: &bytes.Buffer{}, raw: true, now: func() time.Time { return time.Unix(0, 0) }}
 	for _, e := range events {
 		p.print(e)
+	}
+	if err := em.End(nil); err != nil {
+		t.Fatal(err)
 	}
 	clitest.Golden(t, "watch", out.String())
 }

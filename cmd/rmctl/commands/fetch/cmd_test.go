@@ -50,7 +50,7 @@ func TestExport(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{}
 	r := run(t, f, clitest.Options{}, "export", "d-notes", "-o", "n.rmdoc")
-	if r.Code != 0 || r.Out != "n.rmdoc (1 documents, 3 files)\n" || f.Calls()[0] != "Export d-notes n.rmdoc" {
+	if r.Code != 0 || r.Out != "path\tn.rmdoc\ndocuments\t1\nfiles\t3\n" || f.Calls()[0] != "Export d-notes n.rmdoc" {
 		t.Fatalf("%d %q %v", r.Code, r.Out, f.Calls())
 	}
 	// Several queries, a folder among them, into one archive.
@@ -73,7 +73,7 @@ func TestMget(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{Report: port.MirrorReport{Written: 3, Skipped: 2, Deleted: 1}}
 	r := run(t, f, clitest.Options{}, "mget", "/Books", "-o", "dir", "--incremental", "--delete", "--jobs", "4")
-	if r.Code != 0 || r.Out != "written 3, skipped 2, deleted 1\n" || f.Calls()[0] != "Mirror /Books dir incremental delete" {
+	if r.Code != 0 || r.Out != "written\t3\nskipped\t2\ndeleted\t1\n" || f.Calls()[0] != "Mirror /Books dir incremental delete" {
 		t.Fatalf("%d %q %v", r.Code, r.Out, f.Calls())
 	}
 	r = run(t, f, clitest.Options{}, "mget", "/Books", "-o", "dir", "--json")

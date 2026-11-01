@@ -1,0 +1,5 @@
+Books/       folder    f-books
+├── Novel *  epub      d-novel
+└── Paper    pdf       d-paper
+Notes        notebook  d-notes
+Old          pdf       d-old

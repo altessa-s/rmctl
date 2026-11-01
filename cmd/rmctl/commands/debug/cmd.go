@@ -6,7 +6,6 @@ package debug
 
 import (
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 
@@ -14,11 +13,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
 // GroupID is the help group of the diagnostics.
 const GroupID = "debug"
+
+// keyHash names a hash in records and tables.
+const keyHash = "hash"
 
 // New returns the debug command group.
 func New(env *cliutil.Env) *cobra.Command {
@@ -70,11 +73,11 @@ func newRoot(env *cliutil.Env) *cobra.Command {
 				return fmt.Errorf("debug root: %w", err)
 			}
 			v := rootView{Hash: root.Hash, Generation: root.Generation, Records: len(root.Records)}
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(cmd.OutOrStdout(), v)
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "hash        %s\ngeneration  %d\nrecords     %d\n", v.Hash, v.Generation, v.Records)
-			return err
+			return env.Emit(cmd, output.Result{JSON: v, Doc: output.Doc{output.Record{Fields: []output.Field{
+				{Key: keyHash, Value: output.ID(v.Hash)},
+				{Key: "generation", Value: output.Count(int(v.Generation))},
+				{Key: "records", Value: output.Count(v.Records)},
+			}}}})
 		},
 	}
 }
@@ -159,37 +162,31 @@ func newFiles(env *cliutil.Env) *cobra.Command {
 				}
 				views = append(views, fileReportView{Name: r.File.Name, Hash: r.File.Hash, Size: r.File.Size, Text: string(text)})
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, struct {
-					ID    string           `json:"id"`
-					Files []fileReportView `json:"files"`
-				}{ID: string(it.ID), Files: views})
-			}
-			return writeFiles(out, views)
+			return env.Emit(cmd, output.Result{JSON: struct {
+				ID    string           `json:"id"`
+				Files []fileReportView `json:"files"`
+			}{ID: string(it.ID), Files: views}, Doc: filesDoc(views)})
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "print the files unmasked")
 	return cmd
 }
 
-func writeFiles(w io.Writer, views []fileReportView) error {
+// filesDoc is each file as a record of its name, size and hash, followed by
+// its text when it has one.
+func filesDoc(views []fileReportView) output.Doc {
+	doc := make(output.Doc, 0, 2*len(views))
 	for _, v := range views {
-		if _, err := fmt.Fprintf(w, "== %s  %s  %s\n", v.Name, cliutil.Size(v.Size), v.Hash); err != nil {
-			return err
-		}
-		if v.Text == "" {
-			continue
-		}
-		text := v.Text
-		if text[len(text)-1] != '\n' {
-			text += "\n"
-		}
-		if _, err := io.WriteString(w, text); err != nil {
-			return err
+		doc = append(doc, output.Record{Fields: []output.Field{
+			{Key: "name", Value: output.Text(v.Name)},
+			{Key: "size", Value: output.Size(v.Size)},
+			{Key: keyHash, Value: output.ID(v.Hash)},
+		}})
+		if v.Text != "" {
+			doc = append(doc, output.Body{Text: v.Text})
 		}
 	}
-	return nil
+	return doc
 }
 
 // hashView is one record of debug hashes as --json prints it.
@@ -223,16 +220,13 @@ func newHashes(env *cliutil.Env) *cobra.Command {
 				}
 				views = append(views, hashView{ID: string(r.Record.ID), Hash: r.Record.Hash, By: by})
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, views)
-			}
+			t := output.Table{Columns: []output.Column{
+				{Title: "id", Role: output.RoleID}, {Title: "by", Role: output.RoleKind}, {Title: keyHash, Role: output.RoleHash},
+			}}
 			for _, v := range views {
-				if _, err := fmt.Fprintf(out, "%s  %s  %s\n", v.By, v.ID, v.Hash); err != nil {
-					return err
-				}
+				t.Rows = append(t.Rows, []output.Cell{output.ID(v.ID), output.Text(v.By), output.ID(v.Hash)})
 			}
-			return nil
+			return env.Emit(cmd, output.Result{JSON: views, Doc: output.Doc{t}})
 		},
 	}
 }
@@ -256,7 +250,15 @@ func newCheckFiles(env *cliutil.Env) *cobra.Command {
 			if missing == nil {
 				missing = []string{}
 			}
-			return printList(cmd, missing, "the cloud holds every blob")
+			if len(missing) == 0 && !env.JSON(cmd) {
+				cliutil.Notef(cmd.ErrOrStderr(), "the cloud holds every blob")
+				return nil
+			}
+			t := output.Table{Columns: []output.Column{{Title: keyHash, Role: output.RoleHash}}}
+			for _, h := range missing {
+				t.Rows = append(t.Rows, []output.Cell{output.ID(h)})
+			}
+			return env.Emit(cmd, output.Result{JSON: missing, Doc: output.Doc{t}})
 		},
 	}
 }
@@ -282,33 +284,11 @@ func newSweep(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("debug sweep: %w", err)
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, counts)
-			}
+			t := output.Table{Columns: []output.Column{{Title: "field"}, {Title: "documents", Role: output.RoleCount}}}
 			for _, k := range slices.Sorted(maps.Keys(counts)) {
-				if _, err := fmt.Fprintf(out, "%6d  %s\n", counts[k], k); err != nil {
-					return err
-				}
+				t.Rows = append(t.Rows, []output.Cell{output.Text(k), output.Count(counts[k])})
 			}
-			return nil
+			return env.Emit(cmd, output.Result{JSON: counts, Doc: output.Doc{t}})
 		},
 	}
-}
-
-func printList(cmd *cobra.Command, lines []string, empty string) error {
-	out := cmd.OutOrStdout()
-	if cliutil.JSON(cmd) {
-		return cliutil.WriteJSON(out, lines)
-	}
-	if len(lines) == 0 {
-		cliutil.Notef(cmd.ErrOrStderr(), "%s", empty)
-		return nil
-	}
-	for _, l := range lines {
-		if _, err := fmt.Fprintln(out, l); err != nil {
-			return err
-		}
-	}
-	return nil
 }

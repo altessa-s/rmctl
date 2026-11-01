@@ -53,6 +53,13 @@ func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extr
 		Err:        errOut,
 		IsTerminal: isTerminal(in) && isTerminal(errOut),
 	}
+	if f, ok := out.(*os.File); ok && isTerminal(f) {
+		streams.OutTerminal = true
+		streams.OutColor = enableColor(f)
+		if w, _, err := term.GetSize(int(f.Fd())); err == nil { //nolint:gosec // a file descriptor fits an int
+			streams.Width = w
+		}
+	}
 	factory := func(ctx context.Context, profile string, verbose bool) (commands.Services, func() error, error) {
 		return build(ctx, profile, verbose, errOut, extra...)
 	}

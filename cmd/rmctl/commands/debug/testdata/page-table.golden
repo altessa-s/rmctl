@@ -1,0 +1,31 @@
+number            1
+id                p-1
+paragraphs        1
+highlights        1
+strokes           5
+strokes by tool   fineliner 3,pencil 2
+strokes by color  black 4,red 1
+anchored strokes  1
+images            2
+skipped blocks    1
+paper             1404×1872
+
+STYLE  TEXT
+─────  ───────────
+    2  Secret plan
+
+HIGHLIGHT  COLOR   TEXT
+─────────  ──────  ────────────
+1:9        yellow  marked words
+
+number            2
+id                p-2
+paragraphs        0
+highlights        0
+strokes           0
+strokes by tool   -
+strokes by color  -
+anchored strokes  0
+images            0
+skipped blocks    0
+paper             -

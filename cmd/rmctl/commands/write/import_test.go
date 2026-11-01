@@ -30,7 +30,7 @@ func TestPutImportsAnArchive(t *testing.T) {
 	if r.Code != cliutil.CodeOK || !slices.Equal(f.Calls(), []string{"Import backup.rmdoc /Archive"}) {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
 	}
-	if r.Out != "imported Notes (n1)\nimported Copy (new id new-2, was d-old)\n" {
+	if r.Out != "imported\tNotes\tnotebook\tn1\t-\tbackup.rmdoc\t/Archive\nimported\tCopy\tnotebook\tnew-2\td-old\tbackup.rmdoc\t/Archive\n" {
 		t.Fatalf("%q", r.Out)
 	}
 	// Mixed with a PDF in one put, and as JSON.
@@ -50,8 +50,8 @@ func TestPutArchiveDryRunPlans(t *testing.T) {
 	if r.Code != cliutil.CodeOK || !slices.Equal(f.Calls(), []string{"PlanImport b.rmdoc /A"}) {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
 	}
-	want := "would import Notes (n1) from b.rmdoc into /A\n" +
-		"would import Copy (new id new-2, was d-old: taken) from b.rmdoc into /A\n"
+	want := "would import\tNotes\tnotebook\tn1\t-\tb.rmdoc\t/A\n" +
+		"would import\tCopy\tnotebook\tnew-2\td-old\tb.rmdoc\t/A\n"
 	if r.Out != want {
 		t.Fatalf("%q", r.Out)
 	}
@@ -77,7 +77,7 @@ func TestPutArchiveRefusals(t *testing.T) {
 	// One archive of several failing: the others go on, and the command fails.
 	f = &clitest.Fake{Imported: imported(), PutErr: map[string]error{"bad.rmdoc": errors.New("broken")}}
 	r := run(t, f, clitest.Options{}, "put", "bad.rmdoc", "good.rmdoc", "--to", "/", "--yes")
-	if r.Code != cliutil.CodeError || !errors.Is(r.Error, ErrSomeFailed) || !strings.Contains(r.Err, "bad.rmdoc") || !strings.Contains(r.Out, "imported Notes") {
+	if r.Code != cliutil.CodeError || !errors.Is(r.Error, ErrSomeFailed) || !strings.Contains(r.Err, "bad.rmdoc") || !strings.Contains(r.Out, "imported\tNotes\t") {
 		t.Fatalf("%d %v %q %q", r.Code, r.Error, r.Err, r.Out)
 	}
 	f = &clitest.Fake{Err: port.ErrNotRegistered}

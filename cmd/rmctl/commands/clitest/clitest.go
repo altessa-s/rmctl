@@ -128,6 +128,11 @@ type Options struct {
 	// person at a terminal.
 	Stdin    string
 	Terminal bool
+	// OutTerminal makes the output stream look like a terminal of Width
+	// columns that shows color; Env is the whole environment the run sees.
+	OutTerminal bool
+	Width       int
+	Env         map[string]string
 	// Factory overrides the fixed services, to test a failing build.
 	Factory cliutil.Factory
 	// Context is the run's context; nil is a background context.
@@ -139,7 +144,11 @@ type Options struct {
 func Exec(t testing.TB, svc cliutil.Services, opts Options, build func(env *cliutil.Env) []*cobra.Command, args ...string) Result {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	streams := cliutil.Streams{In: strings.NewReader(opts.Stdin), Out: &out, Err: &errOut, IsTerminal: opts.Terminal}
+	streams := cliutil.Streams{
+		In: strings.NewReader(opts.Stdin), Out: &out, Err: &errOut, IsTerminal: opts.Terminal,
+		OutTerminal: opts.OutTerminal, OutColor: opts.OutTerminal, Width: opts.Width,
+		Getenv: func(key string) string { return opts.Env[key] },
+	}
 	factory := opts.Factory
 	if factory == nil {
 		factory = cliutil.Fixed(svc)
@@ -150,7 +159,7 @@ func Exec(t testing.TB, svc cliutil.Services, opts Options, build func(env *cliu
 	root.SetOut(&out)
 	root.SetErr(&errOut)
 	root.SetFlagErrorFunc(cliutil.FlagError)
-	cliutil.AddPersistentFlags(root)
+	cliutil.AddPersistentFlags(root, env)
 	for _, c := range build(env) {
 		if c.GroupID != "" && !root.ContainsGroup(c.GroupID) {
 			root.AddGroup(&cobra.Group{ID: c.GroupID, Title: c.GroupID})

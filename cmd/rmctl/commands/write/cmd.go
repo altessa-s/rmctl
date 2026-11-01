@@ -36,19 +36,9 @@ func writer(cmd *cobra.Command, env *cliutil.Env) (port.Writer, error) {
 	return cliutil.Need(cmd, env, func(s cliutil.Services) port.Writer { return s.Writer })
 }
 
-// printItems writes the items a change touched: name and identifier, or
-// their views as JSON.
-func printItems(cmd *cobra.Command, items ...domain.Item) error {
-	out := cmd.OutOrStdout()
-	if cliutil.JSON(cmd) {
-		return cliutil.WriteJSON(out, cliutil.Views(nil, items))
-	}
-	for _, it := range items {
-		if _, err := fmt.Fprintln(out, cliutil.Line(it, false)); err != nil {
-			return err
-		}
-	}
-	return nil
+// printItems writes the items a change touched.
+func printItems(cmd *cobra.Command, env *cliutil.Env, items ...domain.Item) error {
+	return env.Emit(cmd, cliutil.Items(nil, items, false))
 }
 
 func newMkdir(env *cliutil.Env) *cobra.Command {
@@ -80,7 +70,7 @@ func newMkdir(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("mkdir: %w", err)
 			}
-			return printItems(cmd, it)
+			return printItems(cmd, env, it)
 		},
 	}
 	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "create missing folders above it")
@@ -117,7 +107,7 @@ func newMv(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("mv: %w", err)
 			}
-			return printItems(cmd, it)
+			return printItems(cmd, env, it)
 		},
 	}
 }
@@ -190,7 +180,7 @@ func newBatch(env *cliutil.Env, spec batchSpec) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("%s: %w", name, err)
 			}
-			return printItems(cmd, items...)
+			return printItems(cmd, env, items...)
 		},
 	}
 	if spec.flags != nil {
@@ -240,7 +230,7 @@ func newRm(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("rm: %w", err)
 			}
-			return printItems(cmd, items...)
+			return printItems(cmd, env, items...)
 		},
 	}
 }
@@ -309,7 +299,7 @@ func newMput(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("mput: %w", err)
 			}
-			return cliutil.PrintReport(cmd.OutOrStdout(), cliutil.JSON(cmd), report)
+			return env.Emit(cmd, cliutil.Report(report))
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Jobs, "jobs", "j", 0, "transfers at a time (0: the default)")

@@ -40,9 +40,14 @@ func (f *pageFlags) add(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.format, "format", formatText, "output format: text, markdown, json")
 }
 
-// resolved is the output format, --json winning over --format.
-func (f *pageFlags) resolved(cmd *cobra.Command) (string, error) {
-	if cliutil.JSON(cmd) {
+// resolved is the output format: --json, else this command's own --format,
+// else json when $RMCTL_FORMAT asks for it, else text. The global formats
+// table and plain are for records; a document's text has its own.
+func (f *pageFlags) resolved(cmd *cobra.Command, env *cliutil.Env) (string, error) {
+	if asJSON, _ := cmd.Flags().GetBool(cliutil.FlagJSON); asJSON { //nolint:errcheck // the flag is persistent on the root
+		return formatJSON, nil
+	}
+	if !cmd.Flags().Changed("format") && env.JSON(cmd) {
 		return formatJSON, nil
 	}
 	switch f.format {
@@ -56,7 +61,7 @@ func (f *pageFlags) resolved(cmd *cobra.Command) (string, error) {
 // load reads the pages of the document query names in the cloud, or of
 // every document of a local .rmdoc archive. local says which it was.
 func (f *pageFlags) load(cmd *cobra.Command, env *cliutil.Env, query string) (docs []port.DocumentText, format string, local bool, err error) {
-	if format, err = f.resolved(cmd); err != nil {
+	if format, err = f.resolved(cmd, env); err != nil {
 		return nil, "", false, err
 	}
 	selected := cliutil.SplitPages(f.pages)

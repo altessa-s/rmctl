@@ -6,12 +6,13 @@ package browse
 
 import (
 	"fmt"
-	"io"
+	"strings"
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/spf13/cobra"
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -60,20 +61,7 @@ func newLs(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ls: %w", err)
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, cliutil.Views(tree, items))
-			}
-			for _, it := range items {
-				line := cliutil.Line(it, tree.IsTrashed(it.ID))
-				if long {
-					line = cliutil.LongLine(it, tree.IsTrashed(it.ID))
-				}
-				if _, err := fmt.Fprintln(out, line); err != nil {
-					return err
-				}
-			}
-			return nil
+			return env.Emit(cmd, cliutil.Items(tree, items, long))
 		},
 	}
 	cmd.Flags().BoolVarP(&long, "long", "l", false, "add the modification time and the size")
@@ -89,8 +77,8 @@ func newTree(env *cliutil.Env) *cobra.Command {
 		Short:   "Show the library as a tree",
 		Long: heredoc.Doc(`
 			Shows the library below a folder, the top level by default, as an indented
-			tree: a folder ends in "/", a document carries its kind in brackets, a
-			pinned item a "*", and each line ends with the identifier.
+			tree: each item with its kind and identifier, the items of a folder below
+			it.
 
 			A broken account is described rather than refused: an item whose parent
 			is missing is shown at the top, and an identifier that repeats keeps its
@@ -118,32 +106,25 @@ func newTree(env *cliutil.Env) *cobra.Command {
 					return fmt.Errorf("tree: %s: %w", args[0], err)
 				}
 			}
-			return PrintTree(cmd.OutOrStdout(), cmd.ErrOrStderr(), tree, root, all, cliutil.JSON(cmd))
+			return PrintTree(cmd, env, tree, root, all)
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "include the trash")
 	return cmd
 }
 
-// PrintTree writes the tree below root as text or JSON, and its oddities as
-// notes on errOut.
-func PrintTree(out, errOut io.Writer, tree *domain.Tree, root domain.ItemID, all, asJSON bool) error {
-	if asJSON {
-		return cliutil.WriteJSON(out, cliutil.TreeJSON(tree, root, all))
+// PrintTree writes the tree below root, and its oddities as notes on the
+// error stream.
+func PrintTree(cmd *cobra.Command, env *cliutil.Env, tree *domain.Tree, root domain.ItemID, all bool) error {
+	nodes := cliutil.BuildTree(tree, root, all)
+	errOut := cmd.ErrOrStderr()
+	if nodes.Repeated > 0 {
+		cliutil.Notef(errOut, "%d items repeat an identifier — the first of each is shown", nodes.Repeated)
 	}
-	lines := cliutil.RenderTree(tree, root, all)
-	if lines.Repeated > 0 {
-		cliutil.Notef(errOut, "%d items repeat an identifier — the first of each is shown", lines.Repeated)
+	if nodes.Stranded > 0 {
+		cliutil.Notef(errOut, "%d items name a parent that leads nowhere — shown at the top", nodes.Stranded)
 	}
-	if lines.Stranded > 0 {
-		cliutil.Notef(errOut, "%d items name a parent that leads nowhere — shown at the top", lines.Stranded)
-	}
-	for _, line := range lines.Lines {
-		if _, err := fmt.Fprintln(out, line); err != nil {
-			return err
-		}
-	}
-	return nil
+	return env.Emit(cmd, output.Result{JSON: cliutil.TreeJSON(tree, root, all), Doc: output.Doc{output.Tree{Nodes: nodes.Nodes}}})
 }
 
 func newStat(env *cliutil.Env) *cobra.Command {
@@ -171,12 +152,8 @@ func newStat(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("stat: %w", err)
 			}
-			out := cmd.OutOrStdout()
 			view := statView{ItemView: cliutil.View(tree, it), Files: fileViews(it.Files)}
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, view)
-			}
-			return writeStat(out, view)
+			return env.Emit(cmd, statResult(it, view))
 		},
 	}
 }
@@ -201,45 +178,31 @@ func fileViews(files []domain.File) []fileView {
 	return out
 }
 
-func writeStat(w io.Writer, v statView) error {
-	rows := [][2]string{
-		{"id", v.ID},
-		{"name", v.Name},
-		{"path", v.Path},
-		{"kind", v.Kind},
-		{"size", cliutil.Size(v.Size)},
-		{"modified", dash(v.Modified)},
-		{"created", dash(v.Created)},
-		{"trashed", fmt.Sprint(v.Trashed)},
-		{"pinned", fmt.Sprint(v.Pinned)},
-		{"tags", tagsText(v.Tags)},
-		{"hash", v.Hash},
-	}
-	for _, r := range rows {
-		if _, err := fmt.Fprintf(w, "%-9s %s\n", r[0], r[1]); err != nil {
-			return err
-		}
-	}
+// statResult is the item as a record, then its files as a table.
+func statResult(it domain.Item, v statView) output.Result {
+	name := cliutil.NameCell(it, v.Trashed)
+	name.Text = v.Name
+	tags := output.Text(strings.Join(v.Tags, ","))
+	rec := output.Record{Fields: []output.Field{
+		{Key: "id", Value: output.ID(v.ID)},
+		{Key: "name", Value: name},
+		{Key: "path", Value: output.Path(v.Path)},
+		{Key: "kind", Value: output.Text(v.Kind)},
+		{Key: "size", Value: output.Size(v.Size)},
+		{Key: "modified", Value: output.Time(it.Modified)},
+		{Key: "created", Value: output.Time(it.Created)},
+		{Key: "trashed", Value: output.Bool(v.Trashed)},
+		{Key: "pinned", Value: output.Bool(v.Pinned)},
+		{Key: "tags", Value: tags},
+		{Key: "hash", Value: output.ID(v.Hash)},
+	}}
+	files := output.Table{Columns: []output.Column{
+		{Title: "file", Role: output.RoleName}, {Title: "size", Role: output.RoleSize}, {Title: "hash", Role: output.RoleHash},
+	}}
 	for _, f := range v.Files {
-		if _, err := fmt.Fprintf(w, "file      %s  %s  %s\n", f.Name, cliutil.Size(f.Size), f.Hash); err != nil {
-			return err
-		}
+		files.Rows = append(files.Rows, []output.Cell{output.Text(f.Name), output.Size(f.Size), output.ID(f.Hash)})
 	}
-	return nil
-}
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-func tagsText(tags []string) string {
-	if len(tags) == 0 {
-		return "-"
-	}
-	return fmt.Sprint(tags)
+	return output.Result{JSON: v, Doc: output.Doc{rec, files}}
 }
 
 func newFind(env *cliutil.Env) *cobra.Command {
@@ -254,7 +217,7 @@ func newFind(env *cliutil.Env) *cobra.Command {
 			no pattern every item matches. --text finds the documents whose typed text
 			or highlighted words hold the words given, ignoring case; it reads the
 			pages, so it is slower than the other filters, which it runs after. Each
-			answer is a path and an identifier.
+			answer is a path, a kind and an identifier.
 		`),
 		Example: heredoc.Doc(`
 			rmctl find 'invoice'
@@ -279,16 +242,7 @@ func newFind(env *cliutil.Env) *cobra.Command {
 				}
 				return fmt.Errorf("find: %w", err)
 			}
-			out := cmd.OutOrStdout()
-			if cliutil.JSON(cmd) {
-				return cliutil.WriteJSON(out, cliutil.Views(tree, items))
-			}
-			for _, it := range items {
-				if _, err := fmt.Fprintf(out, "%s  %s\n", tree.Path(it.ID), it.ID); err != nil {
-					return err
-				}
-			}
-			return nil
+			return env.Emit(cmd, findResult(tree, items))
 		},
 	}
 	cmd.Flags().StringArrayVar(&q.Tags, "tag", nil, "carries this tag (repeat for several)")
@@ -297,4 +251,22 @@ func newFind(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().BoolVarP(&q.All, "all", "a", false, "include the trash")
 	cmd.Flags().StringVar(&q.Text, "text", "", "typed or highlighted text holds this, ignoring case")
 	return cmd
+}
+
+// findResult is the items found as paths, kinds and identifiers.
+func findResult(tree *domain.Tree, items []domain.Item) output.Result {
+	t := output.Table{Columns: []output.Column{
+		{Title: "path", Role: output.RolePath},
+		{Title: "kind", Role: output.RoleKind},
+		{Title: "id", Role: output.RoleID},
+		{Title: "pinned", Detail: true},
+		{Title: "trashed", Detail: true},
+	}}
+	for _, it := range items {
+		trashed := tree.IsTrashed(it.ID)
+		path := cliutil.NameCell(it, trashed)
+		path.Kind, path.Text = output.KindPath, tree.Path(it.ID)
+		t.Rows = append(t.Rows, []output.Cell{path, output.Text(string(it.Kind)), output.ID(string(it.ID)), output.Bool(it.Pinned), output.Bool(trashed)})
+	}
+	return output.Result{JSON: cliutil.Views(tree, items), Doc: output.Doc{t}}
 }

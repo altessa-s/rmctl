@@ -200,3 +200,25 @@ func BenchmarkRenderText(b *testing.B) {
 		})
 	}
 }
+
+// text keeps its own --format, which shadows the global one; $RMCTL_FORMAT
+// reaches it only as json, and a table or plain format leaves it text.
+func TestTextKeepsItsOwnFormat(t *testing.T) {
+	t.Parallel()
+	exec := func(env map[string]string, args ...string) clitest.Result {
+		return clitest.Exec(t, (&clitest.Fake{Document: notebook()}).Services(), clitest.Options{Env: env, OutTerminal: true}, Commands, args...)
+	}
+	md := exec(nil, "text", "/Notes", "--format", "markdown")
+	if md.Code != 0 || !strings.HasPrefix(md.Out, "## Page 1") {
+		t.Fatalf("%d %v %q", md.Code, md.Error, md.Out)
+	}
+	if r := exec(map[string]string{"RMCTL_FORMAT": "json"}, "text", "/Notes"); r.Code != 0 || !strings.HasPrefix(r.Out, "{") {
+		t.Fatalf("%q", r.Out)
+	}
+	if r := exec(map[string]string{"RMCTL_FORMAT": "json"}, "text", "/Notes", "--format", "markdown"); r.Out != md.Out {
+		t.Fatalf("its own flag loses to the environment: %q", r.Out)
+	}
+	if r := exec(map[string]string{"RMCTL_FORMAT": "table"}, "text", "/Notes"); r.Code != 0 || !strings.HasPrefix(r.Out, "Page 1") {
+		t.Fatalf("%q", r.Out)
+	}
+}

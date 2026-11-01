@@ -136,7 +136,7 @@ func TestE2E_Reading(t *testing.T) {
 	)
 
 	tree := e.ok("tree")
-	for _, want := range []string{"Books/", "Go [pdf]", "Rust [epub]", "Sketches [notebook]"} {
+	for _, want := range []string{"Books\tfolder\t", "  Go\tpdf\t", "  Rust\tepub\t", "Sketches\tnotebook\t"} {
 		if !strings.Contains(tree, want) {
 			t.Errorf("tree lacks %q:\n%s", want, tree)
 		}
@@ -281,7 +281,7 @@ func TestE2E_Writing(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.ok("mput", upload, "/Inbox", "--yes")
-	if tree := e.ok("tree", "/Inbox"); !strings.Contains(tree, "a") || !strings.Contains(tree, "sub/") || !strings.Contains(tree, "b") {
+	if tree := e.ok("tree", "/Inbox"); !strings.Contains(tree, "a\tpdf") || !strings.Contains(tree, "sub\tfolder") || !strings.Contains(tree, "  b\tpdf") {
 		t.Fatalf("after mput:\n%s", tree)
 	}
 	if _, ok := e.names()["notes.txt"]; ok {

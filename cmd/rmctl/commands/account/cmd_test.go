@@ -30,7 +30,7 @@ func TestCommands(t *testing.T) {
 		{[]string{"register", "abcdefgh", "--replace"}, "Register abcdefgh replace", "registered\n"},
 		{[]string{"logout"}, "Logout", "logged out\n"},
 		{[]string{"logout", "--revoke"}, "Logout revoke", "revoked and logged out\n"},
-		{[]string{"account"}, "Info", "registered  yes\nlevel       connect\nsync scope  sync:fox\nsecrets     keychain\n"},
+		{[]string{"account"}, "Info", "registered\ttrue\nlevel\tconnect\nsync_scope\tsync:fox\nsecrets\tkeychain\n"},
 	}
 	for _, tc := range tests {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestCommands(t *testing.T) {
 func TestAccountUnregistered(t *testing.T) {
 	t.Parallel()
 	r := run(t, &clitest.Fake{}, "account")
-	if r.Out != "registered  no\nlevel       -\nsync scope  -\nsecrets     -\n" {
+	if r.Out != "registered\tfalse\nlevel\t-\nsync_scope\t-\nsecrets\t-\n" {
 		t.Fatalf("%q", r.Out)
 	}
 	r = run(t, &clitest.Fake{AccountInfo: port.AccountInfo{Registered: true, Plan: port.Plan{Level: "connect"}}}, "account", "--json")
@@ -101,4 +101,17 @@ func TestAccountFailsWhenTheTokenStoreFails(t *testing.T) {
 	if r.Code != cliutil.CodeError || !strings.Contains(r.Error.Error(), "token store: the Keychain is locked") || r.Out != "" {
 		t.Fatalf("%d %v %q", r.Code, r.Error, r.Out)
 	}
+}
+
+func TestAccountTable(t *testing.T) {
+	t.Parallel()
+	f := &clitest.Fake{
+		AccountInfo: port.AccountInfo{Registered: true, Plan: port.Plan{Level: "connect", SyncScope: "sync:fox"}},
+		SecretsAt:   port.SecretsStatus{Backend: port.SecretsKeychain},
+	}
+	r := clitest.Exec(t, f.Services(), clitest.Options{OutTerminal: true}, Commands, "account", "--color", "never")
+	if r.Code != 0 {
+		t.Fatal(r.Error)
+	}
+	clitest.Golden(t, "account-table", r.Out)
 }

@@ -1,0 +1,7 @@
+PATH            KIND      ID
+──────────────  ────────  ───────
+/Books/         folder    f-books
+/Books/Novel *  epub      d-novel
+/Books/Paper    pdf       d-paper
+/Notes          notebook  d-notes
+/Old            pdf       d-old

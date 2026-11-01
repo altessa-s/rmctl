@@ -24,6 +24,8 @@ const (
 	FlagJSON    = "json"
 	FlagVerbose = "verbose"
 	FlagYes     = "yes"
+	FlagFormat  = "format"
+	FlagColor   = "color"
 )
 
 // Services are the use cases the command line drives. The command line
@@ -40,13 +42,21 @@ type Services struct {
 	Secrets   port.Secrets
 }
 
-// Streams are the process's standard streams. IsTerminal says whether both
-// the input and the error stream are a terminal: confirmation prompts and
-// progress lines are only for a person.
+// Streams are the process's standard streams and what is known of the
+// terminal. IsTerminal says whether both the input and the error stream are
+// a terminal: confirmation prompts and progress lines are only for a person.
+// OutTerminal says whether the output stream is one, which makes the answer
+// a table; OutColor whether that terminal shows ANSI color; Width is its
+// width in columns, 0 when unknown. Getenv reads the environment; nil is the
+// process's.
 type Streams struct {
-	In         io.Reader
-	Out, Err   io.Writer
-	IsTerminal bool
+	In          io.Reader
+	Out, Err    io.Writer
+	IsTerminal  bool
+	OutTerminal bool
+	OutColor    bool
+	Width       int
+	Getenv      func(string) string
 }
 
 // Factory builds the services for a profile once the flags are parsed. The
@@ -108,12 +118,6 @@ func Profile(cmd *cobra.Command) string {
 	return os.Getenv(ProfileEnv)
 }
 
-// JSON reports --json.
-func JSON(cmd *cobra.Command) bool {
-	on, _ := cmd.Flags().GetBool(FlagJSON) //nolint:errcheck // the flag is persistent on the root
-	return on
-}
-
 // Yes reports --yes.
 func Yes(cmd *cobra.Command) bool {
 	on, _ := cmd.Flags().GetBool(FlagYes) //nolint:errcheck // the flag is persistent on the root
@@ -138,11 +142,19 @@ func Need[T any](cmd *cobra.Command, env *Env, pick func(Services) T) (T, error)
 	return s, nil
 }
 
-// AddPersistentFlags declares the flags every command reads on root.
-func AddPersistentFlags(root *cobra.Command) {
+// AddPersistentFlags declares the flags every command reads on root, and
+// checks the output flags of env before any command runs, so a bad --format
+// is refused before a change is made rather than after.
+func AddPersistentFlags(root *cobra.Command, env *Env) {
 	flags := root.PersistentFlags()
 	flags.StringP(FlagProfile, "P", "", "account profile (or "+ProfileEnv+")")
-	flags.Bool(FlagJSON, false, "print answers as JSON")
+	flags.Bool(FlagJSON, false, "print answers as JSON (the same as --format json)")
+	flags.String(FlagFormat, "", "answer format: table, plain or json (or "+FormatEnv+"; default: table on a terminal, plain otherwise)")
+	flags.String(FlagColor, ColorAuto, "color a table: auto, always or never")
 	flags.BoolP(FlagVerbose, "v", false, "log what happens on standard error")
 	flags.BoolP(FlagYes, "y", false, "confirm a command that changes the library")
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		_, err := env.Output(cmd)
+		return err
+	}
 }

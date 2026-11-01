@@ -5,25 +5,17 @@
 package cliutil
 
 import (
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 )
 
 // WriteJSON writes v as indented JSON and a newline. Field names are the
 // views' snake_case tags, so scripts can rely on them.
-func WriteJSON(w io.Writer, v any) error {
-	if err := json.MarshalWrite(w, v, jsontext.WithIndent("  "), json.Deterministic(true)); err != nil {
-		return err
-	}
-	_, err := io.WriteString(w, "\n")
-	return err
-}
+func WriteJSON(w io.Writer, v any) error { return output.WriteJSON(w, v) }
 
 // ItemView is an item as --json prints it.
 type ItemView struct {
@@ -84,50 +76,67 @@ func Stamp(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// Line is an item the way the tree shows it: the name, "/" for a folder or
-// the kind in brackets, "(trashed)", "*" when pinned, then the identifier.
-func Line(it domain.Item, trashed bool) string {
-	var b strings.Builder
-	b.WriteString(it.Name)
-	if it.Kind.IsFolder() {
-		b.WriteString("/")
-	} else {
-		b.WriteString(" [")
-		b.WriteString(string(it.Kind))
-		b.WriteString("]")
+// Size is a byte count for a person: 512 B, 1.5 KiB, 3.2 MiB.
+func Size(n int64) string { return output.HumanSize(n) }
+
+// ItemColumns are the columns of a list of items: the name and the kind,
+// with long the modification time and the size, then the identifier, and
+// whether the item is pinned or in the trash.
+func ItemColumns(long bool) []output.Column {
+	cols := []output.Column{{Title: "name", Role: output.RoleName}, {Title: "kind", Role: output.RoleKind}}
+	if long {
+		cols = append(cols, output.Column{Title: "modified", Role: output.RoleTime}, output.Column{Title: "size", Role: output.RoleSize})
 	}
-	if trashed {
-		b.WriteString(" (trashed)")
+	return append(cols,
+		output.Column{Title: "id", Role: output.RoleID},
+		output.Column{Title: "pinned", Detail: true},
+		output.Column{Title: "trashed", Detail: true})
+}
+
+// ItemRow is it as a row of [ItemColumns].
+func ItemRow(it domain.Item, trashed, long bool) []output.Cell {
+	row := []output.Cell{NameCell(it, trashed), output.Text(string(it.Kind))}
+	if long {
+		size := output.Size(it.Size)
+		if it.Kind.IsFolder() {
+			size = output.Text("")
+		}
+		row = append(row, output.Time(it.Modified), size)
+	}
+	return append(row, output.ID(string(it.ID)), output.Bool(it.Pinned), output.Bool(trashed))
+}
+
+// NameCell is an item's name, flagged as a folder, pinned or in the trash.
+func NameCell(it domain.Item, trashed bool) output.Cell {
+	return output.Text(it.Name).With(itemFlags(it, trashed))
+}
+
+func itemFlags(it domain.Item, trashed bool) output.Flag {
+	var f output.Flag
+	if it.Kind.IsFolder() {
+		f |= output.Folder
 	}
 	if it.Pinned {
-		b.WriteString(" *")
+		f |= output.Pinned
 	}
-	b.WriteString("  ")
-	b.WriteString(string(it.ID))
-	return b.String()
+	if trashed {
+		f |= output.Trashed
+	}
+	return f
 }
 
-// LongLine is [Line] after the modification time and the size.
-func LongLine(it domain.Item, trashed bool) string {
-	modified := "-"
-	if !it.Modified.IsZero() {
-		modified = it.Modified.UTC().Format("2006-01-02 15:04")
+// Items is the answer listing items: a table of [ItemColumns], and their
+// views as JSON. tree gives the trash state and may be nil.
+func Items(tree *domain.Tree, items []domain.Item, long bool) output.Result {
+	t := output.Table{Columns: ItemColumns(long)}
+	for _, it := range items {
+		trashed := it.TrashedHere()
+		if tree != nil {
+			trashed = tree.IsTrashed(it.ID)
+		}
+		t.Rows = append(t.Rows, ItemRow(it, trashed, long))
 	}
-	return fmt.Sprintf("%-16s %9s  %s", modified, Size(it.Size), Line(it, trashed))
-}
-
-// Size is a byte count for a person: 512 B, 1.5 KiB, 3.2 MiB.
-func Size(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit && exp < 4; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTP"[exp])
+	return output.Result{JSON: Views(tree, items), Doc: output.Doc{t}}
 }
 
 // Notef writes a line of commentary to the error stream.

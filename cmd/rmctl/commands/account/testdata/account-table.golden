@@ -1,0 +1,4 @@
+registered  yes
+level       connect
+sync scope  sync:fox
+secrets     keychain

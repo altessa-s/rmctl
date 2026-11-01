@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -22,7 +23,7 @@ import (
 func parsed(t *testing.T, args ...string) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "x"}
-	AddPersistentFlags(cmd)
+	AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,8 @@ func parsed(t *testing.T, args ...string) *cobra.Command {
 
 func TestFlagsAndNeed(t *testing.T) {
 	t.Parallel()
-	if !JSON(parsed(t, "--json")) || JSON(parsed(t)) || Yes(parsed(t)) {
+	env := NewEnv(Streams{Getenv: func(string) string { return "" }}, Fixed(Services{}))
+	if !env.JSON(parsed(t, "--json")) || env.JSON(parsed(t)) || Yes(parsed(t)) {
 		t.Fatal("flag readers")
 	}
 	cmd := parsed(t)
@@ -77,7 +79,7 @@ func TestConfirmAnswers(t *testing.T) {
 	}
 }
 
-func TestViewsAndLongLine(t *testing.T) {
+func TestViewsAndItemRows(t *testing.T) {
 	t.Parallel()
 	tree := testTree(t)
 	views := Views(tree, tree.Items())
@@ -85,13 +87,17 @@ func TestViewsAndLongLine(t *testing.T) {
 		t.Fatalf("%+v", views)
 	}
 	it, _ := tree.Get("d-paper")
-	if got := LongLine(it, false); !strings.HasPrefix(got, "-                      0 B  Paper [pdf]  d-paper") {
-		t.Fatalf("%q", got)
+	if row := ItemRow(it, false, true); !row[2].Empty() || row[3].Int != 0 || row[4].Text != "d-paper" {
+		t.Fatalf("%+v", row)
 	}
 	meta := mustMeta(t, `{"visibleName":"N","type":"DocumentType","lastModified":"1730000000000","createdTime":"1730000000000"}`)
 	dated := domain.NewItem(domain.Record{ID: "n"}, []domain.File{{Name: "n.pdf", Size: 2048}}, meta, nil)
-	if got := LongLine(dated, false); !strings.HasPrefix(got, time.UnixMilli(1730000000000).UTC().Format("2006-01-02 15:04")+"   2.0 KiB") {
-		t.Fatalf("%q", got)
+	if row := ItemRow(dated, false, true); !row[2].Time.Equal(time.UnixMilli(1730000000000)) || row[3].Int != 2048 {
+		t.Fatalf("%+v", row)
+	}
+	folder, _ := tree.Get("f-books")
+	if row := ItemRow(folder, false, true); !row[3].Empty() || !row[0].Has(output.Folder) {
+		t.Fatalf("a folder has a size: %+v", row)
 	}
 	if v := View(nil, dated); v.Created == "" || v.Modified == "" {
 		t.Fatalf("%+v", v)
@@ -116,10 +122,10 @@ func TestTreeLoopsAndStrays(t *testing.T) {
 		item("t", domain.TypeCollection, "trash"),
 		item("u", domain.TypeDocument, "t"),
 	})
-	lines := RenderTree(tree, domain.RootID, false)
-	joined := strings.Join(lines.Lines, "\n")
-	if lines.Stranded != 2 || strings.Contains(joined, "  t") || !strings.Contains(joined, "Y/  y") {
-		t.Fatalf("%+v", lines)
+	lines := BuildTree(tree, domain.RootID, false)
+	joined := plainTree(t, lines)
+	if lines.Stranded != 2 || strings.Contains(joined, "\tt\n") || !strings.Contains(joined, "Y\tfolder\ty\n") {
+		t.Fatalf("%q %+v", joined, lines)
 	}
 	nodes := TreeJSON(tree, domain.RootID, false)
 	if len(nodes) != 2 || len(nodes[1].Children) != 1 {
@@ -128,8 +134,8 @@ func TestTreeLoopsAndStrays(t *testing.T) {
 	if all := TreeJSON(tree, domain.RootID, true); len(all) != 3 {
 		t.Fatalf("%+v", all)
 	}
-	if all := RenderTree(tree, domain.RootID, true); len(all.Lines) != 5 {
-		t.Fatalf("%+v", all)
+	if all := plainTree(t, BuildTree(tree, domain.RootID, true)); strings.Count(all, "\n") != 5 {
+		t.Fatalf("%q", all)
 	}
 }
 

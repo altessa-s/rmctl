@@ -6,16 +6,17 @@ package cliutil
 
 import (
 	"slices"
-	"strings"
 
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 )
 
-// TreeLines is the library below root as indented lines, with what was odd
-// about it counted: a debugging client is pointed at broken accounts, and
-// each oddity would otherwise end the command rather than describe the tree.
-type TreeLines struct {
-	Lines []string
+// TreeNodes is the library below root as nodes of name, kind and
+// identifier, with what was odd about it counted: a debugging client is
+// pointed at broken accounts, and each oddity would otherwise end the
+// command rather than describe the tree.
+type TreeNodes struct {
+	Nodes []output.Node
 	// Stranded counts items whose parent is missing or that sit in a parent
 	// loop; they are shown at the top level.
 	Stranded int
@@ -29,12 +30,17 @@ type TreeNode struct {
 	Children []TreeNode `json:"children,omitempty"`
 }
 
-// RenderTree lays out the items below root. includeTrashed keeps the trash.
-func RenderTree(tree *domain.Tree, root domain.ItemID, includeTrashed bool) TreeLines {
-	out := TreeLines{Repeated: tree.Repeated}
+// BuildTree lays out the items below root. includeTrashed keeps the trash.
+func BuildTree(tree *domain.Tree, root domain.ItemID, includeTrashed bool) TreeNodes {
+	out := TreeNodes{Repeated: tree.Repeated}
 	seen := map[domain.ItemID]bool{}
-	var walk func(parent domain.ItemID, depth int)
-	walk = func(parent domain.ItemID, depth int) {
+	node := func(it domain.Item) output.Node {
+		trashed := tree.IsTrashed(it.ID)
+		return output.Node{Cells: []output.Cell{NameCell(it, trashed), output.Text(string(it.Kind)).With(output.Muted), output.ID(string(it.ID))}}
+	}
+	var walk func(parent domain.ItemID, depth int) []output.Node
+	walk = func(parent domain.ItemID, depth int) []output.Node {
+		var nodes []output.Node
 		for _, it := range tree.Children(parent, includeTrashed) {
 			if seen[it.ID] {
 				continue
@@ -43,11 +49,13 @@ func RenderTree(tree *domain.Tree, root domain.ItemID, includeTrashed bool) Tree
 			if depth == 0 && tree.Stranded(it) {
 				out.Stranded++
 			}
-			out.Lines = append(out.Lines, strings.Repeat("  ", depth)+Line(it, tree.IsTrashed(it.ID)))
-			walk(it.ID, depth+1)
+			n := node(it)
+			n.Children = walk(it.ID, depth+1)
+			nodes = append(nodes, n)
 		}
+		return nodes
 	}
-	walk(root, 0)
+	out.Nodes = walk(root, 0)
 	if root != domain.RootID {
 		return out
 	}
@@ -58,8 +66,9 @@ func RenderTree(tree *domain.Tree, root domain.ItemID, includeTrashed bool) Tree
 		}
 		seen[it.ID] = true
 		out.Stranded++
-		out.Lines = append(out.Lines, Line(it, tree.IsTrashed(it.ID)))
-		walk(it.ID, 1)
+		n := node(it)
+		n.Children = walk(it.ID, 1)
+		out.Nodes = append(out.Nodes, n)
 	}
 	return out
 }

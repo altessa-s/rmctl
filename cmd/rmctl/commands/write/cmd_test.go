@@ -25,17 +25,17 @@ func TestCommandsWithYes(t *testing.T) {
 		args       []string
 		call, want string
 	}{
-		{[]string{"mkdir", "/Papers/2026", "-p"}, "Mkdir /Papers/2026 parents", "2026/  f-new\n"},
-		{[]string{"put", "a.pdf", "/Papers", "--name", "A", "--tag", "x", "--tag", "y"}, "Put a.pdf /Papers A x,y", "Uploaded [pdf]  d-new\n"},
-		{[]string{"put", "a.pdf"}, "Put a.pdf /", "Uploaded [pdf]  d-new\n"},
-		{[]string{"mv", "d-paper", "/"}, "Move d-paper /", "Paper [pdf]  d-paper\n"},
-		{[]string{"trash", "d-paper", "d-notes"}, "Trash d-paper d-notes", "Paper [pdf]  d-paper\nNotes [notebook]  d-notes\n"},
-		{[]string{"restore", "d-old"}, "Restore d-old", "Old [pdf]  d-old\n"},
-		{[]string{"restore", "d-old", "--to", "/Books"}, "Restore d-old to=/Books", "Old [pdf]  d-old\n"},
-		{[]string{"rm", "f-books"}, "Remove f-books", "Books/  f-books\n"},
-		{[]string{"mput", "dir", "/Papers", "--jobs", "2"}, "Upload dir /Papers", "written 0, skipped 0, deleted 0\n"},
-		{[]string{"mput", "dir", "/Papers", "--incremental"}, "Upload dir /Papers incremental", "written 0, skipped 0, deleted 0\n"},
-		{[]string{"mput", "dir"}, "Upload dir /", "written 0, skipped 0, deleted 0\n"},
+		{[]string{"mkdir", "/Papers/2026", "-p"}, "Mkdir /Papers/2026 parents", "2026\tfolder\tf-new\tfalse\tfalse\n"},
+		{[]string{"put", "a.pdf", "/Papers", "--name", "A", "--tag", "x", "--tag", "y"}, "Put a.pdf /Papers A x,y", "uploaded\tUploaded\tpdf\td-new\t-\ta.pdf\t/Papers\n"},
+		{[]string{"put", "a.pdf"}, "Put a.pdf /", "uploaded\tUploaded\tpdf\td-new\t-\ta.pdf\t/\n"},
+		{[]string{"mv", "d-paper", "/"}, "Move d-paper /", "Paper\tpdf\td-paper\tfalse\tfalse\n"},
+		{[]string{"trash", "d-paper", "d-notes"}, "Trash d-paper d-notes", "Paper\tpdf\td-paper\tfalse\tfalse\nNotes\tnotebook\td-notes\tfalse\tfalse\n"},
+		{[]string{"restore", "d-old"}, "Restore d-old", "Old\tpdf\td-old\tfalse\ttrue\n"},
+		{[]string{"restore", "d-old", "--to", "/Books"}, "Restore d-old to=/Books", "Old\tpdf\td-old\tfalse\ttrue\n"},
+		{[]string{"rm", "f-books"}, "Remove f-books", "Books\tfolder\tf-books\tfalse\tfalse\n"},
+		{[]string{"mput", "dir", "/Papers", "--jobs", "2"}, "Upload dir /Papers", "written\t0\nskipped\t0\ndeleted\t0\n"},
+		{[]string{"mput", "dir", "/Papers", "--incremental"}, "Upload dir /Papers incremental", "written\t0\nskipped\t0\ndeleted\t0\n"},
+		{[]string{"mput", "dir"}, "Upload dir /", "written\t0\nskipped\t0\ndeleted\t0\n"},
 	}
 	for _, tc := range tests {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -172,10 +172,11 @@ func TestRmWithoutALibrary(t *testing.T) {
 
 func TestPrintItemsFailingWriter(t *testing.T) {
 	t.Parallel()
-	cmd := Commands(cliutil.NewEnv(cliutil.Streams{}, cliutil.Fixed(cliutil.Services{})))[0]
-	cliutil.AddPersistentFlags(cmd)
+	env := cliutil.NewEnv(cliutil.Streams{Getenv: func(string) string { return "" }}, cliutil.Fixed(cliutil.Services{}))
+	cmd := Commands(env)[0]
+	cliutil.AddPersistentFlags(cmd, env)
 	cmd.SetOut(failWriter{})
-	if printItems(cmd, clitest.Item(clitest.Spec{ID: "a", Name: "A"})) == nil {
+	if printItems(cmd, env, clitest.Item(clitest.Spec{ID: "a", Name: "A"})) == nil {
 		t.Fatal("a failing writer went unnoticed")
 	}
 }

@@ -5,9 +5,7 @@
 package cliutil
 
 import (
-	"fmt"
-	"io"
-
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -21,12 +19,12 @@ type reportView struct {
 	Deleted int `json:"deleted"`
 }
 
-// PrintReport writes what a recursive transfer did: mget and mput both
-// report this way.
-func PrintReport(out io.Writer, asJSON bool, r port.MirrorReport) error {
-	if asJSON {
-		return WriteJSON(out, reportView(r))
-	}
-	_, err := fmt.Fprintf(out, "written %d, skipped %d, deleted %d\n", r.Written, r.Skipped, r.Deleted)
-	return err
+// Report is what a recursive transfer did, as a record: mget and mput both
+// answer this way.
+func Report(r port.MirrorReport) output.Result {
+	return output.Result{JSON: reportView(r), Doc: output.Doc{output.Record{Fields: []output.Field{
+		{Key: "written", Value: output.Count(r.Written)},
+		{Key: "skipped", Value: output.Count(r.Skipped)},
+		{Key: "deleted", Value: output.Count(r.Deleted)},
+	}}}}
 }

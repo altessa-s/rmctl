@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/output"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -151,8 +152,12 @@ func TestStampAndLines(t *testing.T) {
 		t.Fatal("stamp")
 	}
 	it := domain.NewItem(domain.Record{ID: "f"}, nil, mustMeta(t, `{"visibleName":"F","type":"CollectionType","pinned":true}`), nil)
-	if got := Line(it, true); got != "F/ (trashed) *  f" {
-		t.Fatalf("%q", got)
+	row := ItemRow(it, true, false)
+	if name := row[0]; name.Text != "F" || !name.Has(output.Folder) || !name.Has(output.Pinned) || !name.Has(output.Trashed) {
+		t.Fatalf("%+v", name)
+	}
+	if output.PlainValue(row[2]) != "f" || !row[3].Bool || !row[4].Bool {
+		t.Fatalf("%+v", row)
 	}
 	v := View(nil, it)
 	if v.Path != "" || v.Tags == nil || v.Kind != "folder" {
@@ -278,7 +283,7 @@ func TestConfirm(t *testing.T) {
 	t.Parallel()
 	newCmd := func(yes bool) *cobra.Command {
 		cmd := &cobra.Command{Use: "x"}
-		AddPersistentFlags(cmd)
+		AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
 		args := []string{}
 		if yes {
 			args = append(args, "--yes")
@@ -312,7 +317,7 @@ func TestEnv(t *testing.T) {
 		return Services{}, func() error { closed++; return nil }, nil
 	})
 	cmd := &cobra.Command{Use: "x"}
-	AddPersistentFlags(cmd)
+	AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
 	t.Setenv(ProfileEnv, "work")
 	if err := cmd.ParseFlags([]string{"--verbose"}); err != nil {
 		t.Fatal(err)
@@ -383,7 +388,7 @@ func TestCompleteRemote(t *testing.T) {
 	tree := testTree(t)
 	svc := Services{Browser: treeBrowser{tree: tree}}
 	cmd := &cobra.Command{Use: "x"}
-	AddPersistentFlags(cmd)
+	AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
 	got, dir := CompleteRemote(NewEnv(Streams{}, Fixed(svc)), false)(cmd, nil, "/B")
 	if strings.Join(got, ",") != "/Books/" || dir&cobra.ShellCompDirectiveNoSpace == 0 {
 		t.Fatalf("%q %v", got, dir)
@@ -408,17 +413,27 @@ func (b treeBrowser) Tree(context.Context) (*domain.Tree, error) { return b.tree
 func TestRenderTreeBelowAFolder(t *testing.T) {
 	t.Parallel()
 	tree := testTree(t)
-	lines := RenderTree(tree, "f-books", false)
-	if strings.Join(lines.Lines, "\n") != "Paper [pdf]  d-paper" || lines.Stranded != 0 {
-		t.Fatalf("%+v", lines)
+	lines := BuildTree(tree, "f-books", false)
+	if got := plainTree(t, lines); got != "Paper\tpdf\td-paper\n" || lines.Stranded != 0 {
+		t.Fatalf("%q %+v", got, lines)
 	}
 	if nodes := TreeJSON(tree, "d-paper", false); len(nodes) != 0 || nodes == nil {
 		t.Fatalf("%v", nodes)
 	}
-	all := RenderTree(tree, domain.RootID, true)
-	if !strings.Contains(strings.Join(all.Lines, "\n"), "Old [notebook] (trashed)  d-old") {
-		t.Fatalf("%q", all.Lines)
+	all := BuildTree(tree, domain.RootID, true)
+	if got := plainTree(t, all); !strings.Contains(got, "Old\tnotebook\td-old\n") || !all.Nodes[len(all.Nodes)-1].Cells[0].Has(output.Trashed) {
+		t.Fatalf("%q", got)
 	}
+}
+
+// plainTree is nodes as the plain renderer writes them.
+func plainTree(t *testing.T, nodes TreeNodes) string {
+	t.Helper()
+	var b strings.Builder
+	if err := (output.PlainRenderer{}).Render(&b, output.Result{Doc: output.Doc{output.Tree{Nodes: nodes.Nodes}}}, output.Style{}); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
 }
 
 func BenchmarkMaskJSON(b *testing.B) {

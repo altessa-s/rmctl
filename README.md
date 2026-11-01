@@ -59,7 +59,7 @@ The `.rmdoc` container goes through [rmdoc-go](https://github.com/altessa-s/rmdo
 | What | Behavior |
 |---|---|
 | Export | `export` packs documents into one archive stored the way the tablet writes one: each document's files under their record names, in index order. A folder, or `/`, stands for every document below it that is not in the trash on its own; a document named twice is packed once. Every name is checked before anything is downloaded. The tablet imports one document per archive. |
-| Import | `put file.rmdoc [folder]` adds every document of an archive with its pages, annotations and tags, in one commit; it mixes with PDFs and EPUBs in one `put`. A document whose identifier the library already holds takes a fresh identifier and its files are renamed to it, so the library's document is never touched: rmctl prints `imported <name> (new id <id>, was <old>)`. The `.metadata` is filed under the folder and taken out of the trash; nothing else in it changes. `--dry-run` only opens the archive and lists what it would import. |
+| Import | `put file.rmdoc [folder]` adds every document of an archive with its pages, annotations and tags, in one commit; it mixes with PDFs and EPUBs in one `put`. A document whose identifier the library already holds takes a fresh identifier and its files are renamed to it, so the library's document is never touched: its row of the answer names the identifier it had under `renamed_from`. The `.metadata` is filed under the folder and taken out of the trash; nothing else in it changes. `--dry-run` only opens the archive and lists what it would import. |
 | Offline | `rmdoc <file>` lists an archive's documents, kinds and files, names masked unless `--raw`. `text` and `highlights` read a local archive's pages without the cloud: an argument ending with `.rmdoc` that is a local file is read from it, every document in turn (in JSON, always an array). |
 | Limits | An entry is read only up to 1 GiB, an archive up to 4 GiB; rmdoc-go's own bounds hold the entry count, the names and the expansion ratio. |
 
@@ -78,16 +78,16 @@ pages are new, so its annotations do not survive, and rmctl says so before it re
 | Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--replace] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep` |
-| Other | `version [--full] [--output json]`, `completion bash\|zsh\|fish\|powershell` |
-| Global flags | `--json`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--version` |
+| Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
+| Global flags | `--format table\|plain\|json`, `--json`, `--color auto\|always\|never`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--version` |
 
 Items are named by a path from the top (`/Books/Go.pdf`) or by an identifier or a unique prefix of one (`3f2a`). A name that two items
 share in one folder is ambiguous: the error lists the candidates, and their identifiers resolve them.
 
 ## Behavior
 
-- **Answers go to standard output, everything else to standard error**, so a pipe gets the answer and not the progress. Every reading
-  command takes `--json` for a stable machine-readable shape.
+- **Answers go to standard output, everything else to standard error**, so a pipe gets the answer and not the progress. See
+  [Output](#output) for their formats.
 - **Writing commands ask first.** On a terminal they ask for confirmation; elsewhere they need `--yes`. `rm` says how many items it
   removes, descendants of a folder included. Each change is one new root: when the library moved meanwhile, the change is replayed on the
   new root, up to five times.
@@ -97,6 +97,26 @@ share in one folder is ambiguous: the error lists the candidates, and their iden
   at once.
 - **Tokens are never printed.** The device token is a file with mode 0600 in the profile directory; `rmctl` refuses to read one that
   other users can read. `debug files` masks document names unless `--raw`.
+
+## Output
+
+Every answer comes in one of three formats:
+
+| Format | For | Shape |
+|---|---|---|
+| `table` | a person; the default when standard output is a terminal | Headers over a `─` rule, aligned columns, sizes like `4.1 KiB`, folders as `Name/`, pinned items marked `*`, trees drawn with `├──` and `└──`, records as aligned `key  value` lines. Names are cut with `…` to fit the terminal; nothing else is. |
+| `plain` | `grep`, `cut`, `awk`; the default anywhere else | One line per record, fields separated by one TAB, no header and no color. Raw values: sizes in bytes, times in RFC 3339 UTC, identifiers whole, `true`/`false`, lists joined by commas, `-` for none. A single record is `key<TAB>value` lines, keys as in the JSON; a tree indents two spaces per level; blocks are separated by a blank line. A TAB, line break or backslash inside a value is written `\t`, `\n` or `\\`. |
+| `json` | scripts | The same answers as indented JSON with sorted keys. `watch` writes one object per event, `put` one array at the end. |
+
+`--format` chooses, then `--json` (the same as `--format json`), then `RMCTL_FORMAT`, then the terminal test. `--json` together with
+another `--format` is a usage error. For scripts, `--json` is the stable interface; plain is stable too, but carries less.
+
+A table is colored on a terminal that shows color: headers bold, folders blue, kinds and identifiers dim, items in the trash dim, the pin
+mark yellow. `--color never` or `NO_COLOR` (any value, see [no-color.org](https://no-color.org)) or `TERM=dumb` turns this off,
+`--color always` forces it, also into a pipe. On Windows, color is on only when the console accepts ANSI sequences.
+
+`text` and `highlights` print a document's own text, and keep their own `--format text|markdown|json`, which stands in for the global
+flag on those two commands; `version --output text|json` does the same. Progress and notes stay on standard error in every format.
 
 ## Configuration
 
@@ -110,6 +130,8 @@ share in one folder is ambiguous: the error lists the candidates, and their iden
 | Token backend | `file` | `config.toml`, `RMCTL_SECRETS=file\|keychain` |
 | Configuration file | `<user config dir>/rmctl/config.toml` | `RMCTL_CONFIG_FILE` |
 | Log level | warnings | `--verbose/-v` |
+| Output format | `table` on a terminal, `plain` elsewhere | `--format`, `--json`, `RMCTL_FORMAT=table\|plain\|json` |
+| Color | on a color terminal | `--color`, `NO_COLOR`, `TERM=dumb` |
 
 Profiles keep several accounts apart: each has its own token.
 
@@ -176,7 +198,8 @@ adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So
 **Composition root and command line**
 
 - `internal/wiring` — builds the adapters and hands them to the use cases.
-- `cmd/rmctl` — Cobra commands over the input ports only.
+- `cmd/rmctl` — Cobra commands over the input ports only. Each command describes its answer once, as a JSON view and a document of
+  tables, records and trees; `cmd/rmctl/commands/output` renders it in the chosen format.
 
 **Tests**
 
