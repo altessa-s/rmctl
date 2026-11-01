@@ -5,8 +5,11 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +21,18 @@ import (
 type PageSlot struct {
 	ID       string
 	Original int
+	// From is the identifier a kept page had before a relayout gave it a
+	// new one; "" for a page that is new.
+	From string
+}
+
+// String is the slot for a diagnostic: {id original}, or {id original
+// from} for a kept page with a new identifier.
+func (p PageSlot) String() string {
+	if p.From == "" {
+		return "{" + p.ID + " " + strconv.Itoa(p.Original) + "}"
+	}
+	return "{" + p.ID + " " + strconv.Itoa(p.Original) + " " + p.From + "}"
 }
 
 // noOriginal is the Original of a page with no page of the PDF under it.
@@ -87,15 +102,17 @@ func (p cPageSlot) deleted() bool {
 }
 
 // Relayout is how a document's pages follow a new original of Count pages.
-// Annotations hang on page identifiers, so every page that still has its
-// page of the original keeps its identifier and its place; a page whose
-// original page is gone is dropped; and every page of the new original that
-// no page shows yet gets a new page, appended.
+// Every page that still has its page of the original keeps its place and
+// its annotations under a new identifier — the tablet keeps page previews
+// by identifier, and a page with its old one would show the old original's
+// picture; a page whose original page is gone is dropped; and every page of
+// the new original that no page shows yet gets a new page, appended.
 type Relayout struct {
 	// Count is the new original's page count.
 	Count int
 	// Kept are the pages that stay, in order: those whose original page is
-	// below Count, and those the tablet added with none.
+	// below Count, and those the tablet added with none. Each has a new ID
+	// and its old one in From.
 	Kept []PageSlot
 	// Appended are the new pages, in the original's order.
 	Appended []PageSlot
@@ -104,8 +121,11 @@ type Relayout struct {
 }
 
 // PlanRelayout lays pages out for a new original of count pages; newID
-// names each appended page.
-func PlanRelayout(pages []PageSlot, count int, newID func() string) Relayout {
+// names each kept page anew, in order, then each appended page. It is
+// given the page it names: a kept page as it was, an appended one as its
+// Original alone, so a caller can give the same page the same identifier
+// on every plan.
+func PlanRelayout(pages []PageSlot, count int, newID func(from PageSlot) string) Relayout {
 	r := Relayout{Count: count}
 	shown := make([]bool, count)
 	for _, p := range pages {
@@ -116,11 +136,11 @@ func PlanRelayout(pages []PageSlot, count int, newID func() string) Relayout {
 		if p.Original >= 0 {
 			shown[p.Original] = true
 		}
-		r.Kept = append(r.Kept, p)
+		r.Kept = append(r.Kept, PageSlot{ID: newID(p), Original: p.Original, From: p.ID})
 	}
 	for i, ok := range shown {
 		if !ok {
-			r.Appended = append(r.Appended, PageSlot{ID: newID(), Original: i})
+			r.Appended = append(r.Appended, PageSlot{ID: newID(PageSlot{Original: i}), Original: i})
 		}
 	}
 	return r
@@ -129,6 +149,15 @@ func PlanRelayout(pages []PageSlot, count int, newID func() string) Relayout {
 // Pages are the document's pages after the relayout, in order.
 func (r Relayout) Pages() []PageSlot {
 	return append(slices.Clone(r.Kept), r.Appended...)
+}
+
+// Renamed maps each kept page's old identifier to its new one.
+func (r Relayout) Renamed() map[string]string {
+	m := make(map[string]string, len(r.Kept))
+	for _, p := range r.Kept {
+		m[p.From] = p.ID
+	}
+	return m
 }
 
 // newPageStamp is the CRDT timestamp of a page entry rmctl adds.
@@ -173,12 +202,73 @@ func RelaidContent(content []byte, r Relayout, size int64, current string) ([]by
 	} else {
 		errs = append(errs, set("pages", ids), set("redirectionPageMap", redirect))
 	}
+	if tags, ok := top["pageTags"]; ok {
+		top["pageTags"] = withoutPages(tags, r.Dropped)
+	}
 	for _, err := range errs {
 		if err != nil {
 			return nil, err
 		}
 	}
-	return json.Marshal(top, json.Deterministic(true))
+	out, err := json.Marshal(top, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	return renameStrings(out, r.Renamed())
+}
+
+// withoutPages is a pageTags list without the tags of the dropped pages; a
+// value that is not a list of objects is kept as it is.
+func withoutPages(raw jsontext.Value, dropped []PageSlot) jsontext.Value {
+	var tags []map[string]jsontext.Value
+	if json.Unmarshal(raw, &tags) != nil {
+		return raw
+	}
+	gone := map[string]bool{}
+	for _, p := range dropped {
+		gone[p.ID] = true
+	}
+	tags = slices.DeleteFunc(tags, func(t map[string]jsontext.Value) bool {
+		var id string
+		return json.Unmarshal(t["pageId"], &id) == nil && gone[id]
+	})
+	out, err := json.Marshal(tags, json.Deterministic(true))
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// renameStrings rewrites every string of a JSON document — value or object
+// key — that is exactly an old page identifier of renamed into the new one,
+// so every reference to a kept page follows it: the page lists, the last
+// opened page, the page of each page tag, and whatever field rmctl does not
+// know. Page identifiers are UUIDs, which no other string of a .content is.
+func renameStrings(data []byte, renamed map[string]string) ([]byte, error) {
+	if len(renamed) == 0 {
+		return data, nil
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(data))
+	var buf bytes.Buffer
+	enc := jsontext.NewEncoder(&buf)
+	for {
+		tok, err := dec.ReadToken()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, MalformedFile("content", err.Error())
+		}
+		if tok.Kind() == '"' {
+			if to, ok := renamed[tok.String()]; ok {
+				tok = jsontext.String(to)
+			}
+		}
+		if err := enc.WriteToken(tok); err != nil {
+			return nil, err
+		}
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // relaidCPages rewrites a cPages object for r: the dropped entries go, the
@@ -277,7 +367,7 @@ func RelaidPagedata(old []byte, before []PageSlot, r Relayout) []byte {
 	}
 	var b strings.Builder
 	for _, p := range r.Pages() {
-		t, ok := line[p.ID]
+		t, ok := line[p.From]
 		if !ok {
 			t = DefaultTemplate
 		}
@@ -287,20 +377,49 @@ func RelaidPagedata(old []byte, before []PageSlot, r Relayout) []byte {
 	return []byte(b.String())
 }
 
+// pageFileNames are the names of the files of page in document doc: its
+// .rm, its old-style highlights (both annotations), its per-page metadata
+// and its old text conversion.
+func pageFileNames(doc ItemID, page string) (annotations, other []string) {
+	d := string(doc)
+	return []string{d + "/" + page + ".rm", d + ".highlights/" + page + ".json"},
+		[]string{d + "/" + page + "-metadata.json", d + ".textconversion/" + page + ".json"}
+}
+
+// allPageFileNames are every name pageFileNames gives, annotations first.
+func allPageFileNames(doc ItemID, page string) []string {
+	notes, other := pageFileNames(doc, page)
+	return slices.Concat(notes, other)
+}
+
 // PageFiles are the files of document doc that belong to page: its .rm,
-// its per-page metadata and its old-style highlights. Annotations are the
-// .rm and the highlights.
+// its old-style highlights, its per-page metadata and its old text
+// conversion. Annotations are the .rm and the highlights.
 func PageFiles(doc ItemID, page string, files []File) (all, annotations []File) {
+	notes, other := pageFileNames(doc, page)
 	for _, f := range files {
-		switch f.Name {
-		case string(doc) + "/" + page + ".rm", string(doc) + ".highlights/" + page + ".json":
+		switch {
+		case slices.Contains(notes, f.Name):
 			all = append(all, f)
 			annotations = append(annotations, f)
-		case string(doc) + "/" + page + "-metadata.json":
+		case slices.Contains(other, f.Name):
 			all = append(all, f)
 		}
 	}
 	return all, annotations
+}
+
+// RenamedPageFile is f filed under the new identifier of its page, when f
+// is one of the files of a page renamed maps; the blob, its hash and its
+// size stay as they are.
+func RenamedPageFile(doc ItemID, f File, renamed map[string]string) (File, bool) {
+	for old, page := range renamed {
+		if i := slices.Index(allPageFileNames(doc, old), f.Name); i >= 0 {
+			f.Name = allPageFileNames(doc, page)[i]
+			return f, true
+		}
+	}
+	return f, false
 }
 
 // IsThumbnail reports whether f is a cached page image of document doc: the

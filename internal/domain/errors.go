@@ -47,6 +47,11 @@ var (
 	ErrAnnotationsDropped = errors.New("the new PDF has fewer pages, and pages it no longer has carry annotations; pass --drop-annotations to drop them")
 	// ErrNoSuchPage means a page number is beyond a document's pages.
 	ErrNoSuchPage = errors.New("no such page")
+	// ErrFolderTags means tags were asked of a folder: the tablet tags
+	// documents and their pages, and a folder's .content holds no tags.
+	ErrFolderTags = errors.New("a folder takes no tags; tag the documents in it")
+	// ErrSlashInName means a name holds a slash, which no path could reach.
+	ErrSlashInName = errors.New("a name cannot hold a slash: no path would reach it")
 )
 
 // AmbiguousError means a path or an identifier prefix names several items.

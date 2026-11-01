@@ -134,6 +134,10 @@ type ContentPlan struct {
 	Kept, Appended, Dropped int
 	// Annotated counts the kept pages that carry annotations, which stay.
 	Annotated int
+	// IDMap maps each kept page's identifier to the new one it takes, so
+	// the tablet draws its preview from the new PDF; its annotations go
+	// with it.
+	IDMap map[string]string
 	// Lost are the dropped pages that carry annotations.
 	Lost []AnnotatedPage
 }
@@ -155,6 +159,13 @@ type Writer interface {
 	// Move moves src into the folder dst, or renames it when dst names no
 	// folder and its parent exists.
 	Move(ctx context.Context, src, dst string) (domain.Item, error)
+	// Rename renames an item where it is; mv moves it.
+	Rename(ctx context.Context, query, name string) (Edited, error)
+	// Pin sets the pinned flag of items; one already so is left alone.
+	Pin(ctx context.Context, queries []string, on bool) ([]Edited, error)
+	// Tag adds the tags add to documents and takes the tags remove off
+	// them; a document already so is left alone. Folders take no tags.
+	Tag(ctx context.Context, queries []string, add, remove []string) ([]Edited, error)
 	Trash(ctx context.Context, queries []string) ([]domain.Item, error)
 	// Restore takes items out of the trash into the folder dest; "" is the
 	// top level.
@@ -171,6 +182,13 @@ type Writer interface {
 	PlanImport(ctx context.Context, local, dest string) ([]ImportedDocument, error)
 	// Upload sends every PDF and EPUB below dir into the folder dest.
 	Upload(ctx context.Context, dir, dest string, opts UploadOptions) (MirrorReport, error)
+}
+
+// Edited is an item after an edit, and whether the edit changed it: an
+// edit that would change nothing is reported, not committed.
+type Edited struct {
+	Item    domain.Item
+	Changed bool
 }
 
 // UploadOptions shape a recursive upload.

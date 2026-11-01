@@ -7,12 +7,35 @@ package write
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
+
+// pageIDs names the pages of a content upload, the same page the same way
+// on every plan of it: a kept page by its old identifier, an appended one
+// by the page of the PDF it shows. A replay after a conflict lays the pages
+// out again and gives them the identifiers the plan announced.
+type pageIDs struct {
+	ids  port.IDs
+	seen map[string]string
+}
+
+func (p *pageIDs) name(from domain.PageSlot) string {
+	key := "kept:" + from.ID
+	if from.ID == "" {
+		key = "pdf:" + strconv.Itoa(from.Original)
+	}
+	if id, ok := p.seen[key]; ok {
+		return id
+	}
+	id := string(p.ids.NewID())
+	p.seen[key] = id
+	return id
+}
 
 // relaid is a document laid out for a new PDF: its pages before, the
 // relayout, the .content it had, and the plan that describes them.
@@ -38,7 +61,8 @@ func (s *Service) putContent(ctx context.Context, tree *domain.Tree, parent doma
 	if old.Kind != domain.KindPDF && old.Kind != domain.KindAnnotatedPDF {
 		return domain.Item{}, fmt.Errorf("%s is %s: %w", name, old.Kind, domain.ErrNotPDFDocument)
 	}
-	r, err := s.relay(ctx, old, up)
+	names := &pageIDs{ids: s.ids, seen: map[string]string{}}
+	r, err := s.relay(ctx, old, up, names)
 	if err != nil {
 		return domain.Item{}, err
 	}
@@ -70,7 +94,7 @@ func (s *Service) putContent(ctx context.Context, tree *domain.Tree, parent doma
 		}
 		// The pages are laid out again on a replay: the document may have
 		// changed on the tablet meanwhile.
-		again, rerr := s.relay(ctx, cur, up)
+		again, rerr := s.relay(ctx, cur, up, names)
 		if rerr == nil {
 			rerr = checkRelay(up, again, opts)
 		}
@@ -91,8 +115,9 @@ func (s *Service) putContent(ctx context.Context, tree *domain.Tree, parent doma
 	return result, nil
 }
 
-// relay lays doc's pages out for up and describes the plan.
-func (s *Service) relay(ctx context.Context, doc domain.Item, up upload) (relaid, error) {
+// relay lays doc's pages out for up, naming them with names, and describes
+// the plan.
+func (s *Service) relay(ctx context.Context, doc domain.Item, up upload, names *pageIDs) (relaid, error) {
 	f, ok := doc.File("content")
 	if !ok {
 		return relaid{}, domain.MalformedFile("content", "missing from "+string(doc.ID))
@@ -105,7 +130,7 @@ func (s *Service) relay(ctx context.Context, doc domain.Item, up upload) (relaid
 	if err != nil {
 		return relaid{}, err
 	}
-	layout := domain.PlanRelayout(before, up.pages, func() string { return string(s.ids.NewID()) })
+	layout := domain.PlanRelayout(before, up.pages, names.name)
 	plan := port.ContentPlan{
 		Document: doc, OldPages: len(before), NewPages: len(layout.Pages()),
 		OldOriginal: domain.ContentOriginalPages(content), NewOriginal: up.pages,
@@ -115,8 +140,9 @@ func (s *Service) relay(ctx context.Context, doc domain.Item, up upload) (relaid
 	for i, p := range before {
 		number[p.ID] = i + 1
 	}
+	plan.IDMap = layout.Renamed()
 	for _, p := range layout.Kept {
-		if _, notes := domain.PageFiles(doc.ID, p.ID, doc.Files); len(notes) > 0 {
+		if _, notes := domain.PageFiles(doc.ID, p.From, doc.Files); len(notes) > 0 {
 			plan.Annotated++
 		}
 	}
@@ -187,12 +213,16 @@ func (s *Service) relaidFiles(ctx context.Context, cur domain.Item, original dom
 			gone[f.Name] = true
 		}
 	}
+	// A kept page's files are filed under its new identifier: the same
+	// blobs, so nothing is uploaded again; only the index names them anew.
+	renamed := r.layout.Renamed()
 	files := []domain.File{original}
 	for _, f := range cur.Files {
 		switch {
 		case gone[f.Name], domain.IsThumbnail(cur.ID, f):
 		case f.Name == id+".pdf", f.Name == id+".content", f.Name == id+".metadata", f.Name == id+".pagedata":
 		default:
+			f, _ = domain.RenamedPageFile(cur.ID, f, renamed)
 			files = append(files, f)
 		}
 	}

@@ -24,7 +24,10 @@ func annotated(t *testing.T, f fixture) domain.Item {
 	f.c.Add(porttest.Doc{
 		ID: "d9aaaaaa", Name: "Annotated", Parent: "f1aaaaaa", Ext: "pdf", Pinned: true, Tags: []string{"keep"},
 		Pages: [][]byte{[]byte("ink on page one"), []byte("ink on page two")},
-		Extra: []domain.File{f.c.Put("d9aaaaaa.thumbnails/p1.png", []byte("old picture"))},
+		Extra: []domain.File{
+			f.c.Put("d9aaaaaa.thumbnails/p1.png", []byte("old picture")),
+			f.c.Put("d9aaaaaa.highlights/p2.json", []byte(`{"highlights":[]}`)),
+		},
 	})
 	it, ok := tree(t, f).Get("d9aaaaaa")
 	if !ok {
@@ -95,26 +98,41 @@ func TestContentOnlySameAndMorePages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.OldPages != 2 || plan.NewPages != 2 || plan.Kept != 2 || plan.Appended != 0 || plan.Dropped != 0 || plan.Annotated != 2 {
+	if plan.OldPages != 2 || plan.NewPages != 2 || plan.Kept != 2 || plan.Appended != 0 || plan.Dropped != 0 || plan.Annotated != 2 ||
+		len(plan.IDMap) != 2 {
 		t.Fatalf("%+v", plan)
 	}
 	if it.ID != before.ID || it.Name != "Annotated" || it.Parent != "f1aaaaaa" || !it.Pinned || !slices.Equal(it.Tags, []string{"keep"}) {
 		t.Fatalf("%+v", it)
 	}
-	// The ink is the very same blobs; the thumbnail is gone; the PDF is new.
-	for _, file := range it.Files {
-		if strings.HasSuffix(file.Name, ".rm") && ink[file.Name] != file.Hash {
-			t.Fatalf("%s changed", file.Name)
-		}
+	// Every kept page has a new identifier, and its ink and highlights are
+	// the very same blobs under it; the thumbnail is gone; the PDF is new.
+	c := contentOf(t, f, it)
+	pages, _ := c["pages"].([]any)
+	if len(pages) != 2 {
+		t.Fatalf("%v", c)
 	}
-	if !slices.Equal(names(it), []string{".content", ".metadata", ".pagedata", ".pdf", "/p1.rm", "/p2.rm"}) {
+	p1, p2 := pages[0].(string), pages[1].(string)
+	if p1 == "p1" || p2 == "p2" || plan.IDMap["p1"] != p1 || plan.IDMap["p2"] != p2 {
+		t.Fatalf("the pages kept their identifiers: %v %v", pages, plan.IDMap)
+	}
+	hashes := map[string]string{}
+	for _, file := range it.Files {
+		hashes[file.Name] = file.Hash
+	}
+	if hashes["d9aaaaaa/"+p1+".rm"] != ink["d9aaaaaa/p1.rm"] || hashes["d9aaaaaa/"+p2+".rm"] != ink["d9aaaaaa/p2.rm"] ||
+		hashes["d9aaaaaa.highlights/"+p2+".json"] != highlights(before) {
+		t.Fatalf("the annotations did not follow their pages: %v", hashes)
+	}
+	want := []string{".content", ".highlights/" + p2 + ".json", ".metadata", ".pagedata", ".pdf", "/" + p1 + ".rm", "/" + p2 + ".rm"}
+	slices.Sort(want)
+	if !slices.Equal(names(it), want) {
 		t.Fatalf("%v", names(it))
 	}
 	if blobOf(t, f, it, "d9aaaaaa.pdf") != "%PDF of 2 pages" {
 		t.Fatal("the PDF was not replaced")
 	}
-	c := contentOf(t, f, it)
-	if fmt.Sprint(c["pages"]) != "[p1 p2]" || c["sizeInBytes"] != "15" || fmt.Sprint(c["tags"]) != fmt.Sprint(contentOf(t, f, before)["tags"]) {
+	if c["sizeInBytes"] != "15" || fmt.Sprint(c["tags"]) != fmt.Sprint(contentOf(t, f, before)["tags"]) {
 		t.Fatalf("%v", c)
 	}
 	if meta := metadata(t, f, it.ID); meta["visibleName"] != "Annotated" || meta["pinned"] != true || meta["parent"] != "f1aaaaaa" {
@@ -127,8 +145,8 @@ func TestContentOnlySameAndMorePages(t *testing.T) {
 		t.Fatalf("%+v %v", plan, err)
 	}
 	c = contentOf(t, f, it)
-	pages, _ := c["pages"].([]any)
-	if len(pages) != 4 || pages[0] != "p1" || pages[1] != "p2" || fmt.Sprint(c["redirectionPageMap"]) != "[0 1 2 3]" ||
+	pages, _ = c["pages"].([]any)
+	if len(pages) != 4 || pages[0] != plan.IDMap[p1] || pages[1] != plan.IDMap[p2] || fmt.Sprint(c["redirectionPageMap"]) != "[0 1 2 3]" ||
 		c["pageCount"] != float64(4) || c["originalPageCount"] != float64(4) {
 		t.Fatalf("%v", c)
 	}
@@ -148,20 +166,22 @@ func TestContentOnlyFewerPages(t *testing.T) {
 	annotated(t, f)
 	before := len(f.c.Records())
 	_, plan, err := putContent(t, f, newPDF(f, 1), port.PutOptions{})
-	if !errors.Is(err, domain.ErrAnnotationsDropped) || !strings.Contains(err.Error(), "page 2 (p2, 1 annotation files)") {
+	if !errors.Is(err, domain.ErrAnnotationsDropped) || !strings.Contains(err.Error(), "page 2 (p2, 2 annotation files)") {
 		t.Fatal(err)
 	}
-	if len(plan.Lost) != 1 || plan.Lost[0] != (port.AnnotatedPage{Number: 2, ID: "p2", Files: 1}) || plan.Dropped != 1 {
+	if len(plan.Lost) != 1 || plan.Lost[0] != (port.AnnotatedPage{Number: 2, ID: "p2", Files: 2}) || plan.Dropped != 1 {
 		t.Fatalf("%+v", plan)
 	}
 	if got, _ := tree(t, f).Get("d9aaaaaa"); len(got.Files) == 0 || len(f.c.Records()) != before {
 		t.Fatal("a refused upload changed the library")
 	}
-	it, _, err := putContent(t, f, newPDF(f, 1), port.PutOptions{DropAnnotations: true})
+	it, plan, err := putContent(t, f, newPDF(f, 1), port.PutOptions{DropAnnotations: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(names(it), []string{".content", ".metadata", ".pagedata", ".pdf", "/p1.rm"}) || fmt.Sprint(contentOf(t, f, it)["pages"]) != "[p1]" {
+	p1 := plan.IDMap["p1"]
+	if !slices.Equal(names(it), []string{".content", ".metadata", ".pagedata", ".pdf", "/" + p1 + ".rm"}) ||
+		fmt.Sprint(contentOf(t, f, it)["pages"]) != "["+p1+"]" {
 		t.Fatalf("%v", names(it))
 	}
 }
@@ -232,5 +252,36 @@ func TestCurrentPage(t *testing.T) {
 	}
 	if _, err := f.s.Put(t.Context(), "in/Three.pdf", "/", port.PutOptions{CurrentPage: -1}, nil); !errors.Is(err, domain.ErrNoSuchPage) {
 		t.Fatal(err)
+	}
+}
+
+func highlights(it domain.Item) string {
+	for _, f := range it.Files {
+		if strings.Contains(f.Name, ".highlights/") {
+			return f.Hash
+		}
+	}
+	return ""
+}
+
+// A conflict replays the change, and the pages take the identifiers the
+// plan announced, not new ones.
+func TestContentOnlyReplayKeepsTheAnnouncedIDs(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	annotated(t, f)
+	f.c.Conflicts = 1
+	it, plan, err := putContent(t, f, newPDF(f, 3), port.PutOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, _ := contentOf(t, f, it)["pages"].([]any)
+	if len(pages) != 3 || pages[0] != plan.IDMap["p1"] || pages[1] != plan.IDMap["p2"] {
+		t.Fatalf("%v %v", pages, plan.IDMap)
+	}
+	for _, file := range it.Files {
+		if strings.Contains(file.Name, "/p1.") || strings.Contains(file.Name, "/p2.") {
+			t.Fatalf("%s is filed under an old identifier", file.Name)
+		}
 	}
 }

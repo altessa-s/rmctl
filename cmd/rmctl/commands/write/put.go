@@ -207,7 +207,8 @@ func newPut(env *cliutil.Env) *cobra.Command {
 
 			--content-only replaces only the PDF of the PDF document of the same name in
 			the folder and keeps its annotations, tags and settings: pages keep their
-			identifiers, extra pages of the new PDF are appended, and pages the new PDF
+			places and annotations under new identifiers (so the tablet draws their
+			previews anew), extra pages of the new PDF are appended, and pages the new PDF
 			no longer has are dropped, which is refused when they carry annotations
 			unless --drop-annotations. It takes one PDF and asks first; --dry-run
 			prints the plan. --current-page N opens a PDF on page N.
@@ -567,6 +568,8 @@ type contentPlanView struct {
 	Dropped     int                 `json:"dropped"`
 	Annotated   int                 `json:"annotated_kept"`
 	Lost        []annotatedPageView `json:"annotated_dropped"`
+	// IDMap maps each kept page's old identifier to its new one.
+	IDMap map[string]string `json:"id_map"`
 }
 
 type annotatedPageView struct {
@@ -579,6 +582,10 @@ func planView(p port.ContentPlan) contentPlanView {
 	v := contentPlanView{
 		OldPages: p.OldPages, NewPages: p.NewPages, OldOriginal: p.OldOriginal, NewOriginal: p.NewOriginal,
 		Kept: p.Kept, Appended: p.Appended, Dropped: p.Dropped, Annotated: p.Annotated, Lost: []annotatedPageView{},
+		IDMap: p.IDMap,
+	}
+	if v.IDMap == nil {
+		v.IDMap = map[string]string{}
 	}
 	for _, l := range p.Lost {
 		v.Lost = append(v.Lost, annotatedPageView{Page: l.Number, ID: l.ID, Files: l.Files})
@@ -594,6 +601,9 @@ func notePlan(w io.Writer, p port.ContentPlan, dry bool) {
 	}
 	cliutil.Notef(w, "%s: %d pages (a PDF of %d) become %d (a PDF of %d): %s %d, append %d, drop %d; annotations stay on %d pages",
 		p.Document.Name, p.OldPages, p.OldOriginal, p.NewPages, p.NewOriginal, verb, p.Kept, p.Appended, p.Dropped, p.Annotated)
+	if p.Kept > 0 {
+		cliutil.Notef(w, "  the %d kept pages take new identifiers, so the tablet draws their previews from the new PDF; their annotations go with them", p.Kept)
+	}
 	for _, l := range p.Lost {
 		cliutil.Notef(w, "  page %d (%s) is dropped with %d annotation files", l.Number, l.ID, l.Files)
 	}

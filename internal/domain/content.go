@@ -7,6 +7,7 @@ package domain
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -235,6 +236,45 @@ func ReplacedContent(old, fresh []byte) []byte {
 	out, err := json.Marshal(next, json.Deterministic(true))
 	if err != nil {
 		return fresh
+	}
+	return out
+}
+
+// ContentWithTags is content with its tags set to tags, and every other
+// field as it was, unknown ones included. A .content that does not decode
+// as an object is an error: there is nothing to keep it beside.
+func ContentWithTags(content []byte, tags []Tag) ([]byte, error) {
+	var top map[string]jsontext.Value
+	if err := json.Unmarshal(content, &top); err != nil || top == nil {
+		return nil, MalformedFile("content", "not an object")
+	}
+	if tags == nil {
+		tags = []Tag{}
+	}
+	data, err := json.Marshal(tags)
+	if err != nil {
+		return nil, err
+	}
+	top["tags"] = data
+	return json.Marshal(top, json.Deterministic(true))
+}
+
+// WithoutTags is tags without the names drop, in order.
+func WithoutTags(tags []Tag, drop []string) []Tag {
+	out := make([]Tag, 0, len(tags))
+	for _, t := range tags {
+		if !slices.Contains(drop, t.Name) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// TagNames are the names of tags, in order.
+func TagNames(tags []Tag) []string {
+	out := make([]string, len(tags))
+	for i, t := range tags {
+		out[i] = t.Name
 	}
 	return out
 }

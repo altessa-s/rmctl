@@ -42,22 +42,20 @@ func (e *e2e) jsonBlob(hash string) map[string]any {
 	return m
 }
 
-// changed are the names whose hash differs between two file lists, or that
-// only one has.
-func changed(before, after map[string]string) []string {
-	var out []string
-	for name := range maps.Keys(before) {
-		if after[name] != before[name] {
-			out = append(out, name)
-		}
+// contentOnly runs put --content-only --yes --json with args and returns
+// the id_map of its plan.
+func (e *e2e) contentOnly(file string, args ...string) map[string]string {
+	e.t.Helper()
+	out := e.ok(append([]string{"put", file, "--content-only", "--yes", "--json"}, args...)...)
+	var results []struct {
+		Plan struct {
+			IDMap map[string]string `json:"id_map"`
+		} `json:"content_plan"`
 	}
-	for name := range maps.Keys(after) {
-		if _, ok := before[name]; !ok {
-			out = append(out, name)
-		}
+	if err := json.Unmarshal([]byte(out), &results); err != nil || len(results) != 1 {
+		e.t.Fatalf("%v %s", err, out)
 	}
-	slices.Sort(out)
-	return slices.Compact(out)
+	return results[0].Plan.IDMap
 }
 
 // put --content-only swaps the PDF and keeps every page's ink: the .rm
@@ -75,19 +73,22 @@ func TestE2E_PutContentOnly(t *testing.T) {
 	if code, _, errOut := e.rmctl("put", four, "--content-only", "--current-page", "9", "--yes"); code != 1 || !strings.Contains(errOut, "no such page") {
 		t.Fatalf("a page beyond: exit %d %q", code, errOut)
 	}
-	out := e.ok("put", four, "--content-only", "--current-page", "4", "--yes")
-	if !strings.HasPrefix(out, "replaced content\tPaper\tannotated-pdf\t"+id) {
-		t.Fatalf("%q", out)
-	}
+	idMap := e.contentOnly(four, "--current-page", "4")
 	after := e.files(id)
-	want := []string{id + ".content", id + ".metadata", id + ".pagedata", id + ".pdf"}
-	if got := changed(before, after); !slices.Equal(got, want) {
-		t.Fatalf("changed %v", got)
+	old := []string{"page-0", "page-1", "page-2"}
+	if len(idMap) != 3 {
+		t.Fatalf("id_map %v", idMap)
 	}
-	for p := range 3 {
-		name := id + "/page-" + string(rune('0'+p)) + ".rm"
-		if after[name] == "" || after[name] != before[name] {
-			t.Fatalf("%s: %q → %q", name, before[name], after[name])
+	// Every page has a new identifier; nothing is filed under an old one;
+	// the ink is the very same blobs under the new names.
+	for _, p := range old {
+		for name := range after {
+			if strings.Contains(name, p) {
+				t.Fatalf("%s is filed under the old page %s", name, p)
+			}
+		}
+		if got := after[id+"/"+idMap[p]+".rm"]; got == "" || got != before[id+"/"+p+".rm"] {
+			t.Fatalf("%s → %s: %q, was %q", p, idMap[p], got, before[id+"/"+p+".rm"])
 		}
 	}
 	if pdf, _ := e.cloud.Blob(after[id+".pdf"]); string(pdf) != string(clouddouble.MakePDF(4)) {
@@ -95,9 +96,15 @@ func TestE2E_PutContentOnly(t *testing.T) {
 	}
 	content := e.jsonBlob(after[id+".content"])
 	pages, _ := content["pages"].([]any)
-	if len(pages) != 4 || pages[0] != "page-0" || pages[2] != "page-2" || content["originalPageCount"] != float64(4) ||
+	if len(pages) != 4 || pages[0] != idMap["page-0"] || pages[1] != idMap["page-1"] || pages[2] != idMap["page-2"] ||
+		slices.Contains(old, pages[3].(string)) || content["originalPageCount"] != float64(4) ||
 		fmt.Sprint(content["tags"]) != "[map[name:keep timestamp:1.7356896e+12]]" {
 		t.Fatalf("%v", content)
+	}
+	for _, p := range old {
+		if strings.Contains(fmt.Sprint(content), p) {
+			t.Fatalf("the .content still names %s: %v", p, content)
+		}
 	}
 	meta := e.jsonBlob(after[id+".metadata"])
 	if meta["lastOpenedPage"] != float64(3) || meta["pinned"] != true || meta["visibleName"] != "Paper" {
@@ -108,7 +115,7 @@ func TestE2E_PutContentOnly(t *testing.T) {
 	// nothing; a dry run says the same; --drop-annotations drops it.
 	two := localPDF(t, "Paper.pdf", 2)
 	code, _, errOut := e.rmctl("put", two, "--content-only", "--yes")
-	if code != 1 || !strings.Contains(errOut, "page 3 (page-2, 1 annotation files)") || !strings.Contains(errOut, "--drop-annotations") {
+	if code != 1 || !strings.Contains(errOut, "page 3 ("+idMap["page-2"]+", 1 annotation files)") || !strings.Contains(errOut, "--drop-annotations") {
 		t.Fatalf("exit %d %q", code, errOut)
 	}
 	if code, _, _ := e.rmctl("put", two, "--content-only", "--dry-run"); code != 1 {
@@ -121,10 +128,11 @@ func TestE2E_PutContentOnly(t *testing.T) {
 	if !strings.Contains(plan, `"dropped": 2`) || !strings.Contains(plan, `"annotated_dropped": [`) || !maps.Equal(e.files(id), after) {
 		t.Fatalf("%s", plan)
 	}
-	e.ok("put", two, "--content-only", "--drop-annotations", "--yes")
+	second := e.contentOnly(two, "--drop-annotations")
 	final := e.files(id)
-	if _, ok := final[id+"/page-2.rm"]; ok || final[id+"/page-0.rm"] != before[id+"/page-0.rm"] || final[id+"/page-1.rm"] != before[id+"/page-1.rm"] {
-		t.Fatalf("%v", final)
+	if len(final) != 6 || final[id+"/"+second[idMap["page-0"]]+".rm"] != before[id+"/page-0.rm"] ||
+		final[id+"/"+second[idMap["page-1"]]+".rm"] != before[id+"/page-1.rm"] {
+		t.Fatalf("%v %v", second, final)
 	}
 
 	// No document of the name, an EPUB, flags that exclude each other.

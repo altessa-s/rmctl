@@ -15,9 +15,9 @@ import (
 	"github.com/altessa-s/rmctl/internal/domain"
 )
 
-func newIDs(prefix string) func() string {
+func newIDs(prefix string) func(domain.PageSlot) string {
 	n := 0
-	return func() string {
+	return func(domain.PageSlot) string {
 		n++
 		return fmt.Sprintf("%s%d", prefix, n)
 	}
@@ -82,9 +82,9 @@ func TestPlanRelayout(t *testing.T) {
 		count                   int
 		kept, appended, dropped string
 	}{
-		{3, "[{a 0} {b 1} {ins -1} {c 2}]", "[]", "[]"},
-		{5, "[{a 0} {b 1} {ins -1} {c 2}]", "[{n1 3} {n2 4}]", "[]"},
-		{2, "[{a 0} {b 1} {ins -1}]", "[]", "[{c 2}]"},
+		{3, "[{n1 0 a} {n2 1 b} {n3 -1 ins} {n4 2 c}]", "[]", "[]"},
+		{5, "[{n1 0 a} {n2 1 b} {n3 -1 ins} {n4 2 c}]", "[{n5 3} {n6 4}]", "[]"},
+		{2, "[{n1 0 a} {n2 1 b} {n3 -1 ins}]", "[]", "[{c 2}]"},
 	}
 	for _, tc := range tests {
 		r := domain.PlanRelayout(pages, tc.count, newIDs("n"))
@@ -97,7 +97,7 @@ func TestPlanRelayout(t *testing.T) {
 	}
 	// An original page no page shows yet gets a page too.
 	r := domain.PlanRelayout([]domain.PageSlot{{ID: "a", Original: 1}}, 3, newIDs("n"))
-	if fmt.Sprint(r.Appended) != "[{n1 0} {n2 2}]" {
+	if fmt.Sprint(r.Appended) != "[{n2 0} {n3 2}]" || fmt.Sprint(r.Renamed()) != "map[a:n1]" {
 		t.Fatalf("%v", r.Appended)
 	}
 }
@@ -118,7 +118,7 @@ func TestRelaidContentPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := decode(t, out)
-	if fmt.Sprint(m["pages"]) != "[a b ins c n1 n2]" || fmt.Sprint(m["redirectionPageMap"]) != "[0 1 -1 2 3 4]" ||
+	if fmt.Sprint(m["pages"]) != "[n1 n2 n3 n4 n5 n6]" || fmt.Sprint(m["redirectionPageMap"]) != "[0 1 -1 2 3 4]" ||
 		m["pageCount"] != float64(6) || m["originalPageCount"] != float64(5) || m["sizeInBytes"] != "4096" {
 		t.Fatalf("the layout: %v", m)
 	}
@@ -129,7 +129,7 @@ func TestRelaidContentPages(t *testing.T) {
 	}
 	fewer := domain.PlanRelayout(pages, 2, newIDs("n"))
 	out, _ = domain.RelaidContent([]byte(v1Content), fewer, 1, "")
-	if m := decode(t, out); fmt.Sprint(m["pages"]) != "[a b ins]" || fmt.Sprint(m["redirectionPageMap"]) != "[0 1 -1]" || m["pageCount"] != float64(3) {
+	if m := decode(t, out); fmt.Sprint(m["pages"]) != "[n1 n2 n3]" || fmt.Sprint(m["redirectionPageMap"]) != "[0 1 -1]" || m["pageCount"] != float64(3) {
 		t.Fatalf("fewer: %v", m)
 	}
 	if _, err := domain.RelaidContent([]byte("[]"), more, 1, ""); err == nil {
@@ -150,11 +150,11 @@ func TestRelaidContentCPages(t *testing.T) {
 		t.Fatal("a pages list was added beside cPages")
 	}
 	got, err := domain.ContentPages(out)
-	if err != nil || fmt.Sprint(got) != "[{a 0} {b 1} {ins -1} {c 2} {n1 3} {n2 4}]" {
+	if err != nil || fmt.Sprint(got) != "[{n1 0} {n2 1} {n3 -1} {n4 2} {n5 3} {n6 4}]" {
 		t.Fatalf("%v %v", got, err)
 	}
 	cp := m["cPages"].(map[string]any)
-	if fmt.Sprint(cp["original"]) != "map[timestamp:1:3 value:5]" || fmt.Sprint(cp["lastOpened"]) != "map[timestamp:1:9 value:c]" ||
+	if fmt.Sprint(cp["original"]) != "map[timestamp:1:3 value:5]" || fmt.Sprint(cp["lastOpened"]) != "map[timestamp:1:9 value:n4]" ||
 		fmt.Sprint(cp["uuids"]) != "[map[first:u second:1]]" || m["pageCount"] != float64(6) || m["originalPageCount"] != float64(5) {
 		t.Fatalf("%v", m)
 	}
@@ -166,12 +166,12 @@ func TestRelaidContentCPages(t *testing.T) {
 	// becomes the first page; --current-page names its own.
 	fewer := domain.PlanRelayout(pages, 2, newIDs("n"))
 	out, _ = domain.RelaidContent([]byte(v2Content), fewer, 9, "")
-	if got, _ := domain.ContentPages(out); fmt.Sprint(got) != "[{a 0} {b 1} {ins -1}]" ||
-		fmt.Sprint(decode(t, out)["cPages"].(map[string]any)["lastOpened"]) != "map[timestamp:1:9 value:a]" {
+	if got, _ := domain.ContentPages(out); fmt.Sprint(got) != "[{n1 0} {n2 1} {n3 -1}]" ||
+		fmt.Sprint(decode(t, out)["cPages"].(map[string]any)["lastOpened"]) != "map[timestamp:1:9 value:n1]" {
 		t.Fatalf("%s", out)
 	}
-	out, _ = domain.RelaidContent([]byte(v2Content), fewer, 9, "b")
-	if fmt.Sprint(decode(t, out)["cPages"].(map[string]any)["lastOpened"]) != "map[timestamp:1:9 value:b]" {
+	out, _ = domain.RelaidContent([]byte(v2Content), fewer, 9, "n2")
+	if fmt.Sprint(decode(t, out)["cPages"].(map[string]any)["lastOpened"]) != "map[timestamp:1:9 value:n2]" {
 		t.Fatalf("%s", out)
 	}
 	for _, bad := range []string{`{"cPages":[]}`, `{"cPages":{"pages":{}}}`} {
@@ -228,5 +228,59 @@ func TestRelayoutErrorsAreMalformed(t *testing.T) {
 	_, err := domain.ContentPages([]byte("{"))
 	if _, ok := errors.AsType[*domain.MalformedFileError](err); !ok {
 		t.Fatal(err)
+	}
+}
+
+// Every reference to a kept page follows it to its new identifier: the page
+// tags, a field rmctl has no name for, an object keyed by a page; the tags
+// of a dropped page go; nothing else changes.
+func TestRelaidContentRenamesEveryReference(t *testing.T) {
+	t.Parallel()
+	const a, b, c = "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000002", "cccccccc-0000-4000-8000-000000000003"
+	content := `{"pages":["` + a + `","` + b + `","` + c + `"],"redirectionPageMap":[0,1,2],"fileType":"pdf",` +
+		`"pageTags":[{"name":"star","pageId":"` + a + `","timestamp":1},{"name":"gone","pageId":"` + c + `","timestamp":2}],` +
+		`"futureNotes":{"` + b + `":{"pinnedTo":"` + a + `"}},"title":"` + a + ` is not a title"}`
+	pages, err := domain.ContentPages([]byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := domain.PlanRelayout(pages, 2, newIDs("new-"))
+	out, err := domain.RelaidContent([]byte(content), r, 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, old := range []string{`"` + a + `"`, `"` + b + `"`, `"` + c + `"`} {
+		if strings.Contains(string(out), old) {
+			t.Fatalf("%s is still referenced: %s", old, out)
+		}
+	}
+	m := decode(t, out)
+	if fmt.Sprint(m["pages"]) != "[new-1 new-2]" || fmt.Sprint(m["pageTags"]) != "[map[name:star pageId:new-1 timestamp:1]]" ||
+		fmt.Sprint(m["futureNotes"]) != "map[new-2:map[pinnedTo:new-1]]" || m["title"] != a+" is not a title" {
+		t.Fatalf("%v", m)
+	}
+	if fmt.Sprint(r.Renamed()) != "map["+a+":new-1 "+b+":new-2]" {
+		t.Fatalf("%v", r.Renamed())
+	}
+}
+
+func TestRenamedPageFile(t *testing.T) {
+	t.Parallel()
+	renamed := map[string]string{"old": "new"}
+	for name, want := range map[string]string{
+		"d/old.rm":                  "d/new.rm",
+		"d/old-metadata.json":       "d/new-metadata.json",
+		"d.highlights/old.json":     "d.highlights/new.json",
+		"d.textconversion/old.json": "d.textconversion/new.json",
+	} {
+		f, ok := domain.RenamedPageFile("d", domain.File{Name: name, Hash: "h", Size: 3}, renamed)
+		if !ok || f.Name != want || f.Hash != "h" || f.Size != 3 {
+			t.Errorf("%s: %+v %v", name, f, ok)
+		}
+	}
+	for _, name := range []string{"d/other.rm", "e/old.rm", "d.pdf", "d/old.rm.bak"} {
+		if f, ok := domain.RenamedPageFile("d", domain.File{Name: name}, renamed); ok || f.Name != name {
+			t.Errorf("%s was renamed to %s", name, f.Name)
+		}
 	}
 }

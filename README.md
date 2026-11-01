@@ -82,10 +82,12 @@ everything else: its identifier, name, folder, tags, pin, cover and reading sett
 metadata, old-style highlights), and every `.content` and `.metadata` field rmctl does not have to change. It changes the PDF, the
 `.content`'s page list (`pages` and `redirectionPageMap`, or `cPages.pages` and `cPages.original`), `pageCount`, `originalPageCount` and
 `sizeInBytes`, the `.pagedata` (one template line per page), and the `.metadata`'s `lastModified` and `version`; cached thumbnails are
-dropped for the tablet to draw again. Annotations hang on page identifiers, which map to the PDF's pages:
+dropped for the tablet to draw again. Every kept page also takes a new page identifier, with its annotation files filed under it
+unchanged, because the tablet keeps page previews by identifier and would otherwise go on showing the old PDF; the plan's `id_map` lists
+old → new. Annotations hang on page identifiers, which map to the PDF's pages:
 
-- **The same number of pages, or more:** every page keeps its identifier and its place; each extra page of the new PDF gets a new page,
-  appended. Pages added on the tablet with no PDF page under them stay where they are.
+- **The same number of pages, or more:** every page keeps its place and its annotations (under its new identifier); each extra page of
+  the new PDF gets a new page, appended. Pages added on the tablet with no PDF page under them stay where they are.
 - **Fewer pages:** the pages whose PDF page is gone are dropped. If any of them carries annotations, the upload is refused (exit 1),
   naming each such page and its annotation files; `--drop-annotations` drops them deliberately. Without annotations they simply go.
 - **No document of that name, or one that is not a PDF:** refused. With nothing to keep, `--content-only` is most likely a mistake; upload
