@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  # Releases an existing tag with this workflow, without moving the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The existing tag to release, such as v1.0.0"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,8 +21,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets: inherit
 
-  # The page commands link rmlines-lib and rmmarks-lib, C23 libraries
-  # built through cgo, so every binary is built natively on its own runner;
+  # The page and archive commands link rmlines-lib and rmdoc-lib, C23
+  # libraries built through cgo, so every binary is built natively on its own runner;
   # goreleaser only publishes them and writes the changelog.
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
@@ -32,19 +39,38 @@ jobs:
           - { runner: macos-latest, goos: darwin, goarch: arm64, cc: clang }
           # Apple's clang builds the other architecture with -arch.
           - { runner: macos-latest, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
-          # MSVC is not a C23 compiler; the runner's LLVM clang is.
-          - { runner: windows-latest, goos: windows, goarch: amd64, cc: clang }
+          # cgo on Windows links through a MinGW-w64 toolchain; MSYS2's
+          # UCRT64 GCC is current enough for C23.
+          - { runner: windows-latest, goos: windows, goarch: amd64, cc: gcc }
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up MinGW-w64
+        if: matrix.goos == 'windows'
+        id: msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW-w64 first on the path
+        if: matrix.goos == 'windows'
+        shell: bash
+        env:
+          MSYS2: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          printf '%s\\ucrt64\\bin\n' "$MSYS2" >> "$GITHUB_PATH"
 
       - name: Build
         shell: bash
@@ -53,14 +79,16 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CC: ${{ matrix.cc }}
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          ext=""; [[ "$GOOS" == windows ]] && ext=".exe"
+          ext=""; static=""
+          # A Windows binary carries the MinGW runtime instead of needing its DLLs.
+          [[ "$GOOS" == windows ]] && { ext=".exe"; static="-linkmode=external -extldflags=-static"; }
           pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
           mkdir -p out artifacts
-          go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w \
+          go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w ${static} \
             -X ${pkg}.Name=rmctl -X ${pkg}.Version=${VERSION#v} \
-            -X ${pkg}.Commit=${GITHUB_SHA::7} -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+            -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
           cp LICENSE README.md out/
           name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"
           if [[ "$GOOS" == windows ]]; then
@@ -75,7 +103,14 @@ jobs:
         shell: bash
         run: |
           bin=./out/rmctl
-          [[ "${{ matrix.goos }}" == windows ]] && bin=./out/rmctl.exe
+          if [[ "${{ matrix.goos }}" == windows ]]; then
+            bin=./out/rmctl.exe
+            # Only system DLLs: nothing from the MinGW toolchain.
+            if objdump -p "$bin" | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
+              echo "::error::rmctl.exe depends on MinGW runtime DLLs"
+              exit 1
+            fi
+          fi
           "$bin" version --full
 
       - name: Upload the archive
@@ -96,6 +131,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Download the archives
@@ -117,6 +153,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}
 
   # The formula in altessa-s/homebrew-tap installs the archives this release
   # published. GITHUB_TOKEN cannot push to another repository, so the job
@@ -125,7 +162,7 @@ jobs:
   homebrew:
     name: Homebrew formula
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -137,6 +174,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download the archives
         if: env.TAP_TOKEN != ''
@@ -149,7 +187,7 @@ jobs:
       - name: Write the formula
         if: env.TAP_TOKEN != ''
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           (cd artifacts && sha256sum rmctl_* > checksums.txt)
           .github/scripts/homebrew-formula.sh "${VERSION#v}" artifacts/checksums.txt > rmctl.rb
@@ -158,7 +196,7 @@ jobs:
       - name: Push it to the tap
         if: env.TAP_TOKEN != ''
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/altessa-s/homebrew-tap.git" tap
           mkdir -p tap/Formula

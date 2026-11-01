@@ -45,4 +45,4 @@ release:
   extra_files:
     - glob: ./artifacts/rmctl_*
     - glob: ./artifacts/checksums.txt
-  name_template: "{{.Tag}}"
+  name_template: "rmctl {{.Version}}"
