@@ -22,9 +22,8 @@ type reportView struct {
 // Report is what a recursive transfer did, as a record: mget and mput both
 // answer this way.
 func Report(r port.MirrorReport) output.Result {
-	return output.Result{JSON: reportView(r), Doc: output.Doc{output.Record{Fields: []output.Field{
-		{Key: "written", Value: output.Count(r.Written)},
-		{Key: "skipped", Value: output.Count(r.Skipped)},
-		{Key: "deleted", Value: output.Count(r.Deleted)},
-	}}}}
+	return output.Fields(reportView(r),
+		output.Field{Key: "written", Value: output.Count(r.Written)},
+		output.Field{Key: "skipped", Value: output.Count(r.Skipped)},
+		output.Field{Key: "deleted", Value: output.Count(r.Deleted)})
 }

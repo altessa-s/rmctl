@@ -108,11 +108,10 @@ func newExport(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return cliutil.PagesErr("export", err)
 			}
-			return env.Emit(cmd, output.Result{JSON: exportView(report), Doc: output.Doc{output.Record{Fields: []output.Field{
-				{Key: "path", Value: output.Path(report.Path)},
-				{Key: "documents", Value: output.Count(report.Documents)},
-				{Key: "files", Value: output.Count(report.Files)},
-			}}}})
+			return env.Emit(cmd, output.Fields(exportView(report),
+				output.Field{Key: "path", Value: output.Path(report.Path)},
+				output.Field{Key: "documents", Value: output.Count(report.Documents)},
+				output.Field{Key: "files", Value: output.Count(report.Files)}))
 		},
 	}
 	cmd.Flags().StringVarP(&dest, "output", "o", "", "archive to write")

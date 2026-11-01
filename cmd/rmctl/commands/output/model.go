@@ -210,6 +210,12 @@ type Result struct {
 	Doc  Doc
 }
 
+// Fields is an answer that is one record: json as the JSON value, and the
+// fields as its only block.
+func Fields(json any, fields ...Field) Result {
+	return Result{JSON: json, Doc: Doc{Record{Fields: fields}}}
+}
+
 // Style is what a renderer knows of where it writes.
 type Style struct {
 	// Color allows ANSI color and attributes.
