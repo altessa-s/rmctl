@@ -108,6 +108,26 @@ JSON answer carries it as `content_plan`. It excludes `--replace`, `--notebook`,
 
 Both read only the library's indexes, so they answer from the cache, `--offline` too.
 
+## Backups
+
+`rmctl backup <dir> [path]` keeps a local copy of the documents below a path (the whole library by default) that the library itself can
+take back:
+
+- **One archive per document.** Each document is written as `<dir>/<id>.rmdoc`, packed as `export` packs one — pages, annotations, tags
+  and all. Documents in the trash stay out unless `--all`. `--jobs N` packs N documents at a time.
+- **A manifest.** `<dir>/manifest.json` records the format version, the profile, the time and the path backed up, and per document its
+  id, name, path, kind, record hash, archive and size. A directory holding another profile's backup is refused unless `--force`.
+- **Incremental.** A document whose record hash the manifest already holds, with its archive there at the recorded size, is skipped
+  without a download; a changed one is written again, and each archive appears only when whole. The manifest is written last.
+- **Documents gone.** The archive of a document the backup no longer covers — deleted, in the trash, or moved out of the path — is moved
+  into `<dir>/removed/`, or deleted with `--prune`. The answer counts the documents, and the archives written, skipped, moved and pruned.
+
+`rmctl backup restore <dir> [--to folder] [--id id]... [--dry-run]` puts a backup back, in one commit: every archive (or those `--id`
+names, by id or unique prefix) is imported into the folder path its manifest records, below `--to` when given, and missing folders are
+created. A document whose id the library still holds comes back as a copy under a new id, as `put` imports an archive; the library's own
+document is not touched. The archives are read before anything is uploaded; it asks first unless `--yes`, and `--dry-run` shows the folders
+and documents it would create. `restore` is the subcommand, so a backup directory that is itself named `restore` is written `./restore`.
+
 ## Running a program on changes
 
 `rmctl watch --exec PROGRAM [-- ARG...]` runs a program whenever the library changes, while it still prints the events:
@@ -139,8 +159,8 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
-| Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
+| Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
 | Global flags | `--format table\|plain\|json`, `--json`, `--color auto\|always\|never`, `--offline`, `--no-cache`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--version` |

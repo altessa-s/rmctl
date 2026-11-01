@@ -152,7 +152,7 @@ func Build(opts Options) (Services, error) {
 	return Services{
 		Account:   account.New(indexcache.NewRegistry(remote, st.profile)),
 		Browser:   browse.New(lib, reader),
-		Fetcher:   fetch.New(lib, st.blobs, files, docs),
+		Fetcher:   fetch.New(lib, st.blobs, files, docs, clk),
 		Writer:    write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk),
 		Watcher:   watch.New(remote),
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),

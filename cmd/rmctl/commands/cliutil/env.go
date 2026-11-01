@@ -149,6 +149,17 @@ func Profile(cmd *cobra.Command) string {
 	return os.Getenv(ProfileEnv)
 }
 
+// DefaultProfile is the profile used when none is named.
+const DefaultProfile = "default"
+
+// ProfileName is [Profile], or DefaultProfile when none is named.
+func ProfileName(cmd *cobra.Command) string {
+	if p := Profile(cmd); p != "" {
+		return p
+	}
+	return DefaultProfile
+}
+
 // Yes reports --yes.
 func Yes(cmd *cobra.Command) bool {
 	on, _ := cmd.Flags().GetBool(FlagYes) //nolint:errcheck // the flag is persistent on the root

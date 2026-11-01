@@ -15,12 +15,13 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// Commands are get, export and mget.
+// Commands are get, export, mget and backup, whose restore subcommand
+// writes the library.
 func Commands(env *cliutil.Env) []*cobra.Command {
 	// They download files the cache does not keep: a TTL may answer their
 	// root, but they need the cloud.
 	read := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessRead) }
-	return []*cobra.Command{read(newGet(env)), read(newExport(env)), read(newMget(env))}
+	return []*cobra.Command{read(newGet(env)), read(newExport(env)), read(newMget(env)), read(newBackup(env))}
 }
 
 func fetcher(cmd *cobra.Command, env *cliutil.Env) (port.Fetcher, error) {

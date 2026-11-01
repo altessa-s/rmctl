@@ -30,12 +30,13 @@ type Service struct {
 	blobs    port.BlobStore
 	files    port.LocalFiles
 	archives port.ArchiveWriter
+	clock    port.Clock
 }
 
 var _ port.Fetcher = (*Service)(nil)
 
 // New returns the fetch use case. A nil dependency panics.
-func New(lib *library.Library, blobs port.BlobStore, files port.LocalFiles, archives port.ArchiveWriter) *Service {
+func New(lib *library.Library, blobs port.BlobStore, files port.LocalFiles, archives port.ArchiveWriter, clk port.Clock) *Service {
 	switch {
 	case lib == nil:
 		panic("fetch: Library is required")
@@ -46,7 +47,10 @@ func New(lib *library.Library, blobs port.BlobStore, files port.LocalFiles, arch
 	case archives == nil:
 		panic("fetch: ArchiveWriter is required")
 	}
-	return &Service{lib: lib, blobs: blobs, files: files, archives: archives}
+	if clk == nil {
+		panic("fetch: Clock is required")
+	}
+	return &Service{lib: lib, blobs: blobs, files: files, archives: archives, clock: clk}
 }
 
 // Get implements port.Fetcher.
@@ -76,7 +80,7 @@ func (s *Service) Get(ctx context.Context, query, dest string, progress port.Pro
 // directory and the archive is written from there, so no file and no
 // archive is held in memory whole; the archive reaches dest only when it is
 // complete.
-func (s *Service) Export(ctx context.Context, queries []string, dest string) (_ port.ExportReport, err error) {
+func (s *Service) Export(ctx context.Context, queries []string, dest string) (port.ExportReport, error) {
 	tree, _, err := s.lib.Load(ctx)
 	if err != nil {
 		return port.ExportReport{}, err
@@ -101,9 +105,24 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (_ 
 	if err != nil {
 		return port.ExportReport{}, err
 	}
+	// An archive in place is reported even when its staging directory
+	// could not be removed.
+	files, err := s.pack(ctx, docs, path)
+	if err != nil && files == 0 {
+		return port.ExportReport{}, err
+	}
+	return port.ExportReport{Path: path, Documents: len(docs), Files: files}, err
+}
+
+// pack writes the files of docs into the archive at path and returns how
+// many it holds, also when only the removal of the staging directory
+// failed. Each file is downloaded to a staging directory and the
+// archive is written from there, so no file and no archive is held in
+// memory whole; the archive reaches path only when it is complete.
+func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n int, err error) {
 	stage, remove, err := s.files.Stage()
 	if err != nil {
-		return port.ExportReport{}, err
+		return 0, err
 	}
 	defer func() {
 		if rerr := remove(); rerr != nil {
@@ -117,14 +136,14 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (_ 
 			local := filepath.Join(stage, strconv.Itoa(len(sources)))
 			derr := s.files.Produce(ctx, local, func(w io.Writer) error { return s.blobs.Download(ctx, f, w, nil) })
 			if derr != nil {
-				return port.ExportReport{}, fmt.Errorf("download %s: %w", f.Name, derr)
+				return 0, fmt.Errorf("download %s: %w", f.Name, derr)
 			}
 			sources = append(sources, port.ArchiveSource{Name: f.Name, Path: local})
 		}
 	}
 	archive := filepath.Join(stage, "archive.rmdoc")
 	if err = s.archives.WriteArchive(archive, sources); err != nil {
-		return port.ExportReport{}, err
+		return 0, err
 	}
 	err = s.files.Produce(ctx, path, func(w io.Writer) error {
 		r, oerr := s.files.Open(archive)
@@ -136,9 +155,9 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (_ 
 		return cerr
 	})
 	if err != nil {
-		return port.ExportReport{}, err
+		return 0, err
 	}
-	return port.ExportReport{Path: path, Documents: len(docs), Files: len(sources)}, nil
+	return len(sources), nil
 }
 
 // Mirror implements port.Fetcher.

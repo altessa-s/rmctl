@@ -246,3 +246,25 @@ func TestStatThroughALockedDirectory(t *testing.T) {
 		t.Fatal("stat through a locked directory succeeded")
 	}
 }
+
+func TestRename(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	if err := os.WriteFile(from, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fs := localfs.New()
+	if err := fs.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(to); string(got) != "x" || slices.Contains(entries(t, dir), "a") {
+		t.Fatalf("%q %v", got, entries(t, dir))
+	}
+	if err := fs.Rename(from, to); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%v", err)
+	}
+}

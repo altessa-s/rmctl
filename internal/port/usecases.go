@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/domain"
 )
@@ -83,6 +84,34 @@ type Fetcher interface {
 	Export(ctx context.Context, queries []string, dest string) (ExportReport, error)
 	// Mirror downloads a folder's documents into dir, keeping the tree.
 	Mirror(ctx context.Context, query, dir string, opts MirrorOptions) (MirrorReport, error)
+	// Backup writes every document below the folder query names into dir,
+	// one .rmdoc archive each, with a manifest. A document whose record
+	// hash the manifest already holds is skipped; one the backup no longer
+	// covers has its archive moved to dir/removed, or deleted with Prune.
+	Backup(ctx context.Context, dir, query string, opts BackupOptions) (BackupReport, error)
+}
+
+// BackupOptions shape a backup.
+type BackupOptions struct {
+	// Profile is the profile the backup is of; a directory backing up
+	// another profile is refused unless Force.
+	Profile string
+	// All takes the documents in the trash too.
+	All bool
+	// Prune deletes the archives of documents the backup no longer covers
+	// instead of moving them to the removed directory.
+	Prune bool
+	Force bool
+	Jobs  int
+}
+
+// BackupReport is what a backup did: Documents is how many the manifest
+// lists, Written and Skipped how many archives were written or found
+// unchanged, Moved and Pruned how many archives of documents gone were
+// moved aside or deleted.
+type BackupReport struct {
+	Dir                                        string
+	Documents, Written, Skipped, Moved, Pruned int
 }
 
 // Cover is which page a document shows as its cover.
@@ -188,6 +217,45 @@ type Writer interface {
 	PlanImport(ctx context.Context, local, dest string) ([]ImportedDocument, error)
 	// Upload sends every PDF and EPUB below dir into the folder dest.
 	Upload(ctx context.Context, dir, dest string, opts UploadOptions) (MirrorReport, error)
+	// RestoreBackup imports the archives of a backup directory, in one
+	// commit, each into its folder from the manifest, below opts.To; missing
+	// folders are created. A document whose identifier the library holds
+	// gets a new one, as Import gives it.
+	RestoreBackup(ctx context.Context, dir string, opts RestoreOptions) (RestoreReport, error)
+}
+
+// RestoreOptions shape a restore from a backup.
+type RestoreOptions struct {
+	// To is the folder the manifest's paths are recreated under; "" or "/"
+	// is the top level, which puts every document back where it was.
+	To string
+	// IDs are the documents to restore, each an identifier or a unique
+	// prefix of one; none is every document of the backup.
+	IDs []string
+	// DryRun works out the restore against the current library and
+	// uploads nothing.
+	DryRun bool
+}
+
+// RestoreReport is what a restore did, or would do.
+type RestoreReport struct {
+	// Profile and Created are the backup's.
+	Profile string
+	Created time.Time
+	// Documents are the documents restored, in manifest order.
+	Documents []RestoredDocument
+	// Folders are the paths of the folders created, parents first.
+	Folders []string
+}
+
+// RestoredDocument is one document a restore imported: the item, the
+// identifier it had in the backup, the archive it came from and the
+// folder path it went into.
+type RestoredDocument struct {
+	Item   domain.Item
+	From   domain.ItemID
+	File   string
+	Folder string
 }
 
 // Edited is an item after an edit, and whether the edit changed it: an

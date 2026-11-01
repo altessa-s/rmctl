@@ -31,8 +31,8 @@ var ErrIsDir = errors.New("porttest: path is a directory")
 
 // MemFiles is a file system in memory. Paths are cleaned with filepath.
 // Fail makes the named method (Produce, Stat, Open, ReadHead, ReadTail,
-// MkdirAll, Walk, Remove, Stage) fail; "Unstage" makes the removal Stage returns fail,
-// after it removed everything.
+// MkdirAll, Walk, Remove, Rename, Stage) fail; "Unstage" makes the removal
+// Stage returns fail, after it removed everything.
 type MemFiles struct {
 	mu     sync.Mutex
 	files  map[string][]byte
@@ -191,6 +191,23 @@ func (m *MemFiles) Remove(path string) error {
 		return ErrNoFile
 	}
 	delete(m.files, path)
+	return nil
+}
+
+// Rename implements port.LocalFiles.
+func (m *MemFiles) Rename(from, to string) error {
+	if err := m.fail("Rename"); err != nil {
+		return err
+	}
+	from, to = filepath.Clean(from), filepath.Clean(to)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.files[from]
+	if !ok {
+		return ErrNoFile
+	}
+	delete(m.files, from)
+	m.files[to] = b
 	return nil
 }
 

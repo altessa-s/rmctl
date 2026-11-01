@@ -168,10 +168,7 @@ func (x execFlags) options(cmd *cobra.Command, args []string) (opts execOptions,
 	if x.shell {
 		argv = append([]string{"sh", "-c", x.program, "rmctl-watch"}, args...)
 	}
-	profile := cliutil.Profile(cmd)
-	if profile == "" {
-		profile = "default"
-	}
+	profile := cliutil.ProfileName(cmd)
 	return execOptions{
 		argv: argv, debounce: x.debounce, timeout: x.timeout, grace: execGrace,
 		only: x.only, under: x.under, profile: profile,

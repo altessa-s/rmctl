@@ -32,6 +32,8 @@ type LocalFiles interface {
 	Walk(dir string) ([]string, error)
 	// Remove deletes a file.
 	Remove(path string) error
+	// Rename moves the file from to the path to, replacing a file there.
+	Rename(from, to string) error
 	// Stage makes a private directory for files a use case keeps on disk
 	// for a while, and returns it with the function that removes it and
 	// everything in it.

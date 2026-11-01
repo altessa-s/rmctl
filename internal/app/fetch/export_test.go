@@ -91,7 +91,7 @@ func TestExportTrashedFolderNamedItself(t *testing.T) {
 		porttest.Doc{ID: "d1", Name: "Inside", Parent: "f1", Ext: "pdf"},
 	)
 	files := porttest.NewMemFiles()
-	s := fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files))
+	s := fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files), porttest.NewClock(porttest.Epoch))
 	if r, err := s.Export(t.Context(), []string{"f1"}, "x.rmdoc"); err != nil || r.Documents != 1 {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -128,7 +128,7 @@ func TestExportRefusals(t *testing.T) {
 	}
 	arc := porttest.NewArchiver(files)
 	arc.Fail["WriteArchive"] = errBoom
-	packer := fetch.New(library.New(c, c, c), c, files, arc)
+	packer := fetch.New(library.New(c, c, c), c, files, arc, porttest.NewClock(porttest.Epoch))
 	if _, err := packer.Export(context.Background(), []string{"d1"}, "p.rmdoc"); !errors.Is(err, errBoom) {
 		t.Fatalf("got %v", err)
 	}
@@ -178,7 +178,7 @@ func TestExportStagesAndCleansUp(t *testing.T) {
 			t.Parallel()
 			_, c, files := setup(t)
 			arc := porttest.NewArchiver(files)
-			s := fetch.New(library.New(c, c, c), c, files, arc)
+			s := fetch.New(library.New(c, c, c), c, files, arc, porttest.NewClock(porttest.Epoch))
 			if tc.cloud != "" {
 				c.Fail[tc.cloud] = errBoom
 			}

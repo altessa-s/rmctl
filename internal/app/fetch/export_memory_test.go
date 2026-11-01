@@ -58,7 +58,7 @@ func TestExportKeepsALargeFileOutOfMemory(t *testing.T) {
 	pdf, _ := it.Original()
 	blobs := bigBlobs{Cloud: c, hash: pdf.Hash, data: original}
 	archives := rmdocs.New()
-	s := fetch.New(library.New(c, c, c), blobs, localfs.New(), archives)
+	s := fetch.New(library.New(c, c, c), blobs, localfs.New(), archives, porttest.NewClock(porttest.Epoch))
 	dest := filepath.Join(t.TempDir(), "big.rmdoc")
 
 	var before, after runtime.MemStats

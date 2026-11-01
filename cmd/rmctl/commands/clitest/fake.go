@@ -71,6 +71,10 @@ type Fake struct {
 	Inspected  port.ArchiveReport
 	Local      []port.DocumentText
 	ArchiveErr error
+	// Backed is what Backup answers, with the directory filled in, and
+	// Restored what RestoreBackup answers.
+	Backed   port.BackupReport
+	Restored port.RestoreReport
 
 	mu    sync.Mutex
 	calls []string
@@ -298,7 +302,25 @@ func (f *Fake) Mirror(_ context.Context, query, dir string, o port.MirrorOptions
 	return f.Report, f.record("Mirror", query, dir, opt(o.Incremental, "incremental"), opt(o.Delete, "delete"))
 }
 
+// Backup implements port.Fetcher.
+func (f *Fake) Backup(_ context.Context, dir, query string, o port.BackupOptions) (port.BackupReport, error) {
+	err := f.record("Backup", dir, query, "profile="+o.Profile, opt(o.All, "all"), opt(o.Prune, "prune"),
+		opt(o.Force, "force"), "jobs="+strconv.Itoa(o.Jobs))
+	r := f.Backed
+	r.Dir = dir
+	return r, err
+}
+
 // Writer.
+
+// RestoreBackup implements port.Writer.
+func (f *Fake) RestoreBackup(_ context.Context, dir string, o port.RestoreOptions) (port.RestoreReport, error) {
+	args := append([]string{dir, "to=" + o.To}, o.IDs...)
+	if err := f.record("RestoreBackup", append(args, opt(o.DryRun, "dry-run"))...); err != nil {
+		return port.RestoreReport{}, err
+	}
+	return f.Restored, f.ArchiveErr
+}
 
 func (f *Fake) Mkdir(_ context.Context, p string, parents bool) (domain.Item, error) {
 	return Item(Spec{ID: "f-new", Name: p[strings.LastIndex(p, "/")+1:], Kind: domain.KindFolder}),

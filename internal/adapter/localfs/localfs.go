@@ -149,6 +149,9 @@ func (FS) Walk(dir string) ([]string, error) {
 // Remove deletes the file at path.
 func (FS) Remove(path string) error { return os.Remove(path) }
 
+// Rename moves the file at from to to, replacing a file there.
+func (FS) Rename(from, to string) error { return os.Rename(from, to) }
+
 // Stage makes a directory of mode 0700 in the system's temporary
 // directory. remove deletes it with everything in it.
 func (FS) Stage() (dir string, remove func() error, err error) {

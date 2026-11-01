@@ -300,7 +300,16 @@ func TestMemFiles(t *testing.T) {
 	if rels, _ := m.Walk("a"); !slices.Equal(rels, []string{"f"}) {
 		t.Fatalf("walk %v", rels)
 	}
-	if err := m.Remove(filepath.Join("a", "f")); err != nil {
+	if err := m.Rename(filepath.Join("a", "f"), filepath.Join("a", "g")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.File(filepath.Join("a", "f")); ok {
+		t.Fatal("rename kept the old name")
+	}
+	if err := m.Rename("none", "x"); !errors.Is(err, porttest.ErrNoFile) {
+		t.Fatal(err)
+	}
+	if err := m.Remove(filepath.Join("a", "g")); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Remove("none"); !errors.Is(err, porttest.ErrNoFile) {
@@ -331,7 +340,7 @@ func TestMemFiles(t *testing.T) {
 	if second, remove, err := m.Stage(); err != nil || second == dir || !errors.Is(remove(), errBoom) {
 		t.Fatalf("%s %v", second, err)
 	}
-	for _, method := range []string{"Produce", "Stat", "Open", "ReadHead", "ReadTail", "MkdirAll", "Walk", "Remove", "Stage"} {
+	for _, method := range []string{"Produce", "Stat", "Open", "ReadHead", "ReadTail", "MkdirAll", "Walk", "Remove", "Rename", "Stage"} {
 		m.Fail[method] = errBoom
 	}
 	errs := []error{
@@ -342,6 +351,7 @@ func TestMemFiles(t *testing.T) {
 		m.MkdirAll("y"),
 		func() error { _, err := m.Walk("y"); return err }(),
 		m.Remove("y"),
+		m.Rename("y", "z"),
 		func() error { _, _, err := m.Stage(); return err }(),
 		func() error { _, err := m.Open("y"); return err }(),
 	}
