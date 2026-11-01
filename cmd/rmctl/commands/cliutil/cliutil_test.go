@@ -309,10 +309,10 @@ func TestConfirm(t *testing.T) {
 func TestEnv(t *testing.T) {
 	builds := 0
 	closed := 0
-	env := NewEnv(Streams{}, func(_ context.Context, profile string, verbose bool) (Services, func() error, error) {
+	env := NewEnv(Streams{}, func(_ context.Context, req Request) (Services, func() error, error) {
 		builds++
-		if profile != "work" || !verbose {
-			t.Errorf("profile %q verbose %v", profile, verbose)
+		if req.Profile != "work" || !req.Verbose {
+			t.Errorf("%+v", req)
 		}
 		return Services{}, func() error { closed++; return nil }, nil
 	})

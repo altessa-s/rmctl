@@ -26,6 +26,8 @@ const (
 	FlagYes     = "yes"
 	FlagFormat  = "format"
 	FlagColor   = "color"
+	FlagOffline = "offline"
+	FlagNoCache = "no-cache"
 )
 
 // Services are the use cases the command line drives. The command line
@@ -40,6 +42,10 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Secrets   port.Secrets
+	Cache     port.Cache
+	// Offline says the services never reach the cloud: --offline, or the
+	// profile's configuration.
+	Offline bool
 }
 
 // Streams are the process's standard streams and what is known of the
@@ -59,9 +65,24 @@ type Streams struct {
 	Getenv      func(string) string
 }
 
-// Factory builds the services for a profile once the flags are parsed. The
-// returned close releases what they hold.
-type Factory func(ctx context.Context, profile string, verbose bool) (Services, func() error, error)
+// Request is what the command line asks of the services: the profile, the
+// verbosity, and how the command may use the cache.
+type Request struct {
+	Profile string
+	Verbose bool
+	// Offline is --offline when it was given; nil leaves it to the
+	// profile's configuration.
+	Offline *bool
+	// NoCache is --no-cache.
+	NoCache bool
+	// ReadOnly says the command changes nothing, so a root confirmed within
+	// the profile's TTL may answer it.
+	ReadOnly bool
+}
+
+// Factory builds the services once the flags are parsed. The returned
+// close releases what they hold.
+type Factory func(ctx context.Context, req Request) (Services, func() error, error)
 
 // Env is what every command shares: the streams, the persistent flags and
 // the services, built on first use.
@@ -82,21 +103,31 @@ func NewEnv(streams Streams, factory Factory) *Env {
 
 // Fixed is a factory that always returns svc, for tests and embedding.
 func Fixed(svc Services) Factory {
-	return func(context.Context, string, bool) (Services, func() error, error) {
+	return func(context.Context, Request) (Services, func() error, error) {
 		return svc, func() error { return nil }, nil
 	}
 }
 
-// Services builds the services on first use with the profile and verbosity
-// of cmd's flags.
+// Services builds the services on first use with the profile, verbosity
+// and cache flags of cmd, and refuses a command that needs the cloud when
+// they are offline.
 func (e *Env) Services(cmd *cobra.Command) (Services, error) {
 	if e.built {
 		return e.services, e.err
 	}
 	e.built = true
-	profile := Profile(cmd)
-	verbose, _ := cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
-	e.services, e.closer, e.err = e.factory(cmd.Context(), profile, verbose)
+	access := AccessOf(cmd)
+	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive}
+	req.Verbose, _ = cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
+	req.NoCache, _ = cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // the flag is persistent on the root
+	if f := cmd.Flags().Lookup(FlagOffline); f != nil && f.Changed {
+		on := f.Value.String() == "true"
+		req.Offline = &on
+	}
+	e.services, e.closer, e.err = e.factory(cmd.Context(), req)
+	if e.err == nil && e.services.Offline && access != AccessOffline {
+		e.err = Usagef("%s needs the cloud: run it without --offline (or with --offline=false)", cmd.CommandPath())
+	}
 	return e.services, e.err
 }
 
@@ -153,7 +184,14 @@ func AddPersistentFlags(root *cobra.Command, env *Env) {
 	flags.String(FlagColor, ColorAuto, "color a table: auto, always or never")
 	flags.BoolP(FlagVerbose, "v", false, "log what happens on standard error")
 	flags.BoolP(FlagYes, "y", false, "confirm a command that changes the library")
+	flags.Bool(FlagOffline, false, "read the library from the cache only; never reach the cloud")
+	flags.Bool(FlagNoCache, false, "neither read nor write the cache on disk")
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		offline, _ := cmd.Flags().GetBool(FlagOffline) //nolint:errcheck // declared just above
+		noCache, _ := cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // declared just above
+		if offline && noCache {
+			return Usagef("--offline reads the cache, and --no-cache turns it off")
+		}
 		_, err := env.Output(cmd)
 		return err
 	}

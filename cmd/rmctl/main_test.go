@@ -9,6 +9,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands"
 )
 
 // isolate points the profile and the cache at a temporary directory, so a
@@ -46,7 +48,7 @@ func TestRun(t *testing.T) {
 
 func TestBuild(t *testing.T) {
 	isolate(t)
-	svc, closeFn, err := build(context.Background(), "work", true, &bytes.Buffer{})
+	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Verbose: true}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +62,10 @@ func TestBuild(t *testing.T) {
 	if err != nil || info.Registered {
 		t.Fatalf("a fresh profile is registered: %+v %v", info, err)
 	}
-	if _, _, err := build(context.Background(), "", false, nil); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{}, nil); err == nil {
 		t.Fatal("a nil log writer was accepted")
 	}
-	if _, _, err := build(context.Background(), "../escape", false, &bytes.Buffer{}); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{Profile: "../escape"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("an unsafe profile name was accepted")
 	}
 }

@@ -66,13 +66,13 @@ func TestDropsADamagedFile(t *testing.T) {
 	data := []byte("hello")
 	h := hashOf(data)
 	c.Put(h, data)
-	if err := os.WriteFile(filepath.Join(dir, h), []byte("tampered"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "blobs", h), []byte("tampered"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Get(h); ok {
 		t.Fatal("served a damaged file")
 	}
-	if _, err := os.Stat(filepath.Join(dir, h)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "blobs", h)); !os.IsNotExist(err) {
 		t.Fatalf("the damaged file is still there: %v", err)
 	}
 }
@@ -89,7 +89,7 @@ func TestEvictsTheLeastRecentlyUsed(t *testing.T) {
 		c.Put(h, data)
 		// Distinct access times, oldest first.
 		at := time.Now().Add(time.Duration(i-10) * time.Minute)
-		if err := os.Chtimes(filepath.Join(dir, h), at, at); err != nil {
+		if err := os.Chtimes(filepath.Join(dir, "blobs", h), at, at); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -161,10 +161,10 @@ func TestEvictionIgnoresStrangers(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "blobs")
 	c := blobcache.New(dir, 10, clock.Real(), nil)
-	if err := os.MkdirAll(filepath.Join(dir, hashOf([]byte("a directory"))), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "blobs", hashOf([]byte("a directory"))), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "README"), make([]byte, 100), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "blobs", "README"), make([]byte, 100), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	data := []byte("0123456789")
@@ -172,7 +172,130 @@ func TestEvictionIgnoresStrangers(t *testing.T) {
 	if _, ok := c.Get(hashOf(data)); !ok {
 		t.Fatal("a stranger in the directory evicted a cached file")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "README")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "blobs", "README")); err != nil {
 		t.Fatalf("eviction removed a file it does not own: %v", err)
+	}
+}
+
+func TestSpacesShareTheBudget(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "p")
+	c := blobcache.New(dir, 30, clock.Real(), nil)
+	idx := hashOf([]byte("index"))
+	c.PutEntry(blobcache.SpaceIndexes, idx, []byte("0123456789"))
+	if err := os.Chtimes(filepath.Join(dir, "indexes", idx), time.Unix(1, 0), time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	c.PutEntry(blobcache.SpaceState, "root", make([]byte, 100))
+	blob := []byte("blob-number-0123456789")
+	c.Put(hashOf(blob), blob)
+	if _, ok := c.Entry(blobcache.SpaceIndexes, idx); ok {
+		t.Fatal("the older index survived a blob over the budget")
+	}
+	if _, ok := c.Entry(blobcache.SpaceState, "root"); !ok {
+		t.Fatal("the state was evicted")
+	}
+	bytes, entries := c.Usage()
+	if bytes != int64(len(blob)) || entries["blobs"] != 1 || entries["indexes"] != 0 || entries["state"] != 1 {
+		t.Fatalf("%d %v", bytes, entries)
+	}
+	for _, bad := range [][2]string{{"blobs", "x"}, {"state", "../x"}, {"state", ".hidden"}, {"other", "root"}} {
+		c.PutEntry(bad[0], bad[1], []byte("x"))
+		if _, ok := c.Entry(bad[0], bad[1]); ok {
+			t.Fatalf("%v was used as a name", bad)
+		}
+		c.Drop(bad[0], bad[1])
+	}
+	c.Drop(blobcache.SpaceState, "root")
+	if _, ok := c.Entry(blobcache.SpaceState, "root"); ok {
+		t.Fatal("dropped and still there")
+	}
+	if err := c.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the cleared profile's directory is still there: %v", err)
+	}
+	if c.Dir() != dir || c.Budget() != 30 {
+		t.Fatal("dir or budget")
+	}
+}
+
+func TestRootKeepsProfilesApart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := blobcache.NewRoot(dir, 1<<20, clock.Real(), nil)
+	for _, bad := range []string{"", "..", "../x", "a/b", "A", ".x"} {
+		if _, err := root.Profile(bad); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+	work, _ := root.Profile("work")
+	home, _ := root.Profile("home")
+	data := []byte("work's document")
+	work.Put(hashOf(data), data)
+	if _, ok := home.Get(hashOf(data)); ok {
+		t.Fatal("home read work's blob")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "not-a-cache"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := root.Profiles(); len(got) != 1 || got[0] != "work" || root.Dir() != dir {
+		t.Fatalf("%v", got)
+	}
+	if blobcache.NewRoot(filepath.Join(dir, "missing"), 1, clock.Real(), nil).Profiles() != nil {
+		t.Fatal("profiles in a missing directory")
+	}
+}
+
+// The blobs every profile once shared go: at the top of the directory and
+// in its blobs directory, and nothing else does.
+func TestRemoveLegacy(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	h := hashOf([]byte("old"))
+	for _, p := range []string{filepath.Join(dir, h), filepath.Join(dir, "blobs", h)} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := blobcache.NewRoot(dir, 1<<20, clock.Real(), nil)
+	work, _ := root.Profile("work")
+	work.Put(h, []byte("old"))
+	root.RemoveLegacy()
+	for _, gone := range []string{filepath.Join(dir, h), filepath.Join(dir, "blobs")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s survived: %v", gone, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := work.Get(h); !ok {
+		t.Fatal("a profile's own blob went")
+	}
+	root.RemoveLegacy()
+}
+
+func TestNewRootNeedsItsDependencies(t *testing.T) {
+	t.Parallel()
+	for name, build := range map[string]func(){
+		"directory": func() { blobcache.NewRoot("", 1, clock.Real(), nil) },
+		"clock":     func() { blobcache.NewRoot(t.TempDir(), 1, nil, nil) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("a missing %s did not panic", name)
+				}
+			}()
+			build()
+		}()
 	}
 }

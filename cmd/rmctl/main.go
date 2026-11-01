@@ -60,8 +60,8 @@ func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extr
 			streams.Width = w
 		}
 	}
-	factory := func(ctx context.Context, profile string, verbose bool) (commands.Services, func() error, error) {
-		return build(ctx, profile, verbose, errOut, extra...)
+	factory := func(ctx context.Context, req commands.Request) (commands.Services, func() error, error) {
+		return build(ctx, req, errOut, extra...)
 	}
 	err := commands.Run(ctx, args, streams, factory)
 	if err != nil {

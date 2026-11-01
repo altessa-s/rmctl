@@ -23,7 +23,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Profile != config.DefaultProfile ||
 		cfg.ConfigDir != filepath.Join("/home/u/.config", "rmctl", "default") ||
 		cfg.TokenPath != filepath.Join(cfg.ConfigDir, "token.json") ||
-		cfg.CacheDir != filepath.Join("/home/u/.cache", "rmctl", "blobs") {
+		cfg.CacheDir != filepath.Join("/home/u/.cache", "rmctl") {
 		t.Fatalf("%+v", cfg)
 	}
 	if cfg.Endpoints.SyncHost.Host == "" {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/altessa-s/rmcloud-go"
 )
@@ -43,9 +44,13 @@ type Config struct {
 	Profile string
 	// ConfigDir holds the profile's token file.
 	ConfigDir string
-	// CacheDir holds downloaded files by hash, shared by every profile: the
-	// files are content addressed.
-	CacheDir  string
+	// CacheDir is the cache directory of every profile; each profile's
+	// cache is the subdirectory named after it, and shares nothing.
+	CacheDir string
+	// CacheTTL is how long a confirmed root serves reads without asking the
+	// cloud, and Offline whether --offline is the profile's default.
+	CacheTTL  time.Duration
+	Offline   bool
 	TokenPath string
 	Endpoints rmcloud.Endpoints
 	// ConfigFile is the configuration file read, present or not.
@@ -112,7 +117,7 @@ func LoadFrom(env map[string]string, profileFlag string, dirs BaseDirs, read Rea
 		if dirs.Cache == "" {
 			return Config{}, errors.New("no cache directory: set " + EnvCacheDir)
 		}
-		cacheDir = filepath.Join(dirs.Cache, appDir, "blobs")
+		cacheDir = filepath.Join(dirs.Cache, appDir)
 	}
 	endpoints, err := rmcloud.FromEnvironment(env)
 	if err != nil {
@@ -138,8 +143,14 @@ func LoadFrom(env map[string]string, profileFlag string, dirs BaseDirs, read Rea
 	if err != nil {
 		return Config{}, err
 	}
+	ttl, offline, err := cacheOf(env, file, profile)
+	if err != nil {
+		return Config{}, err
+	}
 	configDir := filepath.Join(configRoot, profile)
 	return Config{
+		CacheTTL:        ttl,
+		Offline:         offline,
 		Profile:         profile,
 		ConfigDir:       configDir,
 		CacheDir:        cacheDir,

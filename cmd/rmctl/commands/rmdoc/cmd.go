@@ -65,7 +65,7 @@ func New(env *cliutil.Env) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "print document names unmasked")
-	return cmd
+	return cliutil.WithAccess(cmd, cliutil.AccessOffline)
 }
 
 func view(r port.ArchiveReport, raw bool) archiveView {

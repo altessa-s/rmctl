@@ -22,7 +22,14 @@ const GroupID = cliutil.GroupRead
 
 // Commands are ls, tree, stat, find, text and highlights.
 func Commands(env *cliutil.Env) []*cobra.Command {
-	return []*cobra.Command{newLs(env), newTree(env), newStat(env), newFind(env), newText(env), newHighlights(env)}
+	// They change nothing and can run from the cache alone; text and
+	// highlights need the pages, which only a local archive or a page the
+	// cache happens to hold give them offline.
+	cmds := []*cobra.Command{newLs(env), newTree(env), newStat(env), newFind(env), newText(env), newHighlights(env)}
+	for _, c := range cmds {
+		cliutil.WithAccess(c, cliutil.AccessOffline)
+	}
+	return cmds
 }
 
 func browser(cmd *cobra.Command, env *cliutil.Env) (port.Browser, error) {

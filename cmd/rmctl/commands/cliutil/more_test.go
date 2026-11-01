@@ -46,11 +46,11 @@ func TestFlagsAndNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	boom := errors.New("boom")
-	failing := func(context.Context, string, bool) (Services, func() error, error) { return Services{}, nil, boom }
+	failing := func(context.Context, Request) (Services, func() error, error) { return Services{}, nil, boom }
 	if _, err := Need(cmd, NewEnv(Streams{}, failing), func(s Services) port.Browser { return s.Browser }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
-	_, closer, _ := Fixed(Services{})(context.Background(), "", false)
+	_, closer, _ := Fixed(Services{})(context.Background(), Request{})
 	if closer() != nil {
 		t.Fatal("fixed closer failed")
 	}

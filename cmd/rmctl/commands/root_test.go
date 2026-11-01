@@ -43,9 +43,9 @@ func TestRunDrivesAServiceAndCloses(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{}
 	closed := false
-	factory := func(_ context.Context, profile string, verbose bool) (Services, func() error, error) {
-		if profile != "work" || !verbose {
-			t.Errorf("profile %q verbose %v", profile, verbose)
+	factory := func(_ context.Context, req Request) (Services, func() error, error) {
+		if req.Profile != "work" || !req.Verbose || !req.ReadOnly {
+			t.Errorf("%+v", req)
 		}
 		return f.Services(), func() error { closed = true; return nil }, nil
 	}
@@ -61,7 +61,7 @@ func TestRunDrivesAServiceAndCloses(t *testing.T) {
 func TestRunReportsACloseFailure(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("close")
-	factory := func(context.Context, string, bool) (Services, func() error, error) {
+	factory := func(context.Context, Request) (Services, func() error, error) {
 		return (&clitest.Fake{}).Services(), func() error { return boom }, nil
 	}
 	s, _, _ := streams()

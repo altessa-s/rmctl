@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -154,6 +155,14 @@ func (c *Cloud) Hits(key string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.hits[key]
+}
+
+// AllHits is a copy of every request count by key, for a test that counts
+// what one command cost.
+func (c *Cloud) AllHits() map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return maps.Clone(c.hits)
 }
 
 // Revoked counts the device-delete calls.

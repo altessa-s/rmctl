@@ -110,3 +110,56 @@ func TestBuildChoosesTheSecretsBackend(t *testing.T) {
 		t.Fatal("an invalid configuration file was accepted")
 	}
 }
+
+func TestBuildCacheModes(t *testing.T) {
+	t.Parallel()
+	on, off := true, false
+	tests := []struct {
+		name     string
+		mutate   func(*wiring.Options)
+		offline  bool
+		disabled bool
+		err      error
+	}{
+		{name: "defaults", mutate: func(*wiring.Options) {}},
+		{name: "offline", mutate: func(o *wiring.Options) { o.Offline = &on }, offline: true},
+		{name: "a TTL for a read", mutate: func(o *wiring.Options) { o.Env["RMCTL_CACHE_TTL"] = "1m"; o.ReadOnly = true }},
+		{name: "no cache", mutate: func(o *wiring.Options) { o.NoCache = true }, disabled: true},
+		{name: "a cache of no bytes", mutate: func(o *wiring.Options) { o.CacheBytes = -1 }, disabled: true},
+		{name: "offline without a cache", mutate: func(o *wiring.Options) { o.Offline = &on; o.NoCache = true }, err: wiring.ErrOfflineNoCache},
+		{name: "the flag overrides the profile", mutate: func(o *wiring.Options) {
+			o.ReadConfig = func(string) ([]byte, bool, error) { return []byte("[cache]\noffline = true\n"), true, nil }
+			o.Offline = &off
+		}},
+		{name: "the profile goes offline", mutate: func(o *wiring.Options) {
+			o.ReadConfig = func(string) ([]byte, bool, error) { return []byte("[cache]\noffline = true\n"), true, nil }
+		}, offline: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := options(t)
+			tc.mutate(&opts)
+			svc, err := wiring.Build(opts)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("%v", err)
+			}
+			if err != nil {
+				return
+			}
+			defer func() { _ = svc.Close() }()
+			report, err := svc.Cache.Status(t.Context(), false)
+			if err != nil || svc.Offline != tc.offline || report.Offline != tc.offline || report.Disabled != tc.disabled ||
+				report.Profile != "default" || len(report.Profiles) != 1 {
+				t.Fatalf("%+v %+v %v", svc.Offline, report, err)
+			}
+			// An offline run reads nothing it was not given: the library is
+			// not in the cache, and the cloud is out of reach.
+			if tc.offline {
+				if _, _, err := svc.Browser.List(t.Context(), "/", false); !errors.Is(err, port.ErrOffline) {
+					t.Fatalf("an offline list: %v", err)
+				}
+			}
+		})
+	}
+}

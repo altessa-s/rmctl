@@ -200,6 +200,14 @@ it may also implement `output.Streamer` to write streamed rows as they come, or 
 plain format's rules are in the package documentation of `cmd/rmctl/commands/output`; change them only with the README's Output section.
 Table output is tested with golden files run as a terminal (`clitest.Options{OutTerminal: true}`, `--color never`).
 
+## The cache and new commands
+
+A command says how it may use the cache with `cliutil.WithAccess`: `AccessOffline` for a read that can run from the cache alone,
+`AccessRead` for a read that needs files the cache does not keep, and nothing (live) for a write or anything only the cloud can answer.
+Live commands always read the live root and refuse `--offline`; the other two may be answered by a root within the TTL. The cache itself
+lives in `internal/adapter/indexcache`, as decorators of the driven ports that `internal/wiring` puts in front of the cloud; use cases
+never see it.
+
 ## The Keychain
 
 `internal/adapter/keychain` holds the logic and is tested everywhere against an in-memory Keychain; the calls into Security.framework

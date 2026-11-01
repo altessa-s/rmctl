@@ -150,6 +150,9 @@ func TestNoRootYetIsAnEmptyLibrary(t *testing.T) {
 	if err != nil || state.Generation != 0 || state.Hash != "" || len(state.Records) != 0 {
 		t.Fatalf("%+v %v", state, err)
 	}
+	if hash, gen, err := c.Pointer(t.Context()); err != nil || hash != "" || gen != 0 {
+		t.Fatalf("pointer: %q %d %v", hash, gen, err)
+	}
 }
 
 func TestFailuresPassThrough(t *testing.T) {
@@ -162,6 +165,9 @@ func TestFailuresPassThrough(t *testing.T) {
 	ctx := t.Context()
 	if _, err := c.Root(ctx); err == nil {
 		t.Fatal("root")
+	}
+	if _, _, err := c.Pointer(ctx); err == nil {
+		t.Fatal("pointer")
 	}
 	if _, err := c.Upload(ctx, "a.metadata", []byte("{}")); err == nil {
 		t.Fatal("upload")

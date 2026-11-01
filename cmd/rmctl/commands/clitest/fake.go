@@ -19,6 +19,11 @@ import (
 // Fake implements every input port over a fixed library. Err, when set, is
 // returned by every call; the call is still recorded.
 type Fake struct {
+	// CacheAt is what Cache.Status answers, CacheErr fails Status and
+	// Clear, and Offline marks the services as offline.
+	CacheAt  port.CacheReport
+	CacheErr error
+	Offline  bool
 	// SecretsAt is what Secrets.Status answers, Migration what Migrate does,
 	// and SecretsErr fails both.
 	SecretsAt  port.SecretsStatus
@@ -70,7 +75,7 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Secrets: (*secretsFake)(f),
+		Archives: (*archivesFake)(f), Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
 	}
 }
 
@@ -441,4 +446,40 @@ func (s *secretsFake) Migrate(_ context.Context, to port.SecretsBackend, o port.
 		return port.SecretsMigration{}, err
 	}
 	return f.Migration, f.SecretsErr
+}
+
+// cacheFake is the Fake's port.Cache.
+type cacheFake Fake
+
+var _ port.Cache = (*cacheFake)(nil)
+
+// Status implements port.Cache: the profiles of CacheAt, only the current
+// one unless all.
+func (c *cacheFake) Status(_ context.Context, all bool) (port.CacheReport, error) {
+	f := (*Fake)(c)
+	if err := f.record("CacheStatus", opt(all, "all")); err != nil {
+		return port.CacheReport{}, err
+	}
+	r := f.CacheAt
+	if !all {
+		r.Profiles = slices.DeleteFunc(slices.Clone(r.Profiles), func(p port.ProfileCache) bool { return p.Profile != r.Profile })
+	}
+	return r, f.CacheErr
+}
+
+// Clear implements port.Cache.
+func (c *cacheFake) Clear(ctx context.Context, all bool) ([]string, error) {
+	f := (*Fake)(c)
+	r, err := c.Status(ctx, all)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.record("CacheClear", opt(all, "all")); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(r.Profiles))
+	for _, p := range r.Profiles {
+		names = append(names, p.Profile)
+	}
+	return names, nil
 }

@@ -24,6 +24,7 @@ packages:
   - internal/adapter/localfs
   - internal/adapter/pdf
   - internal/adapter/blobcache
+  - internal/adapter/indexcache
   - internal/adapter/config
   - internal/adapter/keychain
   - internal/adapter/vault

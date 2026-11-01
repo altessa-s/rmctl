@@ -30,6 +30,8 @@ type (
 	Streams = cliutil.Streams
 	// Factory builds the services once the flags are parsed.
 	Factory = cliutil.Factory
+	// Request is what the command line asks of the factory.
+	Request = cliutil.Request
 	// ExitError carries the exit code of an error.
 	ExitError = cliutil.ExitError
 )

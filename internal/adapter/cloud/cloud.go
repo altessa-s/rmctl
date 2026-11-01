@@ -61,16 +61,7 @@ func (c *Cloud) Root(ctx context.Context) (port.RootState, error) {
 	if err != nil {
 		return port.RootState{}, mapErr(err)
 	}
-	records := make([]domain.Record, 0, len(index.Entries))
-	for _, e := range index.Entries {
-		records = append(records, domain.Record{
-			ID:       domain.ItemID(e.DocumentID),
-			Hash:     e.Hash,
-			Subfiles: e.Subfiles,
-			Size:     e.Size,
-		})
-	}
-	return port.RootState{Hash: root.Hash, Generation: root.Generation, Records: records}, nil
+	return port.RootState{Hash: root.Hash, Generation: root.Generation, Records: recordsOf(index)}, nil
 }
 
 // CommitRoot uploads records as a root index and points the root at it, on
@@ -120,11 +111,7 @@ func (c *Cloud) Files(ctx context.Context, rec domain.Record) ([]domain.File, er
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	out := make([]domain.File, 0, len(index.Entries))
-	for _, e := range index.Entries {
-		out = append(out, domain.File{Name: e.DocumentID, Hash: e.Hash, Size: e.Size})
-	}
-	return out, nil
+	return filesOf(index), nil
 }
 
 // PutIndex uploads the index of id listing files. The record's hash is the

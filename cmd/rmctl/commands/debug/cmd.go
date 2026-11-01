@@ -32,8 +32,9 @@ func New(env *cliutil.Env) *cobra.Command {
 		Long: heredoc.Doc(`
 			Diagnostics of the sync protocol rather than the library: the root, raw
 			blobs, what a document is made of, which hash records carry, which blobs
-			the cloud lacks, which fields occur across the library, and what the .rm
-			pages of a document hold. None of them changes anything.
+			the cloud lacks, which fields occur across the library, what the .rm pages
+			of a document hold, and what the cache on disk keeps. None of them changes
+			the library; cache clear empties the cache.
 		`),
 		Args:         cliutil.Args(cobra.NoArgs),
 		SilenceUsage: true,
@@ -41,7 +42,12 @@ func New(env *cliutil.Env) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newRoot(env), newBlob(env), newFiles(env), newHashes(env), newCheckFiles(env), newSweep(env), newPage(env))
+	// root and blob ask the cloud itself; files, hashes and checkfiles read
+	// what the cache does not keep; sweep and page can run from it.
+	read := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessRead) }
+	offline := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessOffline) }
+	cmd.AddCommand(newRoot(env), newBlob(env), read(newFiles(env)), read(newHashes(env)), read(newCheckFiles(env)),
+		offline(newSweep(env)), offline(newPage(env)), newCache(env))
 	return cmd
 }
 

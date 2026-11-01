@@ -17,7 +17,10 @@ import (
 
 // Commands are get, export and mget.
 func Commands(env *cliutil.Env) []*cobra.Command {
-	return []*cobra.Command{newGet(env), newExport(env), newMget(env)}
+	// They download files the cache does not keep: a TTL may answer their
+	// root, but they need the cloud.
+	read := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessRead) }
+	return []*cobra.Command{read(newGet(env)), read(newExport(env)), read(newMget(env))}
 }
 
 func fetcher(cmd *cobra.Command, env *cliutil.Env) (port.Fetcher, error) {

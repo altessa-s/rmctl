@@ -1,0 +1,23 @@
+{
+  "dir": "/c/rmctl",
+  "profile": "work",
+  "ttl_seconds": 600,
+  "offline": false,
+  "no_cache": false,
+  "profiles": [
+    {
+      "profile": "work",
+      "dir": "/c/rmctl/work",
+      "bytes": 10485760,
+      "budget": 536870912,
+      "entries": {
+        "blobs": 120,
+        "indexes": 61,
+        "state": 1
+      },
+      "root_hash": "abababababababababababababababababababababababababababababababab",
+      "root_generation": 42,
+      "confirmed": "2026-11-01T09:30:00Z"
+    }
+  ]
+}

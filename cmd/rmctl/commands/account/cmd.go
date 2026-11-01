@@ -20,7 +20,7 @@ const GroupID = "account"
 
 // Commands are register, logout and account.
 func Commands(env *cliutil.Env) []*cobra.Command {
-	return []*cobra.Command{newRegister(env), newLogout(env), newAccount(env), newSecrets(env)}
+	return []*cobra.Command{newRegister(env), newLogout(env), cliutil.WithAccess(newAccount(env), cliutil.AccessRead), newSecrets(env)}
 }
 
 func service(cmd *cobra.Command, env *cliutil.Env) (port.Account, error) {

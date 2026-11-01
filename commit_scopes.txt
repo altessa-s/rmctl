@@ -36,7 +36,7 @@ secrets                     # Where the tokens are kept, and moving them
 secretfile                  # The token file of mode 0600
 keychain                    # The macOS Keychain
 vault                       # Token stores as a port
-cache                       # The blob cache on disk
+cache                       # The cache on disk: blobs, indexes and roots per profile (blobcache, indexcache)
 files                       # Local files: safe writes and reads
 config                      # Profiles, paths and the environment
 wiring                      # Wires the adapters into the use cases

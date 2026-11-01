@@ -79,7 +79,7 @@ func TestUsage(t *testing.T) {
 func TestFactoryFailure(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("no config")
-	factory := func(context.Context, string, bool) (cliutil.Services, func() error, error) {
+	factory := func(context.Context, cliutil.Request) (cliutil.Services, func() error, error) {
 		return cliutil.Services{}, nil, boom
 	}
 	r := clitest.Exec(t, cliutil.Services{}, clitest.Options{Factory: factory}, Commands, "account")

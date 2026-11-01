@@ -29,6 +29,8 @@ const (
 	// EnvKeychainService files the Keychain items under another service:
 	// a test keeps its items apart from the user's with it.
 	EnvKeychainService = "RMCTL_KEYCHAIN_SERVICE"
+	// EnvCacheTTL is the cache TTL over the configuration file.
+	EnvCacheTTL = "RMCTL_CACHE_TTL"
 	// configFile is the file's name in the rmctl configuration directory.
 	configFile = "config.toml"
 	// fileMode and dirMode keep the configuration to its owner.
@@ -85,13 +87,22 @@ type fileSecrets struct {
 }
 
 // fileProfile is a [profiles.<name>] table.
+// fileCache is a [cache] table: ttl is a Go duration ("10m"), offline makes
+// --offline the default.
+type fileCache struct {
+	TTL     string `toml:"ttl"`
+	Offline *bool  `toml:"offline"`
+}
+
 type fileProfile struct {
 	Secrets fileSecrets `toml:"secrets"`
+	Cache   fileCache   `toml:"cache"`
 }
 
 // File is the configuration file as rmctl reads it.
 type File struct {
 	Secrets  fileSecrets            `toml:"secrets"`
+	Cache    fileCache              `toml:"cache"`
 	Profiles map[string]fileProfile `toml:"profiles"`
 }
 
@@ -114,6 +125,9 @@ func ParseFile(data []byte) (File, error) {
 	if err := checkBackend("secrets.backend", f.Secrets.Backend); err != nil {
 		return File{}, err
 	}
+	if _, err := parseTTL("cache.ttl", f.Cache.TTL); err != nil {
+		return File{}, err
+	}
 	names := make([]string, 0, len(f.Profiles))
 	for name := range f.Profiles {
 		names = append(names, name)
@@ -124,6 +138,9 @@ func ParseFile(data []byte) (File, error) {
 			return File{}, fmt.Errorf("%w: profiles.%s: %w", ErrConfig, name, ErrProfile)
 		}
 		if err := checkBackend("profiles."+name+".secrets.backend", f.Profiles[name].Secrets.Backend); err != nil {
+			return File{}, err
+		}
+		if _, err := parseTTL("profiles."+name+".cache.ttl", f.Profiles[name].Cache.TTL); err != nil {
 			return File{}, err
 		}
 	}
@@ -137,6 +154,42 @@ func checkBackend(key, value string) error {
 	default:
 		return fmt.Errorf("%w: %s = %q: a backend is %q or %q", ErrConfig, key, value, BackendFile, BackendKeychain)
 	}
+}
+
+// parseTTL reads a cache TTL: a Go duration of zero or more, "" for none.
+func parseTTL(key, value string) (time.Duration, error) {
+	if value == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%w: %s = %q: a TTL is a duration such as \"10m\" or \"1h\", 0 for none", ErrConfig, key, value)
+	}
+	return d, nil
+}
+
+// cacheOf chooses a profile's cache TTL and offline default: RMCTL_CACHE_TTL
+// for the TTL, then the profile's [profiles.<name>.cache], then [cache],
+// then a TTL of 0 and online.
+func cacheOf(env map[string]string, f File, profile string) (ttl time.Duration, offline bool, err error) {
+	p := f.Profiles[profile].Cache
+	switch {
+	case env[EnvCacheTTL] != "":
+		if ttl, err = parseTTL(EnvCacheTTL, env[EnvCacheTTL]); err != nil {
+			return 0, false, err
+		}
+	case p.TTL != "":
+		ttl, _ = parseTTL("", p.TTL) //nolint:errcheck // ParseFile checked it
+	default:
+		ttl, _ = parseTTL("", f.Cache.TTL) //nolint:errcheck // ParseFile checked it
+	}
+	switch {
+	case p.Offline != nil:
+		offline = *p.Offline
+	case f.Cache.Offline != nil:
+		offline = *f.Cache.Offline
+	}
+	return ttl, offline, nil
 }
 
 // backendOf chooses a profile's backend: RMCTL_SECRETS, then the profile's

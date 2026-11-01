@@ -149,7 +149,7 @@ func TestExec(t *testing.T) {
 	if r.Code != 0 || r.Out != "hi\n" || f.Calls()[0] != "Tree" {
 		t.Fatalf("%+v", r)
 	}
-	closing := func(context.Context, string, bool) (cliutil.Services, func() error, error) {
+	closing := func(context.Context, cliutil.Request) (cliutil.Services, func() error, error) {
 		return f.Services(), func() error { return errors.New("close") }, nil
 	}
 	if r := Exec(t, cliutil.Services{}, Options{Factory: closing}, build, "hello"); r.Code != cliutil.CodeError {

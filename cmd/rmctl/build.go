@@ -15,11 +15,11 @@ import (
 	rmcloud "github.com/altessa-s/rmcloud-go"
 )
 
-// build is the composition root's entry: the services for profile, with a
+// build is the composition root's entry: the services req asks for, with a
 // logger on errOut at Debug when verbose and Warn otherwise. extra are
 // transport options a test uses to reach an emulated cloud.
-func build(_ context.Context, profile string, verbose bool, errOut io.Writer, extra ...rmcloud.Option) (commands.Services, func() error, error) {
-	logger, err := newLogger(errOut, verbose)
+func build(_ context.Context, req commands.Request, errOut io.Writer, extra ...rmcloud.Option) (commands.Services, func() error, error) {
+	logger, err := newLogger(errOut, req.Verbose)
 	if err != nil {
 		return commands.Services{}, nil, err
 	}
@@ -28,11 +28,14 @@ func build(_ context.Context, profile string, verbose bool, errOut io.Writer, ex
 		return commands.Services{}, nil, err
 	}
 	svc, err := wiring.Build(wiring.Options{
-		Env:     config.Environ(),
-		Profile: profile,
-		Dirs:    dirs,
-		Logger:  logger,
-		Client:  extra,
+		Env:      config.Environ(),
+		Profile:  req.Profile,
+		Dirs:     dirs,
+		Logger:   logger,
+		Client:   extra,
+		Offline:  req.Offline,
+		NoCache:  req.NoCache,
+		ReadOnly: req.ReadOnly,
 	})
 	if err != nil {
 		return commands.Services{}, nil, err
@@ -47,5 +50,7 @@ func build(_ context.Context, profile string, verbose bool, errOut io.Writer, ex
 		Secrets:   svc.Secrets,
 		Pages:     svc.Pages,
 		Archives:  svc.Archives,
+		Cache:     svc.Cache,
+		Offline:   svc.Offline,
 	}, svc.Close, nil
 }

@@ -42,7 +42,7 @@ func newSecrets(env *cliutil.Env) *cobra.Command {
 		`),
 		SilenceUsage: true,
 	}
-	cmd.AddCommand(newSecretsStatus(env), newSecretsMigrate(env))
+	cmd.AddCommand(cliutil.WithAccess(newSecretsStatus(env), cliutil.AccessOffline), newSecretsMigrate(env))
 	return cmd
 }
 

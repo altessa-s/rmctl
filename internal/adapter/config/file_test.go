@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/adapter/config"
 )
@@ -508,4 +509,50 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestCacheSettings(t *testing.T) {
+	t.Parallel()
+	dirs := config.BaseDirs{Config: "/cfg", Cache: "/cache"}
+	path := filepath.Join("/cfg", "rmctl", "config.toml")
+	file := "[cache]\nttl = \"10m\"\noffline = true\n\n[profiles.work.cache]\nttl = \"1h\"\noffline = false\n\n[profiles.home.secrets]\nbackend = \"file\"\n"
+	tests := []struct {
+		name, profile, env string
+		ttl                time.Duration
+		offline            bool
+	}{
+		{name: "the profile's table", profile: "work", ttl: time.Hour},
+		{name: "the global table", profile: "home", ttl: 10 * time.Minute, offline: true},
+		{name: "the environment wins", profile: "work", env: "30s", ttl: 30 * time.Second},
+		{name: "zero turns it off", profile: "work", env: "0", ttl: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := map[string]string{}
+			if tt.env != "" {
+				env[config.EnvCacheTTL] = tt.env
+			}
+			cfg, err := config.LoadFrom(env, tt.profile, dirs, files(map[string]string{path: file}))
+			if err != nil || cfg.CacheTTL != tt.ttl || cfg.Offline != tt.offline || cfg.CacheDir != filepath.Join("/cache", "rmctl") {
+				t.Fatalf("%+v %v", cfg, err)
+			}
+		})
+	}
+	if cfg, err := config.LoadFrom(nil, "", dirs, nil); err != nil || cfg.CacheTTL != 0 || cfg.Offline {
+		t.Fatalf("defaults: %+v %v", cfg, err)
+	}
+	for name, tc := range map[string]struct {
+		file string
+		env  map[string]string
+	}{
+		"a bad global ttl":     {file: "[cache]\nttl = \"soon\"\n"},
+		"a negative ttl":       {file: "[profiles.work.cache]\nttl = \"-1m\"\n"},
+		"an unknown cache key": {file: "[cache]\nsize = 1\n"},
+		"a bad environment":    {env: map[string]string{config.EnvCacheTTL: "x"}},
+	} {
+		if _, err := config.LoadFrom(tc.env, "work", dirs, files(map[string]string{path: tc.file})); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
 }
