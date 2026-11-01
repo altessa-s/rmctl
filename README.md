@@ -97,6 +97,17 @@ It takes one PDF, asks first ("Replace the PDF of /Books/Paper, keeping its anno
 `--dry-run` prints the plan — the old and new page counts, the pages kept, appended and dropped, and the annotated pages affected — and the
 JSON answer carries it as `content_plan`. It excludes `--replace`, `--notebook`, `--tag` and `--cover`.
 
+## Space and duplicates
+
+- **`du [path] [--depth N] [--all]`** adds up what the documents below a folder (the top level by default) take — the bytes of every file
+  their indexes list, which is what the cloud keeps — and reports the total, each folder down to `--depth` levels (1; 0 is the total
+  alone) with its documents and folders, largest first, and the documents by kind. `--all` counts the trash.
+- **`dupes [path] [--all]`** groups the documents whose original — the PDF or EPUB they were made from — is the same file by its hash,
+  one row per document with its path and id, the groups that waste the most first, then the number of groups and the bytes the extra copies
+  take. Annotations are not compared, and notebooks, which have no original, are never listed.
+
+Both read only the library's indexes, so they answer from the cache, `--offline` too.
+
 ## Running a program on changes
 
 `rmctl watch --exec PROGRAM [-- ARG...]` runs a program whenever the library changes, while it still prints the events:
@@ -128,7 +139,7 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
@@ -187,7 +198,7 @@ Everything kept is addressed by its content, so nothing goes stale and nothing n
   conflict replay; the indexes and files it writes go into the cache.
 - **A TTL** (`ttl` in config.toml, or `RMCTL_CACHE_TTL`, a Go duration; 0, the default, is off) lets a read trust a root the cloud
   confirmed less than that long ago, without asking. Writes ignore it.
-- **`--offline`** makes no request at all. `ls`, `tree`, `stat`, `find`, `text`, `highlights`, `debug page`, `debug sweep`, `rmdoc`,
+- **`--offline`** makes no request at all. `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights`, `debug page`, `debug sweep`, `rmdoc`,
   `secrets status` and `debug cache` read the last known root and its indexes from the cache; anything missing is an error that names it.
   A root older than a day draws a warning. Every other command refuses to run offline.
 - **`--no-cache`** neither reads nor writes the cache, for debugging.

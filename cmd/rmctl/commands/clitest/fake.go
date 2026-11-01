@@ -174,6 +174,32 @@ func (f *Fake) Stat(_ context.Context, query string) (*domain.Tree, domain.Item,
 	return t, it, err
 }
 
+// Usage implements port.Browser over the fake's library: the top level,
+// or the folder whose identifier query is.
+func (f *Fake) Usage(_ context.Context, query string, depth int, all bool) (*domain.Tree, domain.Usage, error) {
+	if err := f.record("Usage", query, strconv.Itoa(depth), opt(all, "all")); err != nil {
+		return nil, domain.Usage{}, err
+	}
+	tree := f.tree()
+	return tree, tree.Usage(f.folder(query), depth, all), nil
+}
+
+// Duplicates implements port.Browser over the fake's library.
+func (f *Fake) Duplicates(_ context.Context, query string, all bool) (*domain.Tree, []domain.DuplicateGroup, error) {
+	if err := f.record("Duplicates", query, opt(all, "all")); err != nil {
+		return nil, nil, err
+	}
+	tree := f.tree()
+	return tree, tree.Duplicates(f.folder(query), all), nil
+}
+
+func (f *Fake) folder(query string) domain.ItemID {
+	if query == "" || query == "/" {
+		return domain.RootID
+	}
+	return domain.ItemID(query)
+}
+
 func (f *Fake) Find(_ context.Context, q port.FindQuery) (*domain.Tree, []domain.Item, error) {
 	if err := f.record("Find", q.Pattern, strings.Join(q.Tags, ","), opt(q.Starred, "starred"), q.Under, opt(q.All, "all"), q.Text); err != nil {
 		return nil, nil, err

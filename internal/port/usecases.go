@@ -50,6 +50,12 @@ type Browser interface {
 	List(ctx context.Context, query string, all bool) (*domain.Tree, []domain.Item, error)
 	Stat(ctx context.Context, query string) (*domain.Tree, domain.Item, error)
 	Find(ctx context.Context, q FindQuery) (*domain.Tree, []domain.Item, error)
+	// Usage is what the folder a query names takes, and each folder below
+	// it down to depth levels; all counts the trash.
+	Usage(ctx context.Context, query string, depth int, all bool) (*domain.Tree, domain.Usage, error)
+	// Duplicates are the documents below the folder a query names that
+	// share their original file; all counts the trash.
+	Duplicates(ctx context.Context, query string, all bool) (*domain.Tree, []domain.DuplicateGroup, error)
 }
 
 // MirrorOptions shape a recursive download.
