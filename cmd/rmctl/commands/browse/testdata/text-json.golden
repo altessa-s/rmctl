@@ -1,0 +1,74 @@
+{
+  "id": "d-notes",
+  "name": "Notes",
+  "pages": [
+    {
+      "number": 1,
+      "id": "p-1",
+      "paragraphs": [
+        {
+          "text": "Meeting",
+          "style": "heading"
+        },
+        {
+          "text": "Agenda",
+          "style": "bold"
+        },
+        {
+          "text": "first point",
+          "style": "bullet"
+        },
+        {
+          "text": "detail",
+          "style": "bullet-nested"
+        },
+        {
+          "text": "",
+          "style": "plain"
+        },
+        {
+          "text": "one",
+          "style": "numbered"
+        },
+        {
+          "text": "two",
+          "style": "numbered"
+        },
+        {
+          "text": "sub",
+          "style": "numbered-nested"
+        },
+        {
+          "text": "three",
+          "style": "numbered"
+        },
+        {
+          "text": "open",
+          "style": "checkbox"
+        },
+        {
+          "text": "done",
+          "style": "checkbox-done"
+        },
+        {
+          "text": "Plain prose.",
+          "style": "plain"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "id": "p-2",
+      "paragraphs": [
+        {
+          "text": "again",
+          "style": "numbered"
+        },
+        {
+          "text": "odd",
+          "style": "plain"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,292 @@
+version: "2"
+
+run:
+  timeout: 5m
+  # Lint the integration tests too; they build only with this tag.
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - dogsled
+    - errcheck
+    - prealloc
+    - mnd
+    - unconvert
+    - asciicheck
+    - exhaustive
+    - copyloopvar
+    - modernize
+    - depguard
+    - forbidigo
+    - gochecknoglobals
+    - gochecknoinits
+    - goconst
+    - whitespace
+    - gocritic
+    - godox
+    - goprintffuncname
+    - govet
+    - unused
+    - lll
+    - makezero
+    - misspell
+    - nilnil
+    - noctx
+    - staticcheck
+    - predeclared
+    - unparam
+    - ineffassign
+    - dupl
+    - gocyclo
+    - gocognit
+  settings:
+    lll:
+      line-length: 156
+    gocyclo:
+      min-complexity: 30
+    gocognit:
+      min-complexity: 30
+    dogsled:
+      max-blank-identifiers: 2
+    depguard:
+      rules:
+        # The dependency set is closed. Anything outside this list is a
+        # defect. Add a dependency by editing this list in the same change.
+        dependencies:
+          list-mode: strict
+          files:
+            - $all
+          allow:
+            - $gostd
+            - github.com/altessa-s/rmctl
+            # The transport. Only internal/adapter/cloud imports it.
+            - github.com/altessa-s/rmcloud-go
+            # Foundation: errors, clock, concurrency, files, build info.
+            - github.com/altessa-s/go-atlas-core
+            # Logging handlers for the command line.
+            - github.com/altessa-s/go-slogx
+            # The command line.
+            - github.com/spf13/cobra
+            - github.com/spf13/pflag
+            - github.com/MakeNowJust/heredoc
+            - golang.org/x/term
+            # Advisory file locks for editing config.toml. Only internal/adapter/config.
+            - golang.org/x/sys
+            # Counting the pages of an uploaded PDF. Only internal/adapter/pdf.
+            - github.com/pdfcpu/pdfcpu
+            # The .rm page format, through cgo. Only internal/adapter/rmpages.
+            - github.com/altessa-s/rmlines-go
+            # The .rmdoc container, through cgo. Only internal/adapter/rmdocs.
+            - github.com/altessa-s/rmdoc-go
+            # The macOS Keychain, through cgo. Only
+            # internal/adapter/keychain/system.
+            - github.com/keybase/go-keychain
+            # The configuration file. Only internal/adapter/config.
+            - github.com/pelletier/go-toml/v2
+            # The notification socket of the emulated cloud. Only
+            # internal/clouddouble, which only tests import.
+            - github.com/coder/websocket
+        # Production code decodes with encoding/json/v2, which refuses
+        # duplicate keys, invalid UTF-8, and keys in another case.
+        json-v2-only:
+          files:
+            - $all
+            - "!$test"
+          deny:
+            - pkg: encoding/json$
+              desc: use encoding/json/v2; v1 accepts duplicate keys and invalid UTF-8
+        # The doubles and the emulated cloud stay out of production code.
+        test-support-only-in-tests:
+          files:
+            - $all
+            - "!$test"
+            - "!**/internal/porttest/*.go"
+            - "!**/internal/clouddouble/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl/internal/porttest
+              desc: test doubles are for tests
+            - pkg: github.com/altessa-s/rmctl/internal/clouddouble
+              desc: the emulated cloud is for tests
+        # The .rm page format is one adapter's business: the page commands
+        # reach it through port.PageReader, PageEditor and PageWriter.
+        page-format-only-in-rmpages:
+          files:
+            - $all
+            - "!**/internal/adapter/rmpages/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmlines-go
+              desc: only internal/adapter/rmpages imports the page format
+        # The .rmdoc container is one adapter's business: export, import and
+        # the offline commands reach it through port.ArchiveReader and
+        # ArchiveWriter.
+        archive-format-only-in-rmdocs:
+          files:
+            - $all
+            - "!**/internal/adapter/rmdocs/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmdoc-go
+              desc: only internal/adapter/rmdocs imports the archive format
+        # The Keychain binding is behind the keychain adapter's system calls.
+        keychain-only-in-system:
+          files:
+            - $all
+            - "!**/internal/adapter/keychain/system/*.go"
+          deny:
+            - pkg: github.com/keybase/go-keychain
+              desc: only internal/adapter/keychain/system calls the Keychain
+        # The TOML parser reads the configuration file and nothing else.
+        toml-only-in-config:
+          files:
+            - $all
+            - "!**/internal/adapter/config/*.go"
+          deny:
+            - pkg: github.com/pelletier/go-toml/v2
+              desc: only internal/adapter/config reads TOML
+        # The rules below mirror architecture_test.go.
+        # domain is the library model: no I/O, no transport, nothing else
+        # from this module.
+        domain-is-pure:
+          files:
+            - "**/internal/domain/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl
+              desc: domain imports nothing from this module
+            - pkg: os
+              desc: domain performs no I/O
+            - pkg: net/http
+              desc: domain knows nothing of the network
+            - pkg: log/slog
+              desc: domain returns what it would log
+            - pkg: github.com/altessa-s/rmcloud-go
+              desc: the transport is the business of the adapters that stand on it
+            - pkg: github.com/altessa-s/rmlines-go
+              desc: the page format is the rmpages adapter's business
+            - pkg: github.com/altessa-s/rmdoc-go
+              desc: the archive format is the rmdocs adapter's business
+        # port declares contracts and imports nothing but domain.
+        port-is-contracts:
+          files:
+            - "**/internal/port/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl/internal/app
+              desc: port imports nothing from this module but domain
+            - pkg: github.com/altessa-s/rmctl/internal/adapter
+              desc: port imports nothing from this module but domain
+            - pkg: os
+              desc: port holds no implementation
+            - pkg: github.com/altessa-s/rmcloud-go
+              desc: the transport is the business of the adapters that stand on it
+        # The use cases reach the outside world only through ports.
+        use-cases-see-only-ports:
+          files:
+            - "**/internal/app/**/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl/internal/adapter
+              desc: an adapter is wired by the composition root, not imported
+            - pkg: github.com/altessa-s/rmctl/internal/wiring
+              desc: the use cases do not know how they are wired
+            - pkg: github.com/altessa-s/rmcloud-go
+              desc: the transport is the business of the adapters that stand on it
+            - pkg: net/http
+              desc: the use cases perform no HTTP
+            - pkg: os
+              desc: local files go through port.LocalFiles
+            - pkg: github.com/spf13/cobra
+              desc: the command line is cmd/rmctl
+            - pkg: github.com/altessa-s/rmlines-go
+              desc: the page format is the rmpages adapter's business
+            - pkg: github.com/altessa-s/rmdoc-go
+              desc: the archive format is the rmdocs adapter's business
+        # Adapters implement ports and know nothing of the use cases.
+        adapters-know-no-use-case:
+          files:
+            - "**/internal/adapter/**/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl/internal/app
+              desc: adapters implement ports and import no use case
+            - pkg: github.com/spf13/cobra
+              desc: the command line is cmd/rmctl
+        # The command line sees the input ports and the model, nothing below.
+        cli-sees-only-input-ports:
+          files:
+            - "**/cmd/rmctl/commands/**/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmctl/internal/app
+              desc: commands call input ports; wiring builds them
+            - pkg: github.com/altessa-s/rmctl/internal/adapter
+              desc: commands call input ports; wiring builds them
+            - pkg: github.com/altessa-s/rmcloud-go
+              desc: the transport is the business of the adapters that stand on it
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^time\.Now$
+          msg: time comes from clock.Clock; the composition root passes clock.Real()
+        # Matched on the package path, so crypto/rand — which exposes the same
+        # identifiers — stays allowed.
+        - pattern: ^rand\.
+          pkg: ^math/rand(/v2)?$
+          msg: randomness comes from crypto/rand
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    exhaustive:
+      default-signifies-exhaustive: true
+      package-scope-only: false
+    goconst:
+      min-len: 3
+      match-constant: true
+      numbers: true
+    staticcheck:
+      checks: ["all", "-ST1003"]
+    mnd:
+      ignored-functions:
+        - strings.SplitN
+        - strconv.*
+        - make
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    makezero:
+      always: false
+    misspell:
+      locale: US
+    varnamelen:
+      ignore-type-assert-ok: true
+      ignore-map-index-ok: true
+      ignore-chan-recv-ok: true
+      ignore-names:
+        - err
+        - ch
+        - ok
+      ignore-decls:
+        - i int
+        - ch chan
+  exclusions:
+    generated: lax
+    paths:
+      - ".*_test\\.go"
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(google.golang.org)
+        - prefix(golang.org)
+        - prefix(github.com/altessa-s/go-atlas-core)
+        - prefix(github.com/altessa-s/go-atlas-net)
+        - prefix(github.com/altessa-s/rmctl)
+        - prefix(github.com/altessa-s)
+        - blank
+        - alias

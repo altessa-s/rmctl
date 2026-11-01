@@ -1,0 +1,176 @@
+// Copyright 2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package port
+
+import (
+	"context"
+
+	"github.com/altessa-s/rmctl/internal/domain"
+)
+
+// The input ports: what the command line asks of the use cases. Each is
+// implemented by one package under internal/app, and the command line
+// imports nothing below this package and domain.
+
+// AccountInfo is what the account command prints.
+type AccountInfo struct {
+	Registered bool
+	Plan       Plan
+}
+
+// Account registers this machine and reports on the account.
+type Account interface {
+	// Register exchanges a one-time code for a device token. It refuses when
+	// one is stored, unless replace.
+	Register(ctx context.Context, code string, replace bool) error
+	// Logout drops the token; revoke first removes the device at the cloud.
+	Logout(ctx context.Context, revoke bool) error
+	Info(ctx context.Context) (AccountInfo, error)
+}
+
+// FindQuery selects items: every non-empty field must match.
+type FindQuery struct {
+	// Pattern is a regular expression matched against the item's path.
+	Pattern string
+	Tags    []string
+	Starred bool
+	Under   string
+	All     bool
+	// Text is a case-insensitive substring of the typed text or the
+	// highlighted text of a document's pages.
+	Text string
+}
+
+// Browser reads the library.
+type Browser interface {
+	Tree(ctx context.Context) (*domain.Tree, error)
+	// List is the folder a query names, or the item itself for a document.
+	List(ctx context.Context, query string, all bool) (*domain.Tree, []domain.Item, error)
+	Stat(ctx context.Context, query string) (*domain.Tree, domain.Item, error)
+	Find(ctx context.Context, q FindQuery) (*domain.Tree, []domain.Item, error)
+}
+
+// MirrorOptions shape a recursive download.
+type MirrorOptions struct {
+	// Incremental skips files already present with the size the cloud names.
+	Incremental bool
+	// Delete removes local files the cloud no longer holds.
+	Delete bool
+	Jobs   int
+}
+
+// MirrorReport is what a recursive transfer did.
+type MirrorReport struct {
+	Written, Skipped, Deleted int
+}
+
+// Fetcher downloads from the library.
+type Fetcher interface {
+	// Get writes a document's original to dest and returns the path written.
+	// An empty dest is the document's name in the working directory.
+	Get(ctx context.Context, query, dest string, progress Progress) (string, error)
+	// Export writes documents whole into one .rmdoc archive. A folder
+	// stands for every document below it; each document is in the archive
+	// once, with every file of its index.
+	Export(ctx context.Context, queries []string, dest string) (ExportReport, error)
+	// Mirror downloads a folder's documents into dir, keeping the tree.
+	Mirror(ctx context.Context, query, dir string, opts MirrorOptions) (MirrorReport, error)
+}
+
+// Cover is which page a document shows as its cover.
+type Cover string
+
+// The covers a document can show.
+const (
+	// CoverLastOpened is the tablet's default: the page last read.
+	CoverLastOpened Cover = "last"
+	// CoverFirst is the first page.
+	CoverFirst Cover = "first"
+)
+
+// PutOptions shape an upload.
+type PutOptions struct {
+	// Name overrides the visible name; empty is the file name without .pdf or .epub.
+	Name string
+	Tags []string
+	// Cover is the cover page; empty is CoverLastOpened.
+	Cover Cover
+	// Replace replaces the original of the document of the same name in the
+	// folder instead of adding a second one. Its tags are kept; its
+	// annotations are not, since its pages are new.
+	Replace bool
+	// DryRun validates the file and resolves the destination, and uploads
+	// nothing.
+	DryRun bool
+	// OnReplace, when set, hears of the document Replace is about to
+	// replace, before anything is uploaded: its annotations will not survive.
+	OnReplace func(old domain.Item)
+}
+
+// Writer changes the library. Every method commits one new root.
+type Writer interface {
+	Mkdir(ctx context.Context, path string, parents bool) (domain.Item, error)
+	Put(ctx context.Context, local, dest string, opts PutOptions, progress Progress) (domain.Item, error)
+	// Move moves src into the folder dst, or renames it when dst names no
+	// folder and its parent exists.
+	Move(ctx context.Context, src, dst string) (domain.Item, error)
+	Trash(ctx context.Context, queries []string) ([]domain.Item, error)
+	// Restore takes items out of the trash into the folder dest; "" is the
+	// top level.
+	Restore(ctx context.Context, queries []string, dest string) ([]domain.Item, error)
+	// Remove deletes items for good, with every descendant of a folder.
+	Remove(ctx context.Context, queries []string) ([]domain.Item, error)
+	// Import adds every document of a local .rmdoc archive into the folder
+	// dest, with its pages, annotations and tags, in one commit. A document
+	// whose identifier the library already holds gets a new identifier,
+	// and its files are renamed to it; the library's document is untouched.
+	Import(ctx context.Context, local, dest string) ([]ImportedDocument, error)
+	// PlanImport is what Import would add right now, with the identifiers
+	// it would assign against the current root, and uploads nothing.
+	PlanImport(ctx context.Context, local, dest string) ([]ImportedDocument, error)
+	// Upload sends every PDF and EPUB below dir into the folder dest.
+	Upload(ctx context.Context, dir, dest string, opts UploadOptions) (MirrorReport, error)
+}
+
+// UploadOptions shape a recursive upload.
+type UploadOptions struct {
+	// Incremental skips a file whose name the folder already holds.
+	Incremental bool
+	Jobs        int
+}
+
+// Watcher follows the notification socket.
+type Watcher interface {
+	Watch(ctx context.Context, on func(Event)) error
+}
+
+// FileReport is one file of an item with its decoded text, for diagnostics.
+type FileReport struct {
+	File domain.File
+	// Text is the file's contents when it is JSON or text, else nil.
+	Text []byte
+}
+
+// HashReport says which hash a record carries.
+type HashReport struct {
+	Record domain.Record
+	// ByIndexFile is true when the record hash is the hash of the index
+	// file's bytes, false when it is the node hash.
+	ByIndexFile bool
+}
+
+// Inspector answers protocol questions for rmctl debug.
+type Inspector interface {
+	Root(ctx context.Context) (RootState, error)
+	Blob(ctx context.Context, hash, name string) ([]byte, error)
+	// SaveBlob writes a blob to dest and returns the path written.
+	SaveBlob(ctx context.Context, hash, name, dest string) (string, error)
+	Files(ctx context.Context, query string) (domain.Item, []FileReport, error)
+	Hashes(ctx context.Context) ([]HashReport, error)
+	CheckFiles(ctx context.Context) ([]string, error)
+	// Sweep counts, across every document, which .metadata and .content
+	// fields occur and how often.
+	Sweep(ctx context.Context) (map[string]int, error)
+}

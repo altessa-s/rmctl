@@ -1,0 +1,15 @@
+[
+  {
+    "id": "d-paper",
+    "name": "Paper",
+    "kind": "pdf",
+    "parent": "f-books",
+    "path": "",
+    "trashed": false,
+    "pinned": false,
+    "size": 2158,
+    "modified": "2026-10-31T12:00:00Z",
+    "tags": [],
+    "hash": "h-d-paper"
+  }
+]

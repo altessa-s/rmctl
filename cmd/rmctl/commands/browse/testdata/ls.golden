@@ -1,0 +1,30 @@
+[
+  {
+    "id": "d-novel",
+    "name": "Novel",
+    "kind": "epub",
+    "parent": "f-books",
+    "path": "/Books/Novel",
+    "trashed": false,
+    "pinned": true,
+    "size": 4205,
+    "modified": "2026-10-31T12:00:00Z",
+    "tags": [
+      "fiction"
+    ],
+    "hash": "h-d-novel"
+  },
+  {
+    "id": "d-paper",
+    "name": "Paper",
+    "kind": "pdf",
+    "parent": "f-books",
+    "path": "/Books/Paper",
+    "trashed": false,
+    "pinned": false,
+    "size": 2158,
+    "modified": "2026-10-31T12:00:00Z",
+    "tags": [],
+    "hash": "h-d-paper"
+  }
+]

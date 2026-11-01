@@ -1,0 +1,33 @@
+{
+  "path": "a.rmdoc",
+  "documents": [
+    {
+      "id": "n1",
+      "name": "Secret plan",
+      "kind": "notebook",
+      "size": 2148,
+      "entries": [
+        {
+          "name": "n1.metadata",
+          "size": 100
+        },
+        {
+          "name": "n1/p1.rm",
+          "size": 2048
+        }
+      ]
+    },
+    {
+      "id": "bad",
+      "name": "",
+      "kind": "",
+      "size": 4,
+      "entries": [
+        {
+          "name": "bad.pdf",
+          "size": 4
+        }
+      ]
+    }
+  ]
+}

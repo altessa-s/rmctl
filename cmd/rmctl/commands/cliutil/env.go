@@ -1,0 +1,148 @@
+// Copyright 2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package cliutil
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/altessa-s/rmctl/internal/port"
+)
+
+// ProfileEnv names the profile when --profile is not given.
+const ProfileEnv = "RMCTL_PROFILE"
+
+// The persistent flags every command reads.
+const (
+	FlagProfile = "profile"
+	FlagJSON    = "json"
+	FlagVerbose = "verbose"
+	FlagYes     = "yes"
+)
+
+// Services are the use cases the command line drives. The command line
+// imports nothing below the input ports.
+type Services struct {
+	Account   port.Account
+	Browser   port.Browser
+	Fetcher   port.Fetcher
+	Writer    port.Writer
+	Watcher   port.Watcher
+	Inspector port.Inspector
+	Pages     port.Pages
+	Archives  port.Archives
+	Secrets   port.Secrets
+}
+
+// Streams are the process's standard streams. IsTerminal says whether both
+// the input and the error stream are a terminal: confirmation prompts and
+// progress lines are only for a person.
+type Streams struct {
+	In         io.Reader
+	Out, Err   io.Writer
+	IsTerminal bool
+}
+
+// Factory builds the services for a profile once the flags are parsed. The
+// returned close releases what they hold.
+type Factory func(ctx context.Context, profile string, verbose bool) (Services, func() error, error)
+
+// Env is what every command shares: the streams, the persistent flags and
+// the services, built on first use.
+type Env struct {
+	Streams Streams
+	factory Factory
+
+	built    bool
+	services Services
+	closer   func() error
+	err      error
+}
+
+// NewEnv returns an environment that builds its services with factory.
+func NewEnv(streams Streams, factory Factory) *Env {
+	return &Env{Streams: streams, factory: factory}
+}
+
+// Fixed is a factory that always returns svc, for tests and embedding.
+func Fixed(svc Services) Factory {
+	return func(context.Context, string, bool) (Services, func() error, error) {
+		return svc, func() error { return nil }, nil
+	}
+}
+
+// Services builds the services on first use with the profile and verbosity
+// of cmd's flags.
+func (e *Env) Services(cmd *cobra.Command) (Services, error) {
+	if e.built {
+		return e.services, e.err
+	}
+	e.built = true
+	profile := Profile(cmd)
+	verbose, _ := cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
+	e.services, e.closer, e.err = e.factory(cmd.Context(), profile, verbose)
+	return e.services, e.err
+}
+
+// Close releases the services if they were built.
+func (e *Env) Close() error {
+	if e.closer == nil {
+		return nil
+	}
+	closer := e.closer
+	e.closer = nil
+	return closer()
+}
+
+// Profile is --profile, else $RMCTL_PROFILE, else "".
+func Profile(cmd *cobra.Command) string {
+	if f := cmd.Flags().Lookup(FlagProfile); f != nil && f.Changed {
+		return f.Value.String()
+	}
+	return os.Getenv(ProfileEnv)
+}
+
+// JSON reports --json.
+func JSON(cmd *cobra.Command) bool {
+	on, _ := cmd.Flags().GetBool(FlagJSON) //nolint:errcheck // the flag is persistent on the root
+	return on
+}
+
+// Yes reports --yes.
+func Yes(cmd *cobra.Command) bool {
+	on, _ := cmd.Flags().GetBool(FlagYes) //nolint:errcheck // the flag is persistent on the root
+	return on
+}
+
+// ErrNoService means a command needs a service the factory did not provide.
+var ErrNoService = errors.New("rmctl: this command is not available in this build")
+
+// Need returns the service pick selects, building the services on first use;
+// a service the factory left nil is [ErrNoService].
+func Need[T any](cmd *cobra.Command, env *Env, pick func(Services) T) (T, error) {
+	var zero T
+	svc, err := env.Services(cmd)
+	if err != nil {
+		return zero, err
+	}
+	s := pick(svc)
+	if any(s) == nil {
+		return zero, ErrNoService
+	}
+	return s, nil
+}
+
+// AddPersistentFlags declares the flags every command reads on root.
+func AddPersistentFlags(root *cobra.Command) {
+	flags := root.PersistentFlags()
+	flags.StringP(FlagProfile, "P", "", "account profile (or "+ProfileEnv+")")
+	flags.Bool(FlagJSON, false, "print answers as JSON")
+	flags.BoolP(FlagVerbose, "v", false, "log what happens on standard error")
+	flags.BoolP(FlagYes, "y", false, "confirm a command that changes the library")
+}

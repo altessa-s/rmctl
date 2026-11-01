@@ -1,0 +1,34 @@
+# Coverage gate for the packages that carry the tool's behavior.
+#
+# Enforced by .github/scripts/coverage-gate.sh. A package with no statements
+# yet is reported as skipped rather than as 0%.
+#
+# port is absent: it declares interfaces only. porttest and clouddouble are
+# test support. cmd/rmctl itself is main and the build function.
+
+threshold: 90.0
+
+packages:
+  - internal/domain
+  - internal/app/library
+  - internal/app/account
+  - internal/app/browse
+  - internal/app/fetch
+  - internal/app/write
+  - internal/app/watch
+  - internal/app/inspect
+  - internal/app/archives
+  - internal/app/pages
+  - internal/adapter/cloud
+  - internal/adapter/secretfile
+  - internal/adapter/localfs
+  - internal/adapter/pdf
+  - internal/adapter/blobcache
+  - internal/adapter/config
+  - internal/adapter/keychain
+  - internal/adapter/vault
+  - internal/adapter/rmpages
+  - internal/adapter/rmdocs
+  - internal/app/secrets
+  - internal/wiring
+  - cmd/rmctl/commands

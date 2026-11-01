@@ -1,0 +1,444 @@
+// Copyright 2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package clitest
+
+import (
+	"context"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/internal/domain"
+	"github.com/altessa-s/rmctl/internal/port"
+)
+
+// Fake implements every input port over a fixed library. Err, when set, is
+// returned by every call; the call is still recorded.
+type Fake struct {
+	// SecretsAt is what Secrets.Status answers, Migration what Migrate does,
+	// and SecretsErr fails both.
+	SecretsAt  port.SecretsStatus
+	Migration  port.SecretsMigration
+	SecretsErr error
+	// ReplaceOld is the document a put --replace finds of the same name;
+	// zero is none, so the file is added.
+	ReplaceOld domain.Item
+	Library    *domain.Tree
+	Err        error
+	// AccountInfo is what Account.Info answers.
+	AccountInfo port.AccountInfo
+	// Path is what Get and Export answer when non-empty.
+	Path string
+	// Report is what Mirror and Upload answer.
+	Report port.MirrorReport
+	// Events are what Watch delivers before it returns WatchErr.
+	Events   []port.Event
+	WatchErr error
+	// Inspector answers.
+	RootState port.RootState
+	BlobData  []byte
+	Reports   []port.FileReport
+	HashList  []port.HashReport
+	Missing   []string
+	Counts    map[string]int
+	// Progress, when set, is reported once by Get and Put.
+	Progress [2]int64
+	// PutErr fails Put of these local files; the other files still succeed.
+	PutErr map[string]error
+	// Pages answers: the document's pages, what Unmark reports, and an error
+	// of the page calls alone (such as domain.ErrPagesUnsupported).
+	Document port.DocumentText
+	Unmarked port.UnmarkReport
+	PagesErr error
+	// Archive answers: what Import adds, what Inspect lists, the documents
+	// Archives.Pages reads, and an error of the archive calls alone (such as
+	// domain.ErrArchivesUnsupported).
+	Imported   []port.ImportedDocument
+	Inspected  port.ArchiveReport
+	Local      []port.DocumentText
+	ArchiveErr error
+
+	mu    sync.Mutex
+	calls []string
+}
+
+// Services is the fake behind every port.
+func (f *Fake) Services() cliutil.Services {
+	return cliutil.Services{
+		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
+		Archives: (*archivesFake)(f), Secrets: (*secretsFake)(f),
+	}
+}
+
+// Calls are the calls made, each "Method arg arg".
+func (f *Fake) Calls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.calls)
+}
+
+func (f *Fake) record(method string, args ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, strings.TrimSpace(method+" "+strings.Join(args, " ")))
+	return f.Err
+}
+
+func (f *Fake) tree() *domain.Tree {
+	if f.Library == nil {
+		return Library()
+	}
+	return f.Library
+}
+
+func (f *Fake) progress(p port.Progress) {
+	if p != nil && f.Progress[1] != 0 {
+		p(f.Progress[0], f.Progress[1])
+	}
+}
+
+func opt(b bool, name string) string {
+	if b {
+		return name
+	}
+	return ""
+}
+
+// Account.
+
+func (f *Fake) Register(_ context.Context, code string, replace bool) error {
+	return f.record("Register", code, opt(replace, "replace"))
+}
+
+func (f *Fake) Logout(_ context.Context, revoke bool) error {
+	return f.record("Logout", opt(revoke, "revoke"))
+}
+
+func (f *Fake) Info(context.Context) (port.AccountInfo, error) {
+	return f.AccountInfo, f.record("Info")
+}
+
+// Browser.
+
+func (f *Fake) Tree(context.Context) (*domain.Tree, error) {
+	if err := f.record("Tree"); err != nil {
+		return nil, err
+	}
+	return f.tree(), nil
+}
+
+func (f *Fake) List(_ context.Context, query string, all bool) (*domain.Tree, []domain.Item, error) {
+	if err := f.record("List", query, opt(all, "all")); err != nil {
+		return nil, nil, err
+	}
+	t := f.tree()
+	if query == "/" {
+		return t, t.Children(domain.RootID, all), nil
+	}
+	it, found, err := t.Resolve(query, all)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found {
+		return t, t.Children(domain.RootID, all), nil
+	}
+	if !it.Kind.IsFolder() {
+		return t, []domain.Item{it}, nil
+	}
+	return t, t.Children(it.ID, all), nil
+}
+
+func (f *Fake) Stat(_ context.Context, query string) (*domain.Tree, domain.Item, error) {
+	if err := f.record("Stat", query); err != nil {
+		return nil, domain.Item{}, err
+	}
+	t := f.tree()
+	it, found, err := t.Resolve(query, true)
+	if err == nil && !found {
+		err = domain.ErrNotFound
+	}
+	return t, it, err
+}
+
+func (f *Fake) Find(_ context.Context, q port.FindQuery) (*domain.Tree, []domain.Item, error) {
+	if err := f.record("Find", q.Pattern, strings.Join(q.Tags, ","), opt(q.Starred, "starred"), q.Under, opt(q.All, "all"), q.Text); err != nil {
+		return nil, nil, err
+	}
+	t := f.tree()
+	re, err := regexp.Compile(q.Pattern)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []domain.Item
+	for _, it := range t.Items() {
+		if (!q.All && t.IsTrashed(it.ID)) || (q.Starred && !it.Pinned) || !re.MatchString(t.Path(it.ID)) {
+			continue
+		}
+		out = append(out, it)
+	}
+	return t, out, nil
+}
+
+// Fetcher.
+
+func (f *Fake) Get(_ context.Context, query, dest string, progress port.Progress) (string, error) {
+	f.progress(progress)
+	return f.answerPath(dest), f.record("Get", query, dest)
+}
+
+func (f *Fake) Export(_ context.Context, queries []string, dest string) (port.ExportReport, error) {
+	err := f.record("Export", append(slices.Clone(queries), dest)...)
+	return port.ExportReport{Path: f.answerPath(dest), Documents: len(queries), Files: filesPerDocument * len(queries)}, err
+}
+
+// filesPerDocument is how many files the fake says each exported document
+// had: a .metadata, a .content and an original.
+const filesPerDocument = 3
+
+// Import implements port.Writer.
+func (f *Fake) Import(_ context.Context, local, dest string) ([]port.ImportedDocument, error) {
+	if err := f.record("Import", local, dest); err != nil {
+		return nil, err
+	}
+	if f.ArchiveErr != nil {
+		return nil, f.ArchiveErr
+	}
+	if err := f.PutErr[local]; err != nil {
+		return nil, err
+	}
+	return f.Imported, nil
+}
+
+// PlanImport implements port.Writer: Imported, without the call counting as
+// an import.
+func (f *Fake) PlanImport(_ context.Context, local, dest string) ([]port.ImportedDocument, error) {
+	if err := f.record("PlanImport", local, dest); err != nil {
+		return nil, err
+	}
+	if f.ArchiveErr != nil {
+		return nil, f.ArchiveErr
+	}
+	return f.Imported, nil
+}
+
+// archivesFake is the Fake as port.Archives: its Pages would clash with
+// port.Pages.Pages on the Fake itself.
+type archivesFake Fake
+
+var _ port.Archives = (*archivesFake)(nil)
+
+// Inspect implements port.Archives.
+func (a *archivesFake) Inspect(_ context.Context, path string) (port.ArchiveReport, error) {
+	f := (*Fake)(a)
+	if err := f.record("Inspect", path); err != nil {
+		return port.ArchiveReport{}, err
+	}
+	r := f.Inspected
+	r.Path = path
+	return r, f.ArchiveErr
+}
+
+// Pages implements port.Archives.
+func (a *archivesFake) Pages(_ context.Context, path string, pages []string) ([]port.DocumentText, error) {
+	f := (*Fake)(a)
+	if err := f.record("LocalPages", append([]string{path}, pages...)...); err != nil {
+		return nil, err
+	}
+	return f.Local, f.ArchiveErr
+}
+
+func (f *Fake) answerPath(dest string) string {
+	if f.Path != "" {
+		return f.Path
+	}
+	return dest
+}
+
+func (f *Fake) Mirror(_ context.Context, query, dir string, o port.MirrorOptions) (port.MirrorReport, error) {
+	return f.Report, f.record("Mirror", query, dir, opt(o.Incremental, "incremental"), opt(o.Delete, "delete"))
+}
+
+// Writer.
+
+func (f *Fake) Mkdir(_ context.Context, p string, parents bool) (domain.Item, error) {
+	return Item(Spec{ID: "f-new", Name: p[strings.LastIndex(p, "/")+1:], Kind: domain.KindFolder}),
+		f.record("Mkdir", p, opt(parents, "parents"))
+}
+
+func (f *Fake) Put(_ context.Context, local, dest string, o port.PutOptions, progress port.Progress) (domain.Item, error) {
+	f.progress(progress)
+	if o.Replace && o.OnReplace != nil && f.ReplaceOld.ID != "" {
+		o.OnReplace(f.ReplaceOld)
+	}
+	err := f.record("Put", local, dest, o.Name, strings.Join(o.Tags, ","), string(o.Cover), opt(o.Replace, "replace"), opt(o.DryRun, "dry-run"))
+	if err == nil {
+		err = f.PutErr[local]
+	}
+	return Item(Spec{ID: "d-new", Name: "Uploaded", Kind: domain.KindPDF}), err
+}
+
+func (f *Fake) Move(_ context.Context, src, dst string) (domain.Item, error) {
+	return Item(Spec{ID: "d-paper", Name: "Paper", Kind: domain.KindPDF}), f.record("Move", src, dst)
+}
+
+func (f *Fake) Trash(_ context.Context, q []string) ([]domain.Item, error) {
+	return f.items(q), f.record("Trash", q...)
+}
+
+func (f *Fake) Restore(_ context.Context, q []string, dest string) ([]domain.Item, error) {
+	args := q
+	if dest != "" {
+		args = append(slices.Clone(q), "to="+dest)
+	}
+	return f.items(q), f.record("Restore", args...)
+}
+
+func (f *Fake) Remove(_ context.Context, q []string) ([]domain.Item, error) {
+	return f.items(q), f.record("Remove", q...)
+}
+
+func (f *Fake) items(queries []string) []domain.Item {
+	var out []domain.Item
+	for _, q := range queries {
+		if it, found, err := f.tree().Resolve(q, true); err == nil && found {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func (f *Fake) Upload(_ context.Context, dir, dest string, o port.UploadOptions) (port.MirrorReport, error) {
+	return f.Report, f.record("Upload", dir, dest, opt(o.Incremental, "incremental"))
+}
+
+// Watcher.
+
+func (f *Fake) Watch(ctx context.Context, on func(port.Event)) error {
+	if err := f.record("Watch"); err != nil {
+		return err
+	}
+	for _, e := range f.Events {
+		on(e)
+	}
+	if f.WatchErr != nil {
+		return f.WatchErr
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Inspector.
+
+func (f *Fake) Root(context.Context) (port.RootState, error) {
+	return f.RootState, f.record("Root")
+}
+
+func (f *Fake) Blob(_ context.Context, hash, name string) ([]byte, error) {
+	return f.BlobData, f.record("Blob", hash, name)
+}
+
+func (f *Fake) SaveBlob(_ context.Context, hash, name, dest string) (string, error) {
+	return dest, f.record("SaveBlob", hash, name, dest)
+}
+
+func (f *Fake) Files(_ context.Context, query string) (domain.Item, []port.FileReport, error) {
+	return Item(Spec{ID: query, Name: "x", Kind: domain.KindPDF}), f.Reports, f.record("Files", query)
+}
+
+func (f *Fake) Hashes(context.Context) ([]port.HashReport, error) {
+	return f.HashList, f.record("Hashes")
+}
+
+func (f *Fake) CheckFiles(context.Context) ([]string, error) {
+	return f.Missing, f.record("CheckFiles")
+}
+
+func (f *Fake) Sweep(context.Context) (map[string]int, error) {
+	return f.Counts, f.record("Sweep")
+}
+
+// inputPorts is every input port: the fake stands in for all the use cases.
+type inputPorts interface {
+	port.Account
+	port.Browser
+	port.Fetcher
+	port.Writer
+	port.Watcher
+	port.Inspector
+	port.Pages
+}
+
+var _ inputPorts = (*Fake)(nil)
+
+// Pages.
+
+func (f *Fake) pagesErr(method string, args ...string) error {
+	if err := f.record(method, args...); err != nil {
+		return err
+	}
+	return f.PagesErr
+}
+
+func (f *Fake) Pages(_ context.Context, query string, pages []string) (port.DocumentText, error) {
+	if err := f.pagesErr("Pages", append([]string{query}, pages...)...); err != nil {
+		return port.DocumentText{}, err
+	}
+	return f.Document, nil
+}
+
+func (f *Fake) Unmark(_ context.Context, query string, pages []string) (port.UnmarkReport, error) {
+	if err := f.pagesErr("Unmark", append([]string{query}, pages...)...); err != nil {
+		return port.UnmarkReport{}, err
+	}
+	return f.Unmarked, nil
+}
+
+func (f *Fake) Notebook(_ context.Context, local, dest string, o port.NotebookOptions) (domain.Item, error) {
+	if err := f.pagesErr("Notebook", local, dest, o.Name, string(o.Device), strings.Join(o.Tags, ",")); err != nil {
+		return domain.Item{}, err
+	}
+	if err := f.PutErr[local]; err != nil {
+		return domain.Item{}, err
+	}
+	return Item(Spec{ID: "d-note", Name: NotesName, Kind: domain.KindNotebook}), nil
+}
+
+// PlanNotebook implements port.Pages: the notebook Notebook would make,
+// without an identifier, and a failure of PutErr as the check's.
+func (f *Fake) PlanNotebook(_ context.Context, local, dest string, o port.NotebookOptions) (domain.Item, error) {
+	if err := f.pagesErr("PlanNotebook", local, dest, o.Name, string(o.Device), strings.Join(o.Tags, ",")); err != nil {
+		return domain.Item{}, err
+	}
+	if err := f.PutErr[local]; err != nil {
+		return domain.Item{}, err
+	}
+	return domain.Item{Name: NotesName, Kind: domain.KindNotebook}, nil
+}
+
+// secretsFake is the Fake as port.Secrets: Status would clash with nothing,
+// but kept apart like the archives for symmetry of the doubles.
+type secretsFake Fake
+
+var _ port.Secrets = (*secretsFake)(nil)
+
+// Status implements port.Secrets.
+func (s *secretsFake) Status(context.Context) (port.SecretsStatus, error) {
+	f := (*Fake)(s)
+	if err := f.record("SecretsStatus"); err != nil {
+		return port.SecretsStatus{}, err
+	}
+	return f.SecretsAt, f.SecretsErr
+}
+
+// Migrate implements port.Secrets.
+func (s *secretsFake) Migrate(_ context.Context, to port.SecretsBackend, o port.MigrateOptions) (port.SecretsMigration, error) {
+	f := (*Fake)(s)
+	if err := f.record("Migrate", string(to), opt(o.Replace, "replace"), opt(o.SetDefault, "set-default")); err != nil {
+		return port.SecretsMigration{}, err
+	}
+	return f.Migration, f.SecretsErr
+}

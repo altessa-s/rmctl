@@ -1,0 +1,25 @@
+{
+  "id": "d-paper",
+  "name": "Paper",
+  "kind": "pdf",
+  "parent": "f-books",
+  "path": "/Books/Paper",
+  "trashed": false,
+  "pinned": false,
+  "size": 2158,
+  "modified": "2026-10-31T12:00:00Z",
+  "tags": [],
+  "hash": "h-d-paper",
+  "files": [
+    {
+      "name": "d-paper.metadata",
+      "hash": "h-meta-d-paper",
+      "size": 110
+    },
+    {
+      "name": "d-paper.pdf",
+      "hash": "h-pdf-d-paper",
+      "size": 2048
+    }
+  ]
+}

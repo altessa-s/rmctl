@@ -1,0 +1,47 @@
+# Commit Scopes for rmctl
+# Use these scopes in conventional commits: type(scope): description
+# The scope is optional: omit it for repository-wide changes. Never use `root`.
+# Only the first word of a non-comment line is a scope.
+# Example: fix(browse): resolve an id prefix that names a folder
+
+# Repository scopes
+deps                        # Dependency updates (Dependabot writes build(deps): bump ...)
+README                      # Root README
+docs                        # Documentation
+
+# Command line
+cli                         # Commands, flags, output and exit codes (cmd/rmctl)
+
+# Library model (internal)
+domain                      # Items, the tree, paths, .metadata and .content
+port                        # Contracts the use cases ask of the outside
+
+# Use cases (internal)
+library                     # Loads the tree and commits changes to the root
+account                     # Register, logout, account information
+browse                      # ls, tree, stat, find
+fetch                       # get, export, mget
+write                       # mkdir, put, mv, trash, restore, rm, mput
+watch                       # Live notifications
+archives                    # Local .rmdoc archives, offline
+inspect                     # Protocol diagnostics (rmctl debug ...)
+pages                       # Page text, highlights, unmark and notebooks from text
+
+# Adapters (internal)
+cloud                       # The reMarkable cloud through rmcloud-go
+rmpages                     # The .rm page format through rmlines-go
+rmdocs                      # The .rmdoc container through rmdoc-go
+secrets                     # Where the tokens are kept, and moving them
+secretfile                  # The token file of mode 0600
+keychain                    # The macOS Keychain
+vault                       # Token stores as a port
+cache                       # The blob cache on disk
+files                       # Local files: safe writes and reads
+config                      # Profiles, paths and the environment
+wiring                      # Wires the adapters into the use cases
+porttest                    # Doubles of the ports
+clouddouble                 # The emulated cloud for tests
+
+# Tooling
+devtools                    # Development tool dependencies
+ci                          # GitHub Actions workflows and scripts

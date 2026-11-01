@@ -1,0 +1,22 @@
+{
+  "id": "a",
+  "files": [
+    {
+      "name": "a.metadata",
+      "hash": "h1",
+      "size": 80,
+      "text": "{\n  \"lastModified\": \"1730000000000\",\n  \"version\": 3,\n  \"visibleName\": \"<name:6>.pdf\"\n}\n"
+    },
+    {
+      "name": "a.pagedata",
+      "hash": "h2",
+      "size": 6,
+      "text": "Blank"
+    },
+    {
+      "name": "a.pdf",
+      "hash": "h3",
+      "size": 2048
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+# IDE
+.idea/
+
+# Release notes are generated at release time
+/CHANGELOG.md
+
+# Local automation scripts
+/scripts/
+
+# Test binary, build with `go test -c`
+*.test
+
+.DS_Store
+go.work
+go.work.sum
+
+/bin/
+build/
+dist/
+
+# Test & coverage
+coverage.out
+coverage.html
+*.coverprofile
+bench.txt
+
+# Vendor (use go mod download)
+vendor/
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Editors
+.vscode/
+*.swp
+*~
+
+tmp/
+/plans/

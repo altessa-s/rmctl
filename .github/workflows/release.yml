@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Release checks
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # The page commands link rmlines-lib and rmmarks-lib, C23 libraries
+  # built through cgo, so every binary is built natively on its own runner;
+  # goreleaser only publishes them and writes the changelog.
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: gcc }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: gcc }
+          - { runner: macos-latest, goos: darwin, goarch: arm64, cc: clang }
+          # Apple's clang builds the other architecture with -arch.
+          - { runner: macos-latest, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
+          # MSVC is not a C23 compiler; the runner's LLVM clang is.
+          - { runner: windows-latest, goos: windows, goarch: amd64, cc: clang }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          ext=""; [[ "$GOOS" == windows ]] && ext=".exe"
+          pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
+          mkdir -p out artifacts
+          go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Commit=${GITHUB_SHA::7} -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+          cp LICENSE README.md out/
+          name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"
+          if [[ "$GOOS" == windows ]]; then
+            (cd out && 7z a -tzip "../artifacts/${name}.zip" . >/dev/null)
+          else
+            tar -C out -czf "artifacts/${name}.tar.gz" .
+          fi
+
+      - name: Smoke test
+        # darwin/amd64 is built on an arm64 runner and is not run here.
+        if: matrix.goos != 'darwin' || matrix.goarch != 'amd64'
+        shell: bash
+        run: |
+          bin=./out/rmctl
+          [[ "${{ matrix.goos }}" == windows ]] && bin=./out/rmctl.exe
+          "$bin" version --full
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rmctl-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifacts/*
+          retention-days: 7
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rmctl-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: (cd artifacts && sha256sum rmctl_* > checksums.txt && cat checksums.txt)
+
+      - name: Run GoReleaser
+        # builds are skipped in .goreleaser.yml: it publishes artifacts/ and
+        # writes the release notes from the commits.
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.19.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

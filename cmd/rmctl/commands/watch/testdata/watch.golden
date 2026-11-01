@@ -1,0 +1,15 @@
+{
+  "time": "1970-01-01T00:00:00Z",
+  "event": "SyncComplete",
+  "frame": "{\"message\":{\"attributes\":{\"event\":\"SyncComplete\",\"id\":\"d-1\",\"vissibleName\":\"Secret plan.pdf\"},\"messageid\":\"m-1\"}}"
+}
+{
+  "time": "1970-01-01T00:00:00Z",
+  "event": "DocAdded",
+  "frame": ""
+}
+{
+  "time": "1970-01-01T00:00:00Z",
+  "event": "unreadable frame",
+  "frame": "not json"
+}

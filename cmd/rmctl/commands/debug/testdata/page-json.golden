@@ -1,0 +1,43 @@
+[
+  {
+    "number": 1,
+    "id": "p-1",
+    "paragraphs": 1,
+    "highlights": 1,
+    "strokes": 5,
+    "strokes_by_tool": {
+      "fineliner": 3,
+      "pencil": 2
+    },
+    "strokes_by_color": {
+      "black": 4,
+      "red": 1
+    },
+    "anchored_strokes": 1,
+    "images": 2,
+    "skipped_blocks": 1,
+    "paper_width": 1404,
+    "paper_height": 1872,
+    "marks": [
+      {
+        "id": "1:9",
+        "color": "yellow",
+        "rects": 2
+      }
+    ]
+  },
+  {
+    "number": 2,
+    "id": "p-2",
+    "paragraphs": 0,
+    "highlights": 0,
+    "strokes": 0,
+    "strokes_by_tool": {},
+    "strokes_by_color": {},
+    "anchored_strokes": 0,
+    "images": 0,
+    "skipped_blocks": 0,
+    "paper_width": 0,
+    "paper_height": 0
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "file": "a.pdf",
+    "item": {
+      "id": "d-new",
+      "name": "Uploaded",
+      "kind": "pdf",
+      "parent": "",
+      "path": "",
+      "trashed": false,
+      "pinned": false,
+      "size": 2123,
+      "tags": [],
+      "hash": "h-d-new"
+    }
+  },
+  {
+    "file": "b.pdf",
+    "error": "locked PDF"
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "id": "d-notes",
+  "name": "Notes",
+  "highlights": [
+    {
+      "page": 2,
+      "page_id": "p-2",
+      "id": "1:5",
+      "color": "yellow",
+      "text": "the marked words",
+      "has_text": true
+    },
+    {
+      "page": 2,
+      "page_id": "p-2",
+      "id": "1:6",
+      "color": "unknown",
+      "text": "",
+      "has_text": false
+    }
+  ]
+}
