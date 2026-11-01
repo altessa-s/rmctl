@@ -144,6 +144,11 @@ jobs:
       - name: Checksums
         run: (cd artifacts && sha256sum rmctl_* > checksums.txt && cat checksums.txt)
 
+      - name: Keep the archives out of git status
+        # goreleaser refuses a dirty tree; a released tag's own .gitignore may
+        # predate this directory.
+        run: echo "/artifacts/" >> .git/info/exclude
+
       - name: Run GoReleaser
         # builds are skipped in .goreleaser.yml: it publishes artifacts/ and
         # writes the release notes from the commits.
