@@ -11,8 +11,10 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -351,5 +353,124 @@ func TestExecMissingProgramWithTheRealRunner(t *testing.T) {
 	if !strings.Contains(res.Err, "exec: "+prog+": ") || !strings.Contains(res.Err, "no such file or directory") ||
 		strings.Contains(res.Err, "exited") {
 		t.Fatalf("%q", res.Err)
+	}
+}
+
+// A burst within one debounce window keeps the newest maxBatch events and
+// counts the rest; the pending batch never grows past the bound.
+func TestExecBatchIsBoundedWithinOneWindow(t *testing.T) {
+	t.Parallel()
+	r := &fakeRunner{}
+	var errOut syncBuffer
+	d := newTestDispatcher(r, execOptions{debounce: time.Hour}, &errOut)
+	const burst = 2500
+	for i := range burst {
+		d.add(library("e" + strconv.Itoa(i)))
+		d.mu.Lock()
+		n, c := len(d.pending.events), cap(d.pending.events)
+		d.mu.Unlock()
+		if n > maxBatch || c > 2*maxBatch {
+			t.Fatalf("after %d events the pending batch holds %d (capacity %d)", i+1, n, c)
+		}
+	}
+	go d.work(t.Context())
+	d.close()
+	<-d.done
+	runs := r.runs()
+	if len(runs) != 1 {
+		t.Fatalf("%d runs", len(runs))
+	}
+	in := runs[0].input
+	if len(in.Events) != maxBatch || in.Dropped != burst-maxBatch || in.Events[0].ID != "e1500" || in.Events[maxBatch-1].ID != "e2499" ||
+		runs[0].env["RMCTL_DROPPED"] != "1500" || runs[0].env["RMCTL_COUNT"] != "1000" {
+		t.Fatalf("%d events, dropped %d, env %v", len(in.Events), in.Dropped, runs[0].env["RMCTL_DROPPED"])
+	}
+	if got := errOut.String(); strings.Count(got, "older events of this batch were dropped") != 1 || !strings.Contains(got, "exec: 1500 older events") {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Merged into the last batch of a full queue, the batch keeps the bound
+// and adds up what both dropped.
+func TestExecMergeRespectsTheBound(t *testing.T) {
+	t.Parallel()
+	r := &fakeRunner{block: make(chan struct{}), started: make(chan struct{}, maxQueue+4)}
+	var errOut syncBuffer
+	d := newTestDispatcher(r, execOptions{debounce: time.Hour}, &errOut)
+	go d.work(t.Context())
+	d.add(library("first"))
+	d.flush()
+	<-r.started
+	for i := range maxQueue {
+		d.add(library("q" + strconv.Itoa(i)))
+		d.flush()
+	}
+	// The queue is full: 1500 more events, 500 dropped while pending and
+	// one more when they join the last batch waiting.
+	for i := range 1500 {
+		d.add(library("m" + strconv.Itoa(i)))
+	}
+	d.flush()
+	d.mu.Lock()
+	last := d.queue[len(d.queue)-1]
+	d.mu.Unlock()
+	if len(last.events) != maxBatch || last.dropped != 501 {
+		t.Fatalf("the last batch holds %d, dropped %d", len(last.events), last.dropped)
+	}
+	close(r.block)
+	d.close()
+	<-d.done
+	runs := r.runs()
+	in := runs[len(runs)-1].input
+	if len(runs) != 1+maxQueue || len(in.Events) != maxBatch || in.Dropped != 501 || in.Events[0].ID != "m500" || in.Events[maxBatch-1].ID != "m1499" {
+		t.Fatalf("%d runs; the last of %d events, dropped %d", len(runs), len(in.Events), in.Dropped)
+	}
+	if in := runs[1].input; in.Dropped != 0 || runs[1].env["RMCTL_DROPPED"] != "0" {
+		t.Fatalf("a whole batch reports drops: %+v", in)
+	}
+}
+
+// The command gets each RMCTL_ variable once, with the event's value, even
+// when rmctl's own environment already holds a stale one.
+func TestExecRunnerReplacesInheritedVariables(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs sh")
+	}
+	r := execRunner{environ: func() []string {
+		return []string{"RMCTL_EVENT=stale", "RMCTL_PATH=stale", "RMCTL_KEEP=kept", "PATH=" + os.Getenv("PATH")}
+	}}
+	var out bytes.Buffer
+	if _, err := r.Run(t.Context(), []string{"env"}, []string{"RMCTL_EVENT=DocAdded", "RMCTL_PATH=/Books/Paper"}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string][]string{}
+	for line := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
+		k, v, _ := strings.Cut(line, "=")
+		seen[k] = append(seen[k], v)
+	}
+	for k, want := range map[string]string{"RMCTL_EVENT": "DocAdded", "RMCTL_PATH": "/Books/Paper", "RMCTL_KEEP": "kept"} {
+		if !slices.Equal(seen[k], []string{want}) {
+			t.Errorf("%s: %q, want once %q", k, seen[k], want)
+		}
+	}
+}
+
+func TestChildEnv(t *testing.T) {
+	t.Parallel()
+	base := []string{"rmctl_event=stale", "RMCTL_PATH=stale", "=C:=C:\\x", "HOME=/h", "ODD"}
+	set := []string{"RMCTL_EVENT=new", "RMCTL_PATH=/p"}
+	// Keys compare with case on POSIX: rmctl_event is another variable.
+	if got := childEnv(base, set, false); !slices.Equal(got, []string{"rmctl_event=stale", "=C:=C:\\x", "HOME=/h", "ODD", "RMCTL_EVENT=new", "RMCTL_PATH=/p"}) {
+		t.Fatalf("%q", got)
+	}
+	// Without case on Windows; the per-drive entry is kept.
+	if got := childEnv(base, set, true); !slices.Equal(got, []string{"=C:=C:\\x", "HOME=/h", "ODD", "RMCTL_EVENT=new", "RMCTL_PATH=/p"}) {
+		t.Fatalf("%q", got)
+	}
+	for kv, key := range map[string]string{"A=b": "A", "=C:=C:\\x": "=C:", "ODD": "ODD", "": "", "K==v": "K"} {
+		if got := envKey(kv); got != key {
+			t.Errorf("envKey(%q) = %q, want %q", kv, got, key)
+		}
 	}
 }

@@ -58,9 +58,14 @@ func newWatch(env *cliutil.Env, run runner) *cobra.Command {
 			hands --exec to sh -c (then the arguments after -- are $0, $1, ...). The
 			events reach it only through its environment — RMCTL_EVENT, RMCTL_ID,
 			RMCTL_NAME, RMCTL_PATH, RMCTL_KIND, RMCTL_THIS_DEVICE and RMCTL_TIME of
-			the last event, RMCTL_COUNT, RMCTL_PROFILE — and as JSON on its standard
-			input ({"profile": ..., "events": [...]}); no name is ever put into its
-			command line. Runs happen one at a time; each may take --exec-timeout,
+			the last event, RMCTL_COUNT, RMCTL_DROPPED, RMCTL_PROFILE — and as JSON
+			on its standard input ({"profile": ..., "dropped": N, "events": [...]});
+			no name is ever put into its command line. Each variable replaces one of
+			the same name in rmctl's environment. A batch holds at most 1000 events:
+			past that the oldest are dropped, counted in RMCTL_DROPPED and "dropped",
+			and noted on standard error, so a program that sees a non-zero count
+			knows it missed events and can rescan the library. Runs happen one at a
+			time; each may take --exec-timeout,
 			and its output goes to standard error. A run that fails is noted with
 			its exit status, and watch goes on. --only and --under keep the events
 			of documents or folders, or below a folder. At Ctrl-C a run under way

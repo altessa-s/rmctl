@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,7 +34,9 @@ const (
 	// maxQueue bounds the runs waiting; past it, a batch joins the last
 	// one waiting rather than being lost.
 	maxQueue = 16
-	// maxBatch bounds the events of one run; past it the oldest go.
+	// maxBatch bounds the events of one batch, pending or waiting: past
+	// it the oldest go and are counted, so a run knows it saw a truncated
+	// batch and can rescan.
 	maxBatch = 1000
 	// waitDelay is how long a finished command's output may still flow.
 	waitDelay = time.Second
@@ -68,11 +71,18 @@ type runner interface {
 }
 
 // execRunner runs commands as processes. ctx ending kills the process.
-type execRunner struct{}
+// environ is the environment the command inherits; nil is rmctl's own.
+type execRunner struct {
+	environ func() []string
+}
 
-func (execRunner) Run(ctx context.Context, argv, env []string, stdin []byte, out io.Writer) (int, error) {
+func (r execRunner) Run(ctx context.Context, argv, env []string, stdin []byte, out io.Writer) (int, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- the user's own command, run as argv without a shell
-	cmd.Env = append(os.Environ(), env...)
+	inherited := os.Environ
+	if r.environ != nil {
+		inherited = r.environ
+	}
+	cmd.Env = childEnv(inherited(), env, runtime.GOOS == "windows")
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = waitDelay
@@ -88,6 +98,38 @@ func (execRunner) Run(ctx context.Context, argv, env []string, stdin []byte, out
 	return cmd.ProcessState.ExitCode(), err
 }
 
+// childEnv is base with the variables of set put in: a variable base
+// already holds is replaced, not repeated, so each key appears once. fold
+// compares keys without case, as Windows does.
+func childEnv(base, set []string, fold bool) []string {
+	norm := func(k string) string {
+		if fold {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
+	replaced := make(map[string]bool, len(set))
+	for _, kv := range set {
+		replaced[norm(envKey(kv))] = true
+	}
+	out := make([]string, 0, len(base)+len(set))
+	for _, kv := range base {
+		if !replaced[norm(envKey(kv))] {
+			out = append(out, kv)
+		}
+	}
+	return append(out, set...)
+}
+
+// envKey is the name of a KEY=value entry. Windows keeps per-drive
+// entries such as "=C:=C:\\x", whose name starts with the "=".
+func envKey(kv string) string {
+	if i := strings.IndexByte(kv[min(1, len(kv)):], '='); i >= 0 {
+		return kv[:i+min(1, len(kv))]
+	}
+	return kv
+}
+
 // execEvent is one event as a run receives it.
 type execEvent struct {
 	Time       string `json:"time"`
@@ -100,8 +142,11 @@ type execEvent struct {
 }
 
 // execInput is what a run reads on its standard input.
+// Dropped counts the events of the batch left out, the oldest first, to
+// keep it within maxBatch.
 type execInput struct {
 	Profile string      `json:"profile"`
+	Dropped int         `json:"dropped"`
 	Events  []execEvent `json:"events"`
 }
 
@@ -115,10 +160,9 @@ type dispatcher struct {
 	now    func() time.Time
 
 	mu      sync.Mutex
-	pending []port.Event
-	stamps  []time.Time
+	pending batch
 	timer   *time.Timer
-	queue   [][]stampedEvent
+	queue   []batch
 	closed  bool
 	wake    chan struct{}
 	done    chan struct{}
@@ -127,6 +171,23 @@ type dispatcher struct {
 type stampedEvent struct {
 	at time.Time
 	e  port.Event
+}
+
+// batch is the events of one run, at most maxBatch of them, the newest
+// kept, and how many older ones were dropped to stay within it.
+type batch struct {
+	events  []stampedEvent
+	dropped int
+}
+
+// add puts events at the end and drops the oldest beyond maxBatch. The
+// slice never holds more than maxBatch events once add returns.
+func (b *batch) add(events ...stampedEvent) {
+	b.events = append(b.events, events...)
+	if over := len(b.events) - maxBatch; over > 0 {
+		b.events = append(b.events[:0], b.events[over:]...)
+		b.dropped += over
+	}
 }
 
 func newDispatcher(opts execOptions, r runner, tree func(context.Context) (*domain.Tree, error), errOut io.Writer, now func() time.Time) *dispatcher {
@@ -147,8 +208,7 @@ func (d *dispatcher) add(e port.Event) {
 	if d.closed {
 		return
 	}
-	d.pending = append(d.pending, e)
-	d.stamps = append(d.stamps, d.now())
+	d.pending.add(stampedEvent{at: d.now(), e: e})
 	if d.timer == nil {
 		d.timer = time.AfterFunc(d.opts.debounce, d.flush)
 	}
@@ -168,23 +228,18 @@ func (d *dispatcher) flushLocked() {
 		d.timer.Stop()
 		d.timer = nil
 	}
-	if len(d.pending) == 0 {
+	if len(d.pending.events) == 0 {
 		return
 	}
-	batch := make([]stampedEvent, len(d.pending))
-	for i, e := range d.pending {
-		batch[i] = stampedEvent{at: d.stamps[i], e: e}
-	}
-	d.pending, d.stamps = nil, nil
+	b := d.pending
+	d.pending = batch{}
 	if len(d.queue) < maxQueue {
-		d.queue = append(d.queue, batch)
+		d.queue = append(d.queue, b)
 		return
 	}
-	last := len(d.queue) - 1
-	d.queue[last] = append(d.queue[last], batch...)
-	if n := len(d.queue[last]); n > maxBatch {
-		d.queue[last] = d.queue[last][n-maxBatch:]
-	}
+	last := &d.queue[len(d.queue)-1]
+	last.dropped += b.dropped
+	last.add(b.events...)
 }
 
 func (d *dispatcher) signal() {
@@ -230,16 +285,16 @@ func (d *dispatcher) work(ctx context.Context) {
 			}
 			continue
 		}
-		batch := d.queue[0]
+		b := d.queue[0]
 		d.queue = d.queue[1:]
 		d.mu.Unlock()
-		d.runBatch(ctx, batch)
+		d.runBatch(ctx, b)
 	}
 }
 
 // runBatch runs the command once for batch, its events filtered and
 // described with the library's paths.
-func (d *dispatcher) runBatch(ctx context.Context, batch []stampedEvent) {
+func (d *dispatcher) runBatch(ctx context.Context, b batch) {
 	var tree *domain.Tree
 	if d.tree != nil {
 		t, err := d.tree(ctx)
@@ -251,8 +306,11 @@ func (d *dispatcher) runBatch(ctx context.Context, batch []stampedEvent) {
 		}
 		tree = t
 	}
-	events := make([]execEvent, 0, len(batch))
-	for _, s := range batch {
+	if b.dropped > 0 {
+		cliutil.Notef(d.errOut, "exec: %d older events of this batch were dropped; the run gets the newest %d (RMCTL_DROPPED)", b.dropped, len(b.events))
+	}
+	events := make([]execEvent, 0, len(b.events))
+	for _, s := range b.events {
 		ev, ok := d.describe(tree, s)
 		if ok {
 			events = append(events, ev)
@@ -271,9 +329,10 @@ func (d *dispatcher) runBatch(ctx context.Context, batch []stampedEvent) {
 		"RMCTL_THIS_DEVICE=" + strconv.FormatBool(last.ThisDevice),
 		"RMCTL_TIME=" + last.Time,
 		"RMCTL_COUNT=" + strconv.Itoa(len(events)),
+		"RMCTL_DROPPED=" + strconv.Itoa(b.dropped),
 		"RMCTL_PROFILE=" + d.opts.profile,
 	}
-	stdin, err := json.Marshal(execInput{Profile: d.opts.profile, Events: events}, json.Deterministic(true))
+	stdin, err := json.Marshal(execInput{Profile: d.opts.profile, Dropped: b.dropped, Events: events}, json.Deterministic(true))
 	if err != nil {
 		cliutil.Notef(d.errOut, "exec: %v", err)
 		return
