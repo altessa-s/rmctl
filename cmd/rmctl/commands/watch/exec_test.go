@@ -390,6 +390,52 @@ func TestExecBatchIsBoundedWithinOneWindow(t *testing.T) {
 	}
 }
 
+// A batch that lost events runs even when no kept event passes the filters,
+// or when the library cannot be read to apply them: the program must learn
+// that it missed events.
+func TestExecDroppedRunsDespiteFilters(t *testing.T) {
+	t.Parallel()
+	for name, tree := range map[string]func(context.Context) (*domain.Tree, error){
+		"none kept": func(context.Context) (*domain.Tree, error) { return domain.NewTree(1, nil), nil },
+		"no library": func(context.Context) (*domain.Tree, error) {
+			return nil, errors.New("offline")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := &fakeRunner{}
+			var errOut syncBuffer
+			d := newDispatcher(execOptions{argv: []string{"prog"}, timeout: time.Minute, debounce: time.Hour, only: "document"},
+				r, tree, &errOut, time.Now)
+			for i := range maxBatch + 7 {
+				d.add(library("e" + strconv.Itoa(i)))
+			}
+			go d.work(t.Context())
+			d.close()
+			<-d.done
+			runs := r.runs()
+			if len(runs) != 1 {
+				t.Fatalf("%d runs", len(runs))
+			}
+			in, env := runs[0].input, runs[0].env
+			if len(in.Events) != 0 || in.Dropped != 7 || env["RMCTL_DROPPED"] != "7" || env["RMCTL_COUNT"] != "0" || env["RMCTL_EVENT"] != "" {
+				t.Fatalf("%d events, dropped %d, env %v", len(in.Events), in.Dropped, env)
+			}
+		})
+	}
+	// Without a loss, a batch the filters empty still makes no run.
+	r := &fakeRunner{}
+	d := newDispatcher(execOptions{argv: []string{"prog"}, timeout: time.Minute, debounce: time.Hour, only: "document"},
+		r, func(context.Context) (*domain.Tree, error) { return domain.NewTree(1, nil), nil }, io.Discard, time.Now)
+	d.add(library("gone"))
+	go d.work(t.Context())
+	d.close()
+	<-d.done
+	if runs := r.runs(); len(runs) != 0 {
+		t.Fatalf("%d runs", len(runs))
+	}
+}
+
 // Merged into the last batch of a full queue, the batch keeps the bound
 // and adds up what both dropped.
 func TestExecMergeRespectsTheBound(t *testing.T) {

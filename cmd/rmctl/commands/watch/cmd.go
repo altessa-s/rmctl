@@ -64,7 +64,8 @@ func newWatch(env *cliutil.Env, run runner) *cobra.Command {
 			the same name in rmctl's environment. A batch holds at most 1000 events:
 			past that the oldest are dropped, counted in RMCTL_DROPPED and "dropped",
 			and noted on standard error, so a program that sees a non-zero count
-			knows it missed events and can rescan the library. Runs happen one at a
+			knows it missed events and can rescan the library; such a batch runs even
+			when no event kept passes the filters. Runs happen one at a
 			time; each may take --exec-timeout,
 			and its output goes to standard error. A run that fails is noted with
 			its exit status, and watch goes on. --only and --under keep the events

@@ -300,26 +300,36 @@ func (d *dispatcher) runBatch(ctx context.Context, b batch) {
 		t, err := d.tree(ctx)
 		if err != nil {
 			cliutil.Notef(d.errOut, "exec: the library for the paths: %v", err)
-			if d.opts.only != "" || d.opts.under != "" {
+			if (d.opts.only != "" || d.opts.under != "") && b.dropped == 0 {
 				return
 			}
 		}
 		tree = t
 	}
+	// Without the library, filters cannot be applied: a batch that lost
+	// events still runs, with no events, so the program learns of the loss.
+	filtersBlind := tree == nil && (d.opts.only != "" || d.opts.under != "")
 	if b.dropped > 0 {
 		cliutil.Notef(d.errOut, "exec: %d older events of this batch were dropped; the run gets the newest %d (RMCTL_DROPPED)", b.dropped, len(b.events))
 	}
 	events := make([]execEvent, 0, len(b.events))
-	for _, s := range b.events {
-		ev, ok := d.describe(tree, s)
-		if ok {
-			events = append(events, ev)
+	if !filtersBlind {
+		for _, s := range b.events {
+			ev, ok := d.describe(tree, s)
+			if ok {
+				events = append(events, ev)
+			}
 		}
 	}
-	if len(events) == 0 {
+	// A batch that lost events always runs, even when no kept event passes
+	// the filters: the dropped count tells the program to rescan.
+	if len(events) == 0 && b.dropped == 0 {
 		return
 	}
-	last := events[len(events)-1]
+	var last execEvent
+	if len(events) > 0 {
+		last = events[len(events)-1]
+	}
 	env := []string{
 		"RMCTL_EVENT=" + last.Event,
 		"RMCTL_ID=" + last.ID,

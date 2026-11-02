@@ -143,7 +143,8 @@ and documents it would create. `restore` is the subcommand, so a backup director
   runs, up to 16 batches wait, and past that a batch joins the last one waiting. A batch holds at most 1000 events, however it grows —
   within one debounce window or by joining the last one waiting: past that the oldest are dropped and the newest 1000 kept. The run is
   told how many went, in `RMCTL_DROPPED` and `"dropped"`, and `watch` notes it on standard error once per batch; a program that sees a
-  non-zero count missed events and should rescan the library (`rmctl ls -l`, `rmctl find`) rather than trust the batch.
+  non-zero count missed events and should rescan the library (`rmctl ls -l`, `rmctl find`) rather than trust the batch. A batch that
+  lost events always runs, even when none of the events kept passes `--only` or `--under`, then with an empty event list.
 - **No shell, no interpolation.** The program runs as given, with the arguments after `--`. `--shell` hands `--exec` to `sh -c` instead
   (the arguments after `--` become `$0`, `$1`, …). Names are never put into the command line: the events reach the program only through its
   environment — `RMCTL_EVENT`, `RMCTL_ID`, `RMCTL_NAME`, `RMCTL_PATH`, `RMCTL_KIND`, `RMCTL_THIS_DEVICE` and `RMCTL_TIME` of the batch's
