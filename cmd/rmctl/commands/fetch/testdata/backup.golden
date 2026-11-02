@@ -3,6 +3,7 @@
   "documents": 1,
   "written": 0,
   "skipped": 0,
-  "moved": 0,
-  "pruned": 2
+  "moved": 3,
+  "pruned": 2,
+  "outside": 3
 }

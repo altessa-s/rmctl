@@ -26,6 +26,11 @@ import (
 // profile.
 var ErrOtherProfile = errors.New("the directory holds a backup of another profile; pass --force to back up into it anyway")
 
+// ErrOtherPath means a backup directory holds the backup of another path
+// of the library.
+var ErrOtherPath = errors.New("back up into another directory, or pass --rescope to bind this one to the new path " +
+	"(the archives outside it are moved to removed/, never deleted)")
+
 // ErrNotADirectory means a backup directory is a file.
 var ErrNotADirectory = errors.New("not a directory")
 
@@ -74,7 +79,7 @@ func (s *Service) Backup(ctx context.Context, dir, query string, opts port.Backu
 	if err != nil {
 		return report, err
 	}
-	old, err := s.manifest(dir, opts)
+	old, err := s.manifest(dir, covered, opts)
 	if err != nil {
 		return report, err
 	}
@@ -112,7 +117,10 @@ func (s *Service) Backup(ctx context.Context, dir, query string, opts port.Backu
 	if err != nil {
 		return report, err
 	}
-	if report.Moved, report.Pruned, err = s.setAside(dir, old, entries, opts.Prune); err != nil {
+	// A re-scope deletes nothing: what the old path held is no longer
+	// this backup's to judge.
+	rescoped := old.Path != "" && old.Path != covered
+	if err = s.setAside(dir, tree, old, entries, opts.Prune && !rescoped, opts.All, &report); err != nil {
 		return report, err
 	}
 	m := domain.BackupManifest{
@@ -130,8 +138,9 @@ func (s *Service) Backup(ctx context.Context, dir, query string, opts port.Backu
 }
 
 // manifest is the manifest dir holds, empty when there is none, checked
-// against the profile.
-func (s *Service) manifest(dir string, opts port.BackupOptions) (domain.BackupManifest, error) {
+// against the profile and the path covered: a directory is bound to the
+// path its manifest records.
+func (s *Service) manifest(dir, covered string, opts port.BackupOptions) (domain.BackupManifest, error) {
 	_, isDir, exists, err := s.files.Stat(dir)
 	switch {
 	case err != nil:
@@ -147,6 +156,9 @@ func (s *Service) manifest(dir string, opts port.BackupOptions) (domain.BackupMa
 	}
 	if m.Profile != opts.Profile && !opts.Force {
 		return domain.BackupManifest{}, fmt.Errorf("%s holds profile %q: %w", dir, m.Profile, ErrOtherProfile)
+	}
+	if m.Path != "" && m.Path != covered && !opts.Rescope {
+		return domain.BackupManifest{}, fmt.Errorf("%s holds the backup of %s, not %s: %w", dir, m.Path, covered, ErrOtherPath)
 	}
 	return m, nil
 }
@@ -195,10 +207,15 @@ func (s *Service) backupOne(
 	return domain.NewBackupEntry(tree, it, name, size), true, nil
 }
 
-// setAside moves the archives of the documents old lists and entries do
-// not into the removed directory, or deletes them with prune. An archive
-// already gone is not counted.
-func (s *Service) setAside(dir string, old domain.BackupManifest, entries []domain.BackupEntry, prune bool) (moved, pruned int, err error) {
+// setAside deals with the archives of the documents old lists and entries
+// do not. The archive of a document gone from the library — deleted, or in
+// the trash unless all — is deleted with prune and moved into the removed
+// directory otherwise; the archive of a document still there but outside
+// the path backed up is always moved, never deleted. An archive already
+// gone is not counted.
+func (s *Service) setAside(
+	dir string, tree *domain.Tree, old domain.BackupManifest, entries []domain.BackupEntry, prune, all bool, report *port.BackupReport,
+) error {
 	kept := make(map[domain.ItemID]bool, len(entries))
 	for _, e := range entries {
 		kept[e.ID] = true
@@ -209,27 +226,32 @@ func (s *Service) setAside(dir string, old domain.BackupManifest, entries []doma
 			continue
 		}
 		path := filepath.Join(dir, e.File)
-		_, isDir, exists, serr := s.files.Stat(path)
-		if serr != nil {
-			return moved, pruned, serr
+		_, isDir, exists, err := s.files.Stat(path)
+		if err != nil {
+			return err
 		}
 		if !exists || isDir {
 			continue
 		}
-		if prune {
+		_, inLibrary := tree.Get(e.ID)
+		gone := !inLibrary || (!all && tree.IsTrashed(e.ID))
+		if gone && prune {
 			if err = s.files.Remove(path); err != nil {
-				return moved, pruned, err
+				return err
 			}
-			pruned++
+			report.Pruned++
 			continue
 		}
 		if err = s.files.MkdirAll(removed); err != nil {
-			return moved, pruned, err
+			return err
 		}
 		if err = s.files.Rename(path, filepath.Join(removed, e.File)); err != nil {
-			return moved, pruned, err
+			return err
 		}
-		moved++
+		report.Moved++
+		if !gone {
+			report.Outside++
+		}
 	}
-	return moved, pruned, nil
+	return nil
 }

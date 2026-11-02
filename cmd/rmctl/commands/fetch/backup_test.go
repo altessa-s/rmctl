@@ -22,14 +22,18 @@ func TestBackup(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{Backed: port.BackupReport{Documents: 5, Written: 2, Skipped: 3, Moved: 1}}
 	r := run(t, f, clitest.Options{}, "backup", "bk")
-	want := "dir\tbk\ndocuments\t5\nwritten\t2\nskipped\t3\nmoved\t1\npruned\t0\n"
-	if r.Code != 0 || r.Out != want || f.Calls()[0] != "Backup bk / profile=default    jobs=0" {
+	want := "dir\tbk\ndocuments\t5\nwritten\t2\nskipped\t3\nmoved\t1\npruned\t0\noutside\t0\n"
+	if r.Code != 0 || r.Out != want || f.Calls()[0] != "Backup bk / profile=default     jobs=0" || r.Err != "" {
 		t.Fatalf("%d %q %q", r.Code, r.Out, f.Calls())
 	}
-	f = &clitest.Fake{Backed: port.BackupReport{Documents: 1, Pruned: 2}}
-	r = run(t, f, clitest.Options{}, "backup", "bk", "/Notes", "--all", "--prune", "--force", "-j", "8", "--profile", "work", "--json")
-	if r.Code != 0 || f.Calls()[0] != "Backup bk /Notes profile=work all prune force jobs=8" {
+	f = &clitest.Fake{Backed: port.BackupReport{Documents: 1, Pruned: 2, Moved: 3, Outside: 3}}
+	r = run(t, f, clitest.Options{}, "backup", "bk", "/Notes", "--all", "--prune", "--force", "--rescope", "-j", "8", "--profile", "work", "--json")
+	if r.Code != 0 || f.Calls()[0] != "Backup bk /Notes profile=work all prune force rescope jobs=8" {
 		t.Fatalf("%d %q", r.Code, f.Calls())
+	}
+	// The archives moved for being outside the path are said.
+	if want := "3 archives of documents outside /Notes were moved to removed/; they are never deleted"; !strings.Contains(r.Err, want) {
+		t.Fatalf("%q", r.Err)
 	}
 	clitest.Golden(t, "backup", r.Out)
 	// A directory named restore is ./restore.

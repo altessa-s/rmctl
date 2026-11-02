@@ -305,7 +305,7 @@ func (f *Fake) Mirror(_ context.Context, query, dir string, o port.MirrorOptions
 // Backup implements port.Fetcher.
 func (f *Fake) Backup(_ context.Context, dir, query string, o port.BackupOptions) (port.BackupReport, error) {
 	err := f.record("Backup", dir, query, "profile="+o.Profile, opt(o.All, "all"), opt(o.Prune, "prune"),
-		opt(o.Force, "force"), "jobs="+strconv.Itoa(o.Jobs))
+		opt(o.Force, "force"), opt(o.Rescope, "rescope"), "jobs="+strconv.Itoa(o.Jobs))
 	r := f.Backed
 	r.Dir = dir
 	return r, err

@@ -98,20 +98,28 @@ type BackupOptions struct {
 	Profile string
 	// All takes the documents in the trash too.
 	All bool
-	// Prune deletes the archives of documents the backup no longer covers
-	// instead of moving them to the removed directory.
+	// Prune deletes the archives of documents gone from the library —
+	// deleted, or in the trash unless All — instead of moving them to the
+	// removed directory. The archive of a document that is still there but
+	// outside the path is always moved, never deleted.
 	Prune bool
+	// Force backs up into a directory holding another profile's backup.
 	Force bool
-	Jobs  int
+	// Rescope backs up into a directory holding the backup of another
+	// path: its manifest takes the new path, and the archives outside it
+	// are moved to the removed directory; nothing is deleted.
+	Rescope bool
+	Jobs    int
 }
 
 // BackupReport is what a backup did: Documents is how many the manifest
 // lists, Written and Skipped how many archives were written or found
-// unchanged, Moved and Pruned how many archives of documents gone were
-// moved aside or deleted.
+// unchanged, Moved and Pruned how many archives the backup no longer
+// covers were moved aside or deleted, and Outside how many of those moved
+// belong to documents still in the library, outside the path.
 type BackupReport struct {
-	Dir                                        string
-	Documents, Written, Skipped, Moved, Pruned int
+	Dir                                                 string
+	Documents, Written, Skipped, Moved, Pruned, Outside int
 }
 
 // Cover is which page a document shows as its cover.

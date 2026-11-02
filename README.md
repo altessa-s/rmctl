@@ -116,11 +116,18 @@ take back:
 - **One archive per document.** Each document is written as `<dir>/<id>.rmdoc`, packed as `export` packs one — pages, annotations, tags
   and all. Documents in the trash stay out unless `--all`. `--jobs N` packs N documents at a time.
 - **A manifest.** `<dir>/manifest.json` records the format version, the profile, the time and the path backed up, and per document its
-  id, name, path, kind, record hash, archive and size. A directory holding another profile's backup is refused unless `--force`.
+  id, name, path, kind, record hash, archive and size.
 - **Incremental.** A document whose record hash the manifest already holds, with its archive there at the recorded size, is skipped
   without a download; a changed one is written again, and each archive appears only when whole. The manifest is written last.
-- **Documents gone.** The archive of a document the backup no longer covers — deleted, in the trash, or moved out of the path — is moved
-  into `<dir>/removed/`, or deleted with `--prune`. The answer counts the documents, and the archives written, skipped, moved and pruned.
+- **Documents gone.** The archive of a document deleted from the library, or put in the trash (unless `--all`), is moved into
+  `<dir>/removed/`, or deleted with `--prune`. The archive of a document still in the library but moved out of the path is always moved
+  into `removed/`, never deleted, `--prune` or not. The answer counts the documents, and the archives written, skipped, moved and pruned,
+  and `outside`: those moved for lying outside the path. The manifest no longer lists what is in `removed/`; an archive there still
+  imports with `rmctl put <file.rmdoc>`.
+- **One directory, one profile, one path.** A directory is bound to the profile and the path of its first backup. A directory holding
+  another profile's backup is refused unless `--force`; one holding the backup of another path — a renamed folder included — is refused
+  unless `--rescope`, which binds it to the new path and moves every archive outside it into `removed/`. A re-scope deletes nothing,
+  whatever `--prune` says. The two overrides are separate, so neither lets the other's mistake through.
 
 `rmctl backup restore <dir> [--to folder] [--id id]... [--dry-run]` puts a backup back, in one commit: every archive (or those `--id`
 names, by id or unique prefix) is imported into the folder path its manifest records, below `--to` when given, and missing folders are
@@ -159,7 +166,7 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |

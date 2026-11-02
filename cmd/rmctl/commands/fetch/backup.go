@@ -26,6 +26,7 @@ type backupView struct {
 	Skipped   int    `json:"skipped"`
 	Moved     int    `json:"moved"`
 	Pruned    int    `json:"pruned"`
+	Outside   int    `json:"outside"`
 }
 
 // backupArgs are a directory and, at most, one path.
@@ -43,13 +44,21 @@ func newBackup(env *cliutil.Env) *cobra.Command {
 			the way export packs one: pages, annotations and tags. Documents in the
 			trash stay out unless --all.
 
-			A manifest.json beside the archives records the profile, the time and,
-			per document, its id, name, path, kind, record hash, archive and size.
-			The next run skips every document whose record hash is unchanged and
-			rewrites the others; each archive appears only when whole. An archive of
-			a document the backup no longer covers (deleted, in the trash, moved out
-			of the path) is moved into removed/, or deleted with --prune. A directory
-			holding the backup of another profile is refused unless --force.
+			A manifest.json beside the archives records the profile, the path, the
+			time and, per document, its id, name, path, kind, record hash, archive
+			and size. The next run skips every document whose record hash is
+			unchanged and rewrites the others; each archive appears only when whole.
+
+			The archive of a document gone from the library (deleted, or in the trash
+			unless --all) is moved into removed/, or deleted with --prune. The archive
+			of a document still in the library but moved out of the path is always
+			moved into removed/, never deleted.
+
+			A directory is bound to the profile and the path of its first backup. One
+			holding another profile's backup is refused unless --force; one holding
+			the backup of another path (a renamed folder too) is refused unless
+			--rescope, which binds it to the new path and moves the archives outside
+			it into removed/ without deleting any, whatever --prune says.
 
 			"rmctl backup restore" puts a backup back. A directory that is itself
 			named restore is written ./restore.
@@ -58,6 +67,7 @@ func newBackup(env *cliutil.Env) *cobra.Command {
 			rmctl backup ~/rm-backup
 			rmctl backup ~/rm-backup /Notes --jobs 8
 			rmctl backup ~/rm-backup --all --prune
+			rmctl backup ~/rm-backup /Notes --rescope
 			rmctl backup ./restore
 		`),
 		Args: cliutil.Args(cobra.RangeArgs(1, backupArgs)),
@@ -82,18 +92,23 @@ func newBackup(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return cliutil.PagesErr("backup", err)
 			}
+			if r.Outside > 0 {
+				cliutil.Notef(cmd.ErrOrStderr(), "%d archives of documents outside %s were moved to removed/; they are never deleted", r.Outside, query)
+			}
 			return env.Emit(cmd, output.Fields(backupView(r),
 				output.Field{Key: "dir", Value: output.Path(r.Dir)},
 				output.Field{Key: "documents", Value: output.Count(r.Documents)},
 				output.Field{Key: "written", Value: output.Count(r.Written)},
 				output.Field{Key: "skipped", Value: output.Count(r.Skipped)},
 				output.Field{Key: "moved", Value: output.Count(r.Moved)},
-				output.Field{Key: "pruned", Value: output.Count(r.Pruned)}))
+				output.Field{Key: "pruned", Value: output.Count(r.Pruned)},
+				output.Field{Key: "outside", Value: output.Count(r.Outside)}))
 		},
 	}
 	cmd.Flags().BoolVarP(&opts.All, "all", "a", false, "back up the documents in the trash too")
-	cmd.Flags().BoolVar(&opts.Prune, "prune", false, "delete the archives of documents gone instead of moving them to removed/")
+	cmd.Flags().BoolVar(&opts.Prune, "prune", false, "delete the archives of documents deleted or trashed instead of moving them to removed/")
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "back up into a directory holding another profile's backup")
+	cmd.Flags().BoolVar(&opts.Rescope, "rescope", false, "back up into a directory holding another path's backup, moving what is outside to removed/")
 	cmd.Flags().IntVarP(&opts.Jobs, "jobs", "j", 0, "documents at a time (0: the default)")
 	cmd.AddCommand(newBackupRestore(env))
 	return cmd

@@ -6,7 +6,9 @@ package fetch_test
 
 import (
 	"errors"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/app/fetch"
@@ -26,10 +28,16 @@ func backupSetup(t *testing.T) (*fetch.Service, *porttest.Cloud, *porttest.MemFi
 	return fetch.New(library.New(c, c, c), c, files, arc, porttest.NewClock(porttest.Epoch)), c, files, arc
 }
 
-// manifestOf reads the manifest a backup wrote.
+// manifestOf reads the manifest a backup wrote into backupDir.
 func manifestOf(t *testing.T, files *porttest.MemFiles) domain.BackupManifest {
 	t.Helper()
-	raw, ok := files.File(backupDir + "/manifest.json")
+	return manifestIn(t, files, backupDir)
+}
+
+// manifestIn reads the manifest a backup wrote into dir.
+func manifestIn(t *testing.T, files *porttest.MemFiles, dir string) domain.BackupManifest {
+	t.Helper()
+	raw, ok := files.File(dir + "/manifest.json")
 	if !ok {
 		t.Fatal("no manifest")
 	}
@@ -183,17 +191,17 @@ func TestBackupPathsAndTrash(t *testing.T) {
 	if m := manifestOf(t, files); m.Path != "/Books/Sub/Dir" || !slices.Equal(entryIDs(m), []string{"d3aaaaaa"}) {
 		t.Fatalf("%+v", m)
 	}
-	// One document; the folder's archive is set aside.
-	r, err = s.Backup(t.Context(), backupDir, "/Books/Paper", port.BackupOptions{Profile: "p"})
-	if err != nil || r.Documents != 1 || r.Moved != 1 {
+	// One document, into a directory of its own.
+	r, err = s.Backup(t.Context(), "one", "/Books/Paper", port.BackupOptions{Profile: "p"})
+	if err != nil || r.Documents != 1 {
 		t.Fatalf("%+v %v", r, err)
 	}
 	// --all takes the trash, a document in a trashed folder too.
-	r, err = s.Backup(t.Context(), backupDir, "/", port.BackupOptions{Profile: "p", All: true})
+	r, err = s.Backup(t.Context(), "all", "/", port.BackupOptions{Profile: "p", All: true})
 	if err != nil || r.Documents != 7 {
 		t.Fatalf("%+v %v", r, err)
 	}
-	m := manifestOf(t, files)
+	m := manifestIn(t, files, "all")
 	if e, _ := m.Entry("d5aaaaaa"); !e.Trashed {
 		t.Fatalf("%+v", e)
 	}
@@ -301,5 +309,115 @@ func TestBackupPlanAndFile(t *testing.T) {
 	docs, covered, err := fetch.BackupPlan(tree, "", false)
 	if err != nil || len(docs) != 0 || covered != "/" {
 		t.Fatalf("%v %q %v", docs, covered, err)
+	}
+}
+
+// snapshot is every file and its bytes.
+func snapshot(files *porttest.MemFiles) map[string]string {
+	out := map[string]string{}
+	for _, p := range files.Paths() {
+		b, _ := files.File(p)
+		out[p] = string(b)
+	}
+	return out
+}
+
+// moveRecord gives one document a new parent; "trash" trashes it.
+func moveRecord(c *porttest.Cloud, d porttest.Doc) { replaceRecord(c, d) }
+
+func TestBackupIsBoundToItsPath(t *testing.T) {
+	t.Parallel()
+	s, _, files, _ := backupSetup(t)
+	if _, err := s.Backup(t.Context(), backupDir, "/", port.BackupOptions{Profile: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(files)
+	for _, opts := range []port.BackupOptions{{Profile: "p"}, {Profile: "p", Prune: true}, {Profile: "p", Force: true}} {
+		_, err := s.Backup(t.Context(), backupDir, "f1aaaaaa", opts)
+		if !errors.Is(err, fetch.ErrOtherPath) || !strings.Contains(err.Error(), "holds the backup of /, not /Books") {
+			t.Fatalf("%+v: %v", opts, err)
+		}
+	}
+	if after := snapshot(files); !maps.Equal(before, after) {
+		t.Fatal("a refused backup changed the directory")
+	}
+}
+
+func TestBackupRescopeMovesWhatIsOutside(t *testing.T) {
+	t.Parallel()
+	s, c, files, _ := backupSetup(t)
+	if _, err := s.Backup(t.Context(), backupDir, "/", port.BackupOptions{Profile: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	// d2 is deleted meanwhile; a re-scope still deletes nothing.
+	dropRecord(c, "d2bbbbbb")
+	r, err := s.Backup(t.Context(), backupDir, "f1aaaaaa", port.BackupOptions{Profile: "p", Rescope: true, Prune: true})
+	if err != nil || r.Moved != 2 || r.Pruned != 0 || r.Outside != 1 || r.Documents != 3 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	for _, id := range []string{"d6aaaaaa", "d2bbbbbb"} {
+		if _, ok := files.File("bk/removed/" + id + ".rmdoc"); !ok {
+			t.Errorf("%s was not moved to removed/", id)
+		}
+	}
+	if m := manifestOf(t, files); m.Path != "/Books" || len(m.Documents) != 3 {
+		t.Fatalf("%+v", m)
+	}
+	// Bound to the new path now.
+	if _, err = s.Backup(t.Context(), backupDir, "/", port.BackupOptions{Profile: "p"}); !errors.Is(err, fetch.ErrOtherPath) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestBackupPrunesOnlyDocumentsGone(t *testing.T) {
+	t.Parallel()
+	s, c, files, _ := backupSetup(t)
+	opts := port.BackupOptions{Profile: "p", Prune: true}
+	if r, err := s.Backup(t.Context(), backupDir, "f1aaaaaa", opts); err != nil || r.Documents != 4 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	// d2 is deleted, d4 trashed, and d1 moved out of /Books.
+	dropRecord(c, "d2bbbbbb")
+	moveRecord(c, porttest.Doc{ID: "d4aaaaaa", Name: "Notes", Parent: "f1aaaaaa", Trashed: true})
+	moveRecord(c, porttest.Doc{ID: "d1aaaaaa", Name: "Paper", Ext: "pdf", Body: []byte("PDF ONE")})
+	r, err := s.Backup(t.Context(), backupDir, "f1aaaaaa", opts)
+	if err != nil || r.Pruned != 2 || r.Moved != 1 || r.Outside != 1 || r.Documents != 1 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	for _, id := range []string{"d2bbbbbb", "d4aaaaaa"} {
+		if _, ok := files.File("bk/" + id + ".rmdoc"); ok {
+			t.Errorf("%s was not pruned", id)
+		}
+		if _, ok := files.File("bk/removed/" + id + ".rmdoc"); ok {
+			t.Errorf("%s was moved, not pruned", id)
+		}
+	}
+	// Moved out of the path, it is kept even with --prune.
+	if _, ok := files.File("bk/removed/d1aaaaaa.rmdoc"); !ok {
+		t.Fatal("the document moved out was not kept in removed/")
+	}
+}
+
+func TestBackupAllKeepsTheTrash(t *testing.T) {
+	t.Parallel()
+	s, c, files, _ := backupSetup(t)
+	// The trash shows at the top level, so the whole library holds it.
+	opts := port.BackupOptions{Profile: "p", Prune: true, All: true}
+	if _, err := s.Backup(t.Context(), backupDir, "/", opts); err != nil {
+		t.Fatal(err)
+	}
+	moveRecord(c, porttest.Doc{ID: "d4aaaaaa", Name: "Notes", Parent: "f1aaaaaa", Trashed: true})
+	r, err := s.Backup(t.Context(), backupDir, "/", opts)
+	if err != nil || r.Pruned != 0 || r.Moved != 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if e, ok := manifestOf(t, files).Entry("d4aaaaaa"); !ok || !e.Trashed {
+		t.Fatalf("%+v", e)
+	}
+	// Without --all the trashed documents are gone, and --prune deletes
+	// them: d4, d5 and d9 in the trashed folder.
+	opts.All = false
+	if r, err = s.Backup(t.Context(), backupDir, "/", opts); err != nil || r.Pruned != 3 || r.Moved != 0 {
+		t.Fatalf("%+v %v", r, err)
 	}
 }

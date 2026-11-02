@@ -83,6 +83,14 @@ func TestE2E_BackupAndRestore(t *testing.T) {
 		t.Fatalf("%+v %v (first %v)", again, hits, firstHits)
 	}
 
+	// The directory is bound to the path of its first backup.
+	if code, _, errOut := e.rmctl("backup", dir, "/Books", "--prune"); code != 1 || !strings.Contains(errOut, "--rescope") {
+		t.Fatalf("a backup of another path: exit %d %q", code, errOut)
+	}
+	if _, err = os.Stat(filepath.Join(dir, notesID+".rmdoc")); err != nil {
+		t.Fatal("a refused backup touched the directory")
+	}
+
 	e.ok("rename", "/Notes", "Notebook", "--yes")
 	if r, _ := e.backup(dir); r != (backupReport{Documents: 2, Written: 1, Skipped: 1}) {
 		t.Fatalf("after a rename: %+v", r)
