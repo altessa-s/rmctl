@@ -10,6 +10,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"io"
+	"io/fs"
 	"runtime"
 	"slices"
 	"strings"
@@ -300,8 +301,10 @@ func TestExecRunner(t *testing.T) {
 	if err != nil || code != 3 || out.String() != "in\n; rm -rf /\n" {
 		t.Fatalf("%d %v %q", code, err, out.String())
 	}
-	if _, err := (execRunner{}).Run(t.Context(), []string{"/no/such/program"}, nil, nil, &out); err == nil {
-		t.Fatal("a missing program ran")
+	// A program that never starts has no exit status: -1 and the start
+	// error, never a panic on the missing process state.
+	if code, err := (execRunner{}).Run(t.Context(), []string{"/no/such/program"}, nil, nil, &out); code != -1 || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a missing program: %d %v", code, err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
@@ -326,4 +329,27 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// watch --exec with a program that is not there, run by the real runner
+// without a shell: each batch reports the start error, and watch carries
+// on to the next one and to its own end.
+func TestExecMissingProgramWithTheRealRunner(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX paths")
+	}
+	const prog = "/no/such/program"
+	f := &clitest.Fake{Events: execEvents, WatchErr: errors.New("socket gone")}
+	build := func(env *cliutil.Env) []*cobra.Command { return []*cobra.Command{newWatch(env, execRunner{})} }
+	res := clitest.Exec(t, f.Services(), clitest.Options{}, build, "watch", "--exec", prog, "--debounce", "1h")
+	// The run of the one batch failed to start; watch still ended on the
+	// socket's own error, not on the program.
+	if res.Code != cliutil.CodeError || !strings.Contains(res.Error.Error(), "socket gone") {
+		t.Fatalf("%d %v", res.Code, res.Error)
+	}
+	if !strings.Contains(res.Err, "exec: "+prog+": ") || !strings.Contains(res.Err, "no such file or directory") ||
+		strings.Contains(res.Err, "exited") {
+		t.Fatalf("%q", res.Err)
+	}
 }

@@ -77,6 +77,11 @@ func (execRunner) Run(ctx context.Context, argv, env []string, stdin []byte, out
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = waitDelay
 	err := cmd.Run()
+	if cmd.ProcessState == nil {
+		// The process never started: a program that is not there or may
+		// not run. There is no exit status; the error says why.
+		return -1, err
+	}
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && ctx.Err() == nil {
 		return exitErr.ExitCode(), nil
 	}
