@@ -78,7 +78,8 @@ func TestSyncUsage(t *testing.T) {
 func TestSyncErrors(t *testing.T) {
 	t.Parallel()
 	// The refusal names the setting that chose the profile's budget.
-	const head = "sync /Books: it needs 700.0 MiB in the cache of profile work, and the budget is 512.0 MiB; nothing was downloaded. "
+	const head = "sync /Books: it needs 700.0 MiB in the cache of profile work, and the budget is 512.0 MiB; no page or original was downloaded, " +
+		"though the indexes and metadata that measure the library may have been read into the cache. "
 	for source, advice := range map[string]string{
 		port.BudgetFromEnv:     "Raise RMCTL_CACHE_BUDGET, which bounds every profile, to at least 701MiB (0 is no limit)",
 		port.BudgetFromProfile: "Raise the budget to at least 701MiB with budget under [profiles.work.cache] in config.toml (0 is no limit)",
@@ -93,8 +94,18 @@ func TestSyncErrors(t *testing.T) {
 			t.Errorf("%s: %d\n%v\n%s", source, r.Code, r.Error, want)
 		}
 	}
+	// A sync whose files did not all stay says so, and asks for more than
+	// the budget, even when it measured less.
+	over := &port.OverBudgetError{Needed: 300 << 20, Budget: 512 << 20, Source: port.BudgetFromEnv, Evicted: true}
+	r := run(t, &clitest.Fake{Err: over}, clitest.Options{}, "sync", "/Books", "-P", "work")
+	want := "sync /Books: it needs at least 300.0 MiB in the cache of profile work, and not all of it stays within the budget of 512.0 MiB; " +
+		"the sync is not recorded as complete. Raise RMCTL_CACHE_BUDGET, which bounds every profile, to at least 513MiB (0 is no limit), " +
+		"or sync a smaller path"
+	if r.Code != cliutil.CodeError || r.Error.Error() != want {
+		t.Fatalf("%d\n%v\n%s", r.Code, r.Error, want)
+	}
 	// A sync that stops says what it kept.
-	r := run(t, &clitest.Fake{Err: context.Canceled, Synced: port.SyncReport{Fetched: 4, Bytes: 2048}}, clitest.Options{}, "sync")
+	r = run(t, &clitest.Fake{Err: context.Canceled, Synced: port.SyncReport{Fetched: 4, Bytes: 2048}}, clitest.Options{}, "sync")
 	if r.Code != cliutil.CodeError || !errors.Is(r.Error, context.Canceled) ||
 		r.Err != "4 files (2.0 KiB) fetched before the sync stopped stay in the cache\n" {
 		t.Fatalf("%d %v %q", r.Code, r.Error, r.Err)

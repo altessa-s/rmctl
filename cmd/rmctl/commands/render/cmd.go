@@ -99,8 +99,12 @@ func New(env *cliutil.Env) *cobra.Command {
 			the first 8 characters of the later one's id in brackets. --mode,
 			--paper and --no-template apply to every document; --page, --scale,
 			--quality and image formats do not. Documents in the trash are left out
-			unless --all. --incremental skips a document whose PDF is there with
-			the document's modification time, which each PDF written takes.
+			unless --all. The directory keeps .rmctl-render.json, a record of what
+			each PDF was drawn from and with which --mode, --paper and
+			--no-template. --incremental skips a document whose PDF is there with
+			the document's modification time, which each PDF written takes, and
+			which that record shows drawn from the same document with the same
+			options; other options, or a record missing or damaged, draw it again.
 			--jobs is how many documents are drawn at a time. A document that
 			fails is reported and the others go on; the answer is a row per
 			document (rendered, unchanged or failed) and the totals, and the
@@ -176,7 +180,7 @@ func New(env *cliutil.Env) *cobra.Command {
 	fl.BoolVar(&f.noTemplate, "no-template", false, "draw the pages without their templates")
 	fl.StringVar(&f.id, "id", "", "the document of a local archive that holds several: an id or a unique prefix")
 	fl.BoolVarP(&f.tree.All, "all", "a", false, "with a folder: draw the documents in the trash too")
-	fl.BoolVar(&f.tree.Incremental, "incremental", false, "with a folder: skip a document whose PDF is there with its modification time")
+	fl.BoolVar(&f.tree.Incremental, "incremental", false, "with a folder: skip a document whose PDF is there, drawn from it as it is with these options")
 	fl.IntVarP(&f.tree.Jobs, "jobs", "j", 0, "with a folder: documents at a time (0: the default)")
 	return cmd
 }

@@ -111,7 +111,9 @@ type RenderTreeOptions struct {
 	// All takes the documents in the trash too.
 	All bool
 	// Incremental skips a document whose PDF is there with the document's
-	// modification time; every PDF written takes that time.
+	// modification time, and which the directory's manifest records drawn
+	// from the same document with the same options; every PDF written takes
+	// that time.
 	Incremental bool
 	// Jobs is how many documents are drawn at a time; 0 is the default.
 	Jobs int

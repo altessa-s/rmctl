@@ -62,11 +62,15 @@ func newSync(env *cliutil.Env) *cobra.Command {
 			with as much) answers at once that the cache is current, after one request.
 			--force walks the library anyway.
 
-			Before downloading, it adds up what it keeps (the sizes are in the indexes)
-			and refuses, with nothing downloaded, a sync that would not fit the
-			profile's cache budget: RMCTL_CACHE_BUDGET, else budget under
-			[profiles.<name>.cache] in config.toml, else under [cache], else 512 MiB.
+			Before downloading any document file, it adds up what it keeps (the sizes
+			are in the indexes) and refuses a sync that would not fit the profile's
+			cache budget: RMCTL_CACHE_BUDGET, else budget under [profiles.<name>.cache]
+			in config.toml, else under [cache], else 512 MiB. No page or original is
+			downloaded then, but the indexes, .metadata and .content the library is
+			measured from may have been read into the cache. A sync whose files do not
+			all stay in the cache is refused too, and is not recorded as complete.
 			A budget of 0 is no limit: sync never refuses and the cache never evicts.
+			Whenever the cache evicts, it forgets the last complete sync.
 			On a terminal a progress bar shows the bytes and files done, the rate and
 			the time left. Ctrl-C stops it; what was fetched stays in the cache. The
 			answer counts the documents, the files fetched and those already cached,
@@ -117,7 +121,13 @@ func newSync(env *cliutil.Env) *cobra.Command {
 func syncErr(cmd *cobra.Command, query string, r port.SyncReport, err error) error {
 	if over, ok := errors.AsType[*port.OverBudgetError](err); ok {
 		profile := cliutil.ProfileName(cmd)
-		return fmt.Errorf("sync %s: it needs %s in the cache of profile %s, and the budget is %s; nothing was downloaded. %s, or sync a smaller path",
+		if over.Evicted {
+			return fmt.Errorf("sync %s: it needs at least %s in the cache of profile %s, and not all of it stays within the budget of %s; "+
+				"the sync is not recorded as complete. %s, or sync a smaller path",
+				query, cliutil.Size(over.Needed), profile, cliutil.Size(over.Budget), raiseBudget(over, profile))
+		}
+		return fmt.Errorf("sync %s: it needs %s in the cache of profile %s, and the budget is %s; no page or original was downloaded, "+
+			"though the indexes and metadata that measure the library may have been read into the cache. %s, or sync a smaller path",
 			query, cliutil.Size(over.Needed), profile, cliutil.Size(over.Budget), raiseBudget(over, profile))
 	}
 	if r.Fetched > 0 {
@@ -132,6 +142,10 @@ func syncErr(cmd *cobra.Command, query string, r port.SyncReport, err error) err
 // the profile's table.
 func raiseBudget(over *port.OverBudgetError, profile string) string {
 	raise := (over.Needed + mib - 1) / mib
+	if over.Evicted {
+		// What it needs did not stay within the budget: above it, then.
+		raise = max(raise, over.Budget/mib+1)
+	}
 	switch over.Source {
 	case port.BudgetFromEnv:
 		return fmt.Sprintf("Raise RMCTL_CACHE_BUDGET, which bounds every profile, to at least %dMiB (0 is no limit)", raise)

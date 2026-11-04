@@ -6,6 +6,7 @@ package prefetch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -79,16 +80,19 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 	if err != nil {
 		return port.SyncReport{}, err
 	}
-	p := s.plan(state, tree, docs, opts.Files)
+	p, err := s.plan(ctx, state, tree, docs, opts.Files)
+	if err != nil {
+		return port.SyncReport{}, err
+	}
 	report := port.SyncReport{
 		Path: displayPath(tree, scope), Root: state.Hash, Generation: state.Generation,
 		Documents: len(docs), Cached: p.cached, Needed: p.needed,
 		Budget: s.cache.Budget(), BudgetSource: s.cache.BudgetSource(),
 	}
 	// A budget of 0 is no limit: it never refuses.
-	if report.Budget > 0 && p.needed > report.Budget {
+	if report.Budget > 0 && (p.lost || p.needed > report.Budget) {
 		report.CacheBytes = s.cache.Usage()
-		return report, &port.OverBudgetError{Needed: p.needed, Budget: report.Budget, Source: report.BudgetSource}
+		return report, s.overBudget(p.needed, p.lost)
 	}
 	fetched, bytes, err := s.fetch(ctx, p, opts)
 	report.Fetched, report.Bytes = fetched, bytes
@@ -96,8 +100,15 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 	if err != nil {
 		return report, err
 	}
+	// What the cache evicted while the sync ran is not there for a read
+	// to find: the sync is not complete.
+	if !s.kept(p) {
+		report.CacheBytes = s.cache.Usage()
+		return report, s.overBudget(p.needed, true)
+	}
 	report.Current = len(p.fetch) == 0
-	if !sameRoot || !coversTree(mark, tree, scope, opts) {
+	// An eviction since this sync began may have forgotten the last mark.
+	if mark, marked = s.cache.LastSync(); !marked || mark.Root != state.Hash || !coversTree(mark, tree, scope, opts) {
 		s.cache.MarkSync(port.SyncMark{
 			Root: state.Hash, Generation: state.Generation, Query: query, Path: report.Path, Scope: scope,
 			Files: opts.Files, All: opts.All, Documents: len(docs), FileCount: p.files, Needed: p.needed,
@@ -175,38 +186,71 @@ func displayPath(tree *domain.Tree, scope domain.ItemID) string {
 	return tree.Path(scope)
 }
 
+// errLost means entries a sync kept left the cache while it ran, under no
+// budget: something else removed them.
+var errLost = errors.New("files the sync kept left the cache while it ran; run it again")
+
+// errMoved means the library's root moved while a sync read it.
+var errMoved = errors.New("the library changed while the sync read it; run it again")
+
+// overBudget is the refusal of a sync that needs needed bytes; evicted says
+// part of it did not stay in the cache. Under no budget nothing is
+// evicted: what left the cache was removed by something else.
+func (s *Service) overBudget(needed int64, evicted bool) error {
+	budget := s.cache.Budget()
+	if budget == 0 {
+		return errLost
+	}
+	return &port.OverBudgetError{Needed: needed, Budget: budget, Source: s.cache.BudgetSource(), Evicted: evicted}
+}
+
+// kept reports whether the cache holds every index and blob p keeps.
+func (s *Service) kept(p plan) bool {
+	for _, hash := range p.indexes {
+		if _, ok := s.cache.IndexSize(hash); !ok {
+			return false
+		}
+	}
+	for _, hash := range p.blobs {
+		if !s.cache.Holds(hash) {
+			return false
+		}
+	}
+	return true
+}
+
 // pageKinds are the extensions of the files the page commands read beyond
 // .metadata and .content, which every document keeps anyway.
 var pageKinds = map[string]bool{"pagedata": true, "rm": true} //nolint:gochecknoglobals // a constant set
 
 // plan is what a sync keeps: the files it downloads, how many files it
-// keeps and how many of them the cache already holds, and what they and
-// the indexes take together.
+// keeps and how many of them the cache already holds, what they and the
+// indexes take together, and the hashes of every index and blob it keeps.
+// lost says an index the tree is read from does not stay in the cache.
 type plan struct {
-	fetch  []domain.File
-	total  int64
-	files  int
-	cached int
-	needed int64
+	fetch   []domain.File
+	total   int64
+	files   int
+	cached  int
+	needed  int64
+	indexes []string
+	blobs   []string
+	lost    bool
 }
 
 // plan lists what the reads of docs need, as the cache holds it now: every
 // index and every .metadata and .content of the library, which every read
 // builds the tree from, and the page files of docs, or with files every
-// file of their indexes. Each blob counts once; whatever the cache holds is
-// marked used, so it outlives what the cache held before.
-func (s *Service) plan(state port.RootState, tree *domain.Tree, docs []domain.Item, files bool) plan {
+// file of their indexes. Each counts once; whatever the cache holds is
+// marked used, so it outlives what the cache held before. An index the
+// cache lost since the tree was built, evicted by what the build itself
+// kept, is read again, as the build reads it, to be kept and measured.
+func (s *Service) plan(ctx context.Context, state port.RootState, tree *domain.Tree, docs []domain.Item, files bool) (plan, error) {
 	var p plan
-	seen := map[string]bool{}
-	index := func(hash string) {
-		if hash == "" || seen[hash] {
-			return
-		}
-		seen[hash] = true
-		if size, ok := s.cache.IndexSize(hash); ok {
-			p.needed += size
-		}
+	if err := s.planIndexes(ctx, state, &p); err != nil {
+		return plan{}, err
 	}
+	seen := map[string]bool{}
 	blob := func(f domain.File) {
 		if seen[f.Hash] {
 			return
@@ -214,16 +258,13 @@ func (s *Service) plan(state port.RootState, tree *domain.Tree, docs []domain.It
 		seen[f.Hash] = true
 		p.files++
 		p.needed += f.Size
+		p.blobs = append(p.blobs, f.Hash)
 		if s.cache.Holds(f.Hash) {
 			p.cached++
 			return
 		}
 		p.fetch = append(p.fetch, f)
 		p.total += f.Size
-	}
-	index(state.Hash)
-	for _, rec := range state.Records {
-		index(rec.Hash)
 	}
 	for _, it := range tree.Items() {
 		for _, ext := range []string{"metadata", "content"} {
@@ -239,7 +280,58 @@ func (s *Service) plan(state port.RootState, tree *domain.Tree, docs []domain.It
 			}
 		}
 	}
-	return p
+	return p, nil
+}
+
+// planIndexes adds to p the root index of state and the index of each of
+// its records, with what each takes in the cache, reading again those the
+// cache no longer holds. One that still is not held does not stay: p is
+// lost.
+func (s *Service) planIndexes(ctx context.Context, state port.RootState, p *plan) error {
+	seen := map[string]bool{}
+	var missing []domain.Record
+	rootMissing := false
+	measure := func(hash string) bool {
+		size, ok := s.cache.IndexSize(hash)
+		if ok {
+			p.needed += size
+		}
+		return ok
+	}
+	if state.Hash != "" {
+		seen[state.Hash] = true
+		p.indexes = append(p.indexes, state.Hash)
+		rootMissing = !measure(state.Hash)
+	}
+	for _, rec := range state.Records {
+		if rec.Hash == "" || seen[rec.Hash] {
+			continue
+		}
+		seen[rec.Hash] = true
+		p.indexes = append(p.indexes, rec.Hash)
+		if !measure(rec.Hash) {
+			missing = append(missing, rec)
+		}
+	}
+	if rootMissing {
+		again, err := s.roots.Root(ctx)
+		if err != nil {
+			return err
+		}
+		if again.Hash != state.Hash {
+			return errMoved
+		}
+		p.lost = !measure(state.Hash)
+	}
+	for _, rec := range missing {
+		if _, err := s.lib.Index(ctx, rec); err != nil {
+			return fmt.Errorf("read the index of %s: %w", rec.ID, err)
+		}
+		if !measure(rec.Hash) {
+			p.lost = true
+		}
+	}
+	return nil
 }
 
 // fetch downloads what p lists into the cache, opts.Jobs at a time, and

@@ -104,11 +104,32 @@ func (c *SyncCache) Fills() int {
 	return c.fills
 }
 
-// Drop forgets the blob of hash, as an eviction would.
+// Drop forgets the blob of hash, as an eviction would, and with it the
+// last complete sync.
 func (c *SyncCache) Drop(hash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.blobs, hash)
+	c.mark = nil
+}
+
+// KeepIndex keeps an index of size under hash, as reading it through the
+// cache would, unless one is kept there already.
+func (c *SyncCache) KeepIndex(hash string, size int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.Indexes[hash]; !ok {
+		c.Indexes[hash] = size
+	}
+}
+
+// DropIndex forgets the index of hash, as an eviction would, and with it
+// the last complete sync.
+func (c *SyncCache) DropIndex(hash string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.Indexes, hash)
+	c.mark = nil
 }
 
 // Usage implements port.SyncCache: the bytes of the blobs and the sizes of

@@ -28,7 +28,9 @@ var errBoom = errors.New("boom")
 // sync is a new service, as each run of rmctl is.
 type fixture struct {
 	cloud *porttest.Cloud
-	cache *porttest.SyncCache
+	// stores are the cloud's roots and indexes read through the cache.
+	stores *indexed
+	cache  *porttest.SyncCache
 	// blobs is the store syncs download from; the cloud unless a test
 	// wraps it.
 	blobs port.BlobStore
@@ -48,7 +50,8 @@ func newFixture(t *testing.T) *fixture {
 		porttest.Doc{ID: "d4aaaaaa", Name: "Old", Parent: "f1aaaaaa", Ext: "pdf", Body: []byte("PDF OLD"), RM: true, Trashed: true},
 		porttest.Doc{ID: "d5aaaaaa", Name: "Novel", Ext: "pdf", Body: []byte("PDF NOVEL"), RM: true},
 	)
-	f := &fixture{cloud: c, cache: porttest.NewSyncCache(1 << 20), blobs: c, files: map[string]domain.File{}}
+	cache := porttest.NewSyncCache(1 << 20)
+	f := &fixture{cloud: c, stores: &indexed{Cloud: c, cache: cache}, cache: cache, blobs: c, files: map[string]domain.File{}}
 	tree := f.tree(t)
 	for _, it := range tree.Items() {
 		for _, file := range it.Files {
@@ -67,9 +70,61 @@ func (f *fixture) tree(t *testing.T) *domain.Tree {
 	return tree
 }
 
+// service reads the items one at a time, so a test's hooks run in order.
 func (f *fixture) service() *prefetch.Service {
-	lib := library.New(f.cloud, f.cloud, f.cloud, library.WithCache(f.cache))
-	return prefetch.New(f.cloud, lib, f.blobs, f.cache, porttest.NewClock(porttest.Epoch))
+	lib := library.New(f.stores, f.stores, f.cloud, library.WithCache(f.cache), library.WithConcurrency(1))
+	return prefetch.New(f.stores, lib, f.blobs, f.cache, porttest.NewClock(porttest.Epoch))
+}
+
+// indexSize is what each index takes in the cache.
+const indexSize = 64
+
+// indexed reads the cloud's roots and indexes through the cache, as
+// indexcache does: each index read is kept. after, when set, runs after
+// each index of a document is read, as an eviction would.
+type indexed struct {
+	*porttest.Cloud
+	cache *porttest.SyncCache
+	after func(rec domain.Record)
+}
+
+func (x *indexed) Root(ctx context.Context) (port.RootState, error) {
+	state, err := x.Cloud.Root(ctx)
+	if err == nil && state.Hash != "" {
+		x.cache.KeepIndex(state.Hash, indexSize)
+	}
+	return state, err
+}
+
+func (x *indexed) Files(ctx context.Context, rec domain.Record) ([]domain.File, error) {
+	files, err := x.Cloud.Files(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	x.cache.KeepIndex(rec.Hash, indexSize)
+	if x.after != nil {
+		x.after(rec)
+	}
+	return files, nil
+}
+
+// heldIndexes reports whether the cache holds the root index and the index
+// of every record.
+func (f *fixture) heldIndexes(t *testing.T) bool {
+	t.Helper()
+	state, err := f.cloud.Root(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.cache.IndexSize(state.Hash); !ok {
+		return false
+	}
+	for _, rec := range state.Records {
+		if _, ok := f.cache.IndexSize(rec.Hash); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *fixture) sync(t *testing.T, query string, opts port.SyncOptions) port.SyncReport {
@@ -445,6 +500,212 @@ func TestSyncAfterAChangeFetchesOnlyWhatChanged(t *testing.T) {
 	}
 	if m, _ := f.cache.LastSync(); m.Generation != f.cloud.Generation() {
 		t.Fatalf("mark %+v", m)
+	}
+}
+
+// An index the build of the tree evicted, under a budget too tight for
+// all it read at once, is read again and counted: the sync that is recorded
+// holds every index an offline read builds the tree from.
+func TestSyncRereadsAnIndexTheBuildEvicted(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	records := f.cloud.Records()
+	first, last := records[0], records[len(records)-1]
+	var once sync.Once
+	f.stores.after = func(rec domain.Record) {
+		if rec.Hash == last.Hash {
+			once.Do(func() { f.cache.DropIndex(first.Hash) })
+		}
+	}
+	before := f.cloud.Count("Files")
+	r := f.sync(t, "/", port.SyncOptions{})
+	if f.cloud.Count("Files") != before+len(records)+1 {
+		t.Fatalf("the evicted index was not read again: %d reads", f.cloud.Count("Files")-before)
+	}
+	if !f.heldIndexes(t) {
+		t.Fatal("an index the tree is built from is not in the cache")
+	}
+	if _, ok := f.cache.LastSync(); !ok {
+		t.Fatal("a complete sync was not recorded")
+	}
+	// Every index counts: the root's and one per record.
+	var blobs int64
+	for _, h := range f.cacheBlobs(t) {
+		blobs += h
+	}
+	if want := blobs + int64(len(records)+1)*indexSize; r.Needed != want {
+		t.Fatalf("needed %d, want %d", r.Needed, want)
+	}
+}
+
+// cacheBlobs are the sizes of the blobs the cache holds, by hash.
+func (f *fixture) cacheBlobs(t *testing.T) map[string]int64 {
+	t.Helper()
+	out := map[string]int64{}
+	for _, file := range f.files {
+		if f.cache.Holds(file.Hash) {
+			out[file.Hash] = file.Size
+		}
+	}
+	return out
+}
+
+// The root index the build evicted is read again, at the same root.
+func TestSyncRereadsTheRootIndex(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	state, err := f.cloud.Root(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	f.stores.after = func(domain.Record) { once.Do(func() { f.cache.DropIndex(state.Hash) }) }
+	roots := f.cloud.Count("Root")
+	f.sync(t, "/", port.SyncOptions{})
+	// The root of the sync, then its index again.
+	if got := f.cloud.Count("Root") - roots; got != 2 || !f.heldIndexes(t) {
+		t.Fatalf("%d roots read, indexes held %v", got, f.heldIndexes(t))
+	}
+	if _, ok := f.cache.LastSync(); !ok {
+		t.Fatal("a complete sync was not recorded")
+	}
+}
+
+// Reading an evicted index again fails as the read fails, and a root that
+// moved meanwhile stops the sync: its tree is not the live one.
+func TestSyncRereadFailures(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		root bool
+		set  func(f *fixture)
+		want error
+	}{
+		"index": {set: func(f *fixture) { f.cloud.Fail["Files"] = errBoom }, want: errBoom},
+		"root":  {root: true, set: func(f *fixture) { f.cloud.Fail["Root"] = errBoom }, want: errBoom},
+		"moved": {root: true, set: func(f *fixture) {
+			f.cloud.Add(porttest.Doc{ID: "d9aaaaaa", Name: "Later", Ext: "pdf"})
+		}},
+	} {
+		f := newFixture(t)
+		state, err := f.cloud.Root(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := state.Records[len(state.Records)-1]
+		f.stores.after = func(rec domain.Record) {
+			if rec.Hash != last.Hash {
+				return
+			}
+			f.stores.after = nil
+			if c.root {
+				f.cache.DropIndex(state.Hash)
+			} else {
+				f.cache.DropIndex(state.Records[0].Hash)
+			}
+			c.set(f)
+		}
+		_, err = f.service().Sync(t.Context(), "/", port.SyncOptions{})
+		if err == nil || (c.want != nil && !errors.Is(err, c.want)) || (c.want == nil && !strings.Contains(err.Error(), "changed")) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, ok := f.cache.LastSync(); ok || f.cache.Fills() != 0 {
+			t.Fatalf("%s: recorded or fetched", name)
+		}
+	}
+}
+
+// An index that does not stay in the cache, even read again, makes the
+// sync too large for the budget: nothing is downloaded or recorded.
+func TestSyncWhoseIndexDoesNotStayIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	gone := f.cloud.Records()[2]
+	f.stores.after = func(rec domain.Record) {
+		if rec.Hash == gone.Hash {
+			f.cache.DropIndex(rec.Hash)
+		}
+	}
+	r, err := f.service().Sync(t.Context(), "/", port.SyncOptions{})
+	over, ok := errors.AsType[*port.OverBudgetError](err)
+	if !ok || !over.Evicted || over.Budget != 1<<20 || over.Needed != r.Needed || !strings.Contains(err.Error(), "at least") {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if f.cache.Fills() != 0 || f.cloud.Count("Download") != 0 {
+		t.Fatal("a refused sync downloaded")
+	}
+	if _, ok := f.cache.LastSync(); ok {
+		t.Fatal("a refused sync was recorded")
+	}
+}
+
+// evicting drops a blob the sync keeps once the downloads are done, as a
+// cache evicting under its budget would.
+type evicting struct {
+	port.BlobStore
+	cache *porttest.SyncCache
+	hash  string
+}
+
+func (e *evicting) Download(ctx context.Context, f domain.File, w io.Writer, progress port.Progress) error {
+	if err := e.BlobStore.Download(ctx, f, w, progress); err != nil {
+		return err
+	}
+	e.cache.Drop(e.hash)
+	return nil
+}
+
+// A sync whose files did not all stay in the cache is not recorded: an
+// offline read after it would not find them. Under a budget it is too
+// large for it; under none, something else removed them.
+func TestSyncThatDidNotStayIsNotRecorded(t *testing.T) {
+	t.Parallel()
+	for _, budget := range []int64{1 << 20, 0} {
+		f := newFixture(t)
+		f.cache.Max = budget
+		f.blobs = &evicting{BlobStore: f.cloud, cache: f.cache, hash: f.files["d1aaaaaa.metadata"].Hash}
+		r, err := f.service().Sync(t.Context(), "/", port.SyncOptions{Jobs: 1})
+		over, ok := errors.AsType[*port.OverBudgetError](err)
+		switch {
+		case budget > 0 && (!ok || !over.Evicted || over.Needed != r.Needed || r.Fetched == 0):
+			t.Fatalf("budget %d: %+v %v", budget, r, err)
+		case budget == 0 && (ok || err == nil || !strings.Contains(err.Error(), "left the cache")):
+			t.Fatalf("budget %d: %+v %v", budget, r, err)
+		}
+		if _, ok := f.cache.LastSync(); ok {
+			t.Fatalf("budget %d: an incomplete sync was recorded", budget)
+		}
+		// The next sync reads it back, as the tree is built, and is recorded.
+		f.blobs = f.cloud
+		f.sync(t, "/", port.SyncOptions{})
+		if !f.cache.Holds(f.files["d1aaaaaa.metadata"].Hash) {
+			t.Fatalf("budget %d: the metadata is not back", budget)
+		}
+		if _, ok := f.cache.LastSync(); !ok {
+			t.Fatalf("budget %d: not recorded", budget)
+		}
+	}
+}
+
+// An eviction after a complete sync forgets it: the next sync walks and
+// fetches back what went, instead of answering that the cache is current.
+func TestSyncAfterAnEvictionWalks(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sync(t, "/", port.SyncOptions{Files: true})
+	f.cache.Drop(f.files["d3aaaaaa.epub"].Hash)
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); r.Current || r.Fetched != 1 {
+		t.Fatalf("%+v", r)
+	}
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); !r.Current {
+		t.Fatalf("%+v", r)
+	}
+	f.cache.DropIndex(f.cloud.Records()[0].Hash)
+	before := f.cloud.Count("Files")
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); !r.Current || r.Fetched != 0 || f.cloud.Count("Files") == before || !f.heldIndexes(t) {
+		t.Fatalf("%+v", r)
+	}
+	if _, ok := f.cache.LastSync(); !ok {
+		t.Fatal("not recorded")
 	}
 }
 

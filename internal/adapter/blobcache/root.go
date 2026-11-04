@@ -59,7 +59,9 @@ func NewRoot(dir string, limits Limits, clock port.Clock, log *slog.Logger) *Roo
 // Dir is the cache directory.
 func (r *Root) Dir() string { return r.base.dir }
 
-// Profile is the cache of profile, which must be a safe directory name.
+// Profile is the cache of profile, which must be a safe directory name,
+// evicted down to its budget when it takes more: a budget lowered since
+// the cache was filled holds from the first command that opens it.
 func (r *Root) Profile(profile string) (*Cache, error) {
 	if !nameKey.MatchString(profile) {
 		return nil, ErrProfileName
@@ -67,6 +69,7 @@ func (r *Root) Profile(profile string) (*Cache, error) {
 	limit := r.limits(profile)
 	c := New(filepath.Join(r.base.dir, profile), limit.Bytes, r.base.clock, r.base.log)
 	c.source = limit.Source
+	c.Reconcile()
 	return c, nil
 }
 

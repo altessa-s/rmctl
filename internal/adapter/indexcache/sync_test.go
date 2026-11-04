@@ -197,3 +197,51 @@ func TestSyncsReportTheProfilesBudget(t *testing.T) {
 		}
 	}
 }
+
+// The mark is the entry the cache drops whenever it evicts: after an
+// eviction, the last complete sync is forgotten, and the next sync walks.
+// Reopened under a lower budget, the cache is within it, and forgets it
+// too, before any command reads it.
+func TestSyncsForgetTheMarkOnEviction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	clk := porttest.NewClock(time.Unix(1_700_000_000, 0))
+	open := func(budget int64) (*blobcache.Cache, *indexcache.Syncs) {
+		t.Helper()
+		st, err := blobcache.NewRoot(dir, blobcache.Fixed(budget), clk, nil).Profile("work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st, indexcache.NewSyncs(st, nil)
+	}
+	st, s := open(100)
+	mark := port.SyncMark{Root: "r", Query: "/", Path: "/", Scope: domain.RootID, At: time.Unix(1_700_000_000, 0).UTC()}
+	keep := func(data []byte) {
+		t.Helper()
+		clk.Advance(time.Second)
+		if err := s.Fill(hashOf(data), func(w io.Writer) error { _, err := w.Write(data); return err }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep(bytes.Repeat([]byte("a"), 60))
+	s.MarkSync(mark)
+	keep(bytes.Repeat([]byte("b"), 30))
+	if _, ok := s.LastSync(); !ok {
+		t.Fatal("a fill within the budget forgot the mark")
+	}
+	keep(bytes.Repeat([]byte("c"), 30))
+	if _, ok := s.LastSync(); ok || s.Usage() > st.Budget() {
+		t.Fatalf("an eviction kept the mark, or the cache takes %d", s.Usage())
+	}
+	s.MarkSync(mark)
+	st, s = open(40)
+	if _, ok := s.LastSync(); ok || s.Usage() > 40 || s.Usage() != 30 {
+		t.Fatalf("the reopened cache takes %d", s.Usage())
+	}
+	// The report agrees.
+	report, err := indexcache.NewAdmin(profiles{blobcache.NewRoot(dir, blobcache.Fixed(40), clk, nil)},
+		indexcache.Settings{Profile: "work"}, nil).Status(t.Context(), false)
+	if err != nil || report.Profiles[0].Bytes > report.Profiles[0].Budget || st.Budget() != 40 {
+		t.Fatalf("%+v %v", report, err)
+	}
+}

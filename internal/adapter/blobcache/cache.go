@@ -45,6 +45,12 @@ const (
 // Spaces are every space, in the order a report lists them.
 func Spaces() []string { return []string{SpaceBlobs, SpaceIndexes, SpaceState} }
 
+// KeyCovered is the name, among the state, of the entry that vouches for
+// what the blobs and indexes hold: the last complete sync. Whatever leaves
+// those spaces, evicted or dropped, drops it, so it never vouches for an
+// entry that is gone.
+const KeyCovered = "sync"
+
 // evictable are the spaces the byte budget covers.
 func evictable(space string) bool { return space == SpaceBlobs || space == SpaceIndexes }
 
@@ -206,13 +212,43 @@ func (c *Cache) account(n int64) {
 	c.evict()
 }
 
-// Drop removes the entry key of space, if there is one.
+// Drop removes the entry key of space, if there is one. An entry of the
+// blobs or indexes that goes takes the entry [KeyCovered] with it.
 func (c *Cache) Drop(space, key string) {
 	if !validKey(space, key) {
 		return
 	}
-	if err := os.Remove(filepath.Join(c.dir, space, key)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	err := os.Remove(filepath.Join(c.dir, space, key))
+	switch {
+	case err == nil:
+		if evictable(space) {
+			c.uncover()
+		}
+	case !errors.Is(err, fs.ErrNotExist):
 		c.log.Debug("cache drop failed", "space", space, "err", err)
+	}
+}
+
+// uncover removes the entry [KeyCovered]: something it vouched for may be
+// gone.
+func (c *Cache) uncover() {
+	if err := os.Remove(filepath.Join(c.dir, SpaceState, KeyCovered)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		c.log.Debug("cache drop failed", "space", SpaceState, "err", err)
+	}
+}
+
+// Reconcile evicts down to the budget, if the cache takes more: after the
+// budget was lowered, the cache is within it before anything reads it. It
+// counts what the cache takes once, which every later write builds on, so
+// a write costs no second count. Without a limit it does nothing.
+func (c *Cache) Reconcile() {
+	if c.maxBytes == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.known || c.total > c.maxBytes {
+		c.evict()
 	}
 }
 
@@ -282,6 +318,7 @@ func (c *Cache) evict() {
 		return
 	}
 	slices.SortFunc(all, func(a, b cached) int { return cmp.Compare(a.used.UnixNano(), b.used.UnixNano()) })
+	evicted := false
 	for _, f := range all {
 		if total <= c.maxBytes {
 			break
@@ -291,8 +328,12 @@ func (c *Cache) evict() {
 			continue
 		}
 		total -= f.size
+		evicted = true
 	}
 	c.total = total
+	if evicted {
+		c.uncover()
+	}
 }
 
 // Usage is what the evictable spaces take in bytes, and the number of

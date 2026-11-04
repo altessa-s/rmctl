@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -67,7 +68,7 @@ func rows(r port.RenderTreeReport) []string {
 func pdfs(f fixture) []string {
 	var out []string
 	for _, p := range f.files.Paths() {
-		if !strings.HasPrefix(p, "stage-") {
+		if !strings.HasPrefix(p, "stage-") && path.Base(p) != render.ManifestName {
 			out = append(out, p)
 		}
 	}
@@ -185,6 +186,102 @@ func TestRenderTreeIncremental(t *testing.T) {
 	}
 }
 
+// An incremental drawing keeps a PDF only when the manifest records it
+// drawn from the same document with the same options: another paper, mode
+// or template choice draws it again, and so does a manifest that is gone or
+// unreadable.
+func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
+	t.Parallel()
+	f := treeSetup(t)
+	inc := port.RenderTreeOptions{Incremental: true}
+	draw := func(opts port.RenderOptions) port.RenderTreeReport {
+		t.Helper()
+		report, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", opts, inc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 2 {
+		t.Fatalf("%q", rows(r))
+	}
+	if _, ok := f.files.File("out/" + render.ManifestName); !ok {
+		t.Fatal("no manifest")
+	}
+	// The defaults spelled out are the same options.
+	if r := draw(port.RenderOptions{Paper: port.PaperA4, Mode: port.PDFFresh}); r.Count(port.RenderUnchanged) != 2 {
+		t.Fatalf("%q", rows(r))
+	}
+	for _, c := range []struct {
+		name string
+		opts port.RenderOptions
+	}{
+		{"paper", port.RenderOptions{Paper: port.PaperLetter}},
+		{"mode", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving}},
+		{"templates", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}},
+	} {
+		if r := draw(c.opts); r.Count(port.RenderRendered) != 2 {
+			t.Fatalf("%s: %q", c.name, rows(r))
+		}
+		if r := draw(c.opts); r.Count(port.RenderUnchanged) != 2 {
+			t.Fatalf("%s again: %q", c.name, rows(r))
+		}
+	}
+	if head, _ := f.written(t, "out/Deep.pdf"); head != "PDF d3aaaaaa preserving letter no-template" {
+		t.Fatalf("%q", head)
+	}
+	last := port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}
+	for name, damage := range map[string]func(){
+		"corrupt": func() { f.files.Write("out/"+render.ManifestName, []byte("{not json")) },
+		"version": func() { f.files.Write("out/"+render.ManifestName, []byte(`{"v":99,"documents":{}}`)) },
+		"missing": func() {
+			if err := f.files.Remove("out/" + render.ManifestName); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		damage()
+		if r := draw(last); r.Count(port.RenderRendered) != 2 {
+			t.Fatalf("%s: %q", name, rows(r))
+		}
+		if r := draw(last); r.Count(port.RenderUnchanged) != 2 {
+			t.Fatalf("%s, then: %q", name, rows(r))
+		}
+	}
+	// A document modified since is drawn again, under the same options.
+	records, _ := library.Replace(f.cloud.Records(),
+		f.cloud.Record(porttest.Doc{ID: "d3aaaaaa", Name: "Deep", Parent: "f2aaaaaa", Modified: porttest.Epoch.Add(time.Hour)}))
+	f.cloud.SetRoot(records)
+	if r := draw(last); r.Count(port.RenderRendered) != 1 || r.Count(port.RenderUnchanged) != 1 {
+		t.Fatalf("%q", rows(r))
+	}
+}
+
+// A drawing under other options forgets the old record of a PDF before it
+// draws anything: stopped halfway, it never leaves a PDF of the new options
+// recorded under the old ones.
+func TestRenderTreeManifestBeforeDrawing(t *testing.T) {
+	t.Parallel()
+	f := treeSetup(t)
+	inc := port.RenderTreeOptions{Incremental: true}
+	if _, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{}, inc); err != nil {
+		t.Fatal(err)
+	}
+	f.renderer.FailIDs = map[domain.ItemID]error{"d3aaaaaa": errBoom, "d7aaaaaa": errBoom}
+	if _, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{Paper: port.PaperLetter}, inc); !errors.Is(err, render.ErrDocumentsFailed) {
+		t.Fatal(err)
+	}
+	f.renderer.FailIDs = nil
+	if r, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{}, inc); err != nil || r.Count(port.RenderRendered) != 2 {
+		t.Fatalf("%v %q", err, rows(r))
+	}
+	// A manifest that cannot be written fails the drawing.
+	f.files.Fail["Produce"] = errBoom
+	if _, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{Paper: port.PaperTablet}, inc); !errors.Is(err, errBoom) {
+		t.Fatal(err)
+	}
+}
+
 func TestRenderTreeFailedDocumentsGoOn(t *testing.T) {
 	t.Parallel()
 	f := treeSetup(t)
@@ -209,7 +306,13 @@ func TestRenderTreeFailedDocumentsGoOn(t *testing.T) {
 	}{
 		{"name", func(f fixture) { f.archiver.Fail["CheckName"] = errBoom }},
 		{"download", func(f fixture) { f.cloud.Fail["Download"] = errBoom }},
-		{"modification time", func(f fixture) { f.files.Fail["ModTime"] = errBoom }},
+		{"modification time", func(f fixture) {
+			// A PDF's time is read only of a document the manifest records.
+			if _, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{}, port.RenderTreeOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			f.files.Fail["ModTime"] = errBoom
+		}},
 		{"set the modification time", func(f fixture) { f.files.Fail["SetModTime"] = errBoom }},
 	} {
 		f := treeSetup(t)

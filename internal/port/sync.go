@@ -17,17 +17,28 @@ import (
 // ErrNoCacheToSync means sync was asked for with the cache turned off.
 var ErrNoCacheToSync = errors.New("sync fills the cache, and --no-cache turns it off")
 
-// OverBudgetError means a sync would not fit the profile's cache: Needed
+// OverBudgetError means a sync does not fit the profile's cache: Needed
 // bytes must be kept at once, and the budget is Budget, set by Source (one
-// of BudgetFrom...). Nothing was downloaded. A budget of no limit never
-// refuses.
+// of BudgetFrom...). A budget of no limit never refuses.
+//
+// Measured before the download, as it is unless Evicted, no document file
+// (no page, no original) was downloaded; the indexes, .metadata and
+// .content the library is measured from may have been read into the cache.
+// Evicted says the sync fetched what it planned, and part of it did not
+// stay: the cache evicted it to stay within the budget, so Needed is at
+// least what the sync takes, and the sync was not recorded as complete.
 type OverBudgetError struct {
-	Needed int64
-	Budget int64
-	Source string
+	Needed  int64
+	Budget  int64
+	Source  string
+	Evicted bool
 }
 
 func (e *OverBudgetError) Error() string {
+	if e.Evicted {
+		return fmt.Sprintf("sync needs at least %d bytes in the cache, and not all of it stays within its budget of %d bytes",
+			e.Needed, e.Budget)
+	}
 	return fmt.Sprintf("sync needs %d bytes in the cache, and its budget is %d bytes", e.Needed, e.Budget)
 }
 
@@ -109,7 +120,9 @@ type SyncMark struct {
 
 // SyncCache is the profile's cache as sync fills it. Blobs are addressed by
 // their sha256; whatever this reports present counts as just used, so it
-// is the last to be evicted.
+// is the last to be evicted. Whenever a blob or an index leaves the cache,
+// evicted or dropped, the last complete sync is forgotten with it: a mark
+// never vouches for an entry that is gone.
 type SyncCache interface {
 	// Holds reports whether the blob of hash is kept.
 	Holds(hash string) bool

@@ -147,7 +147,7 @@ func TestE2E_SyncRefusals(t *testing.T) {
 
 	t.Setenv("RMCTL_CACHE_BUDGET", "1MiB")
 	code, _, errOut := e.rmctl("sync", "--files")
-	if code != 1 || !strings.Contains(errOut, "and the budget is 1.0 MiB; nothing was downloaded") || !strings.Contains(errOut, "RMCTL_CACHE_BUDGET") {
+	if code != 1 || !strings.Contains(errOut, "and the budget is 1.0 MiB; no page or original was downloaded") || !strings.Contains(errOut, "RMCTL_CACHE_BUDGET") {
 		t.Fatalf("over budget: exit %d %q", code, errOut)
 	}
 	// What fits still syncs: the refused sync was not recorded, and kept

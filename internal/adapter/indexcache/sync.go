@@ -15,7 +15,8 @@ import (
 )
 
 // The blob space of the store, and the name of the last complete sync among
-// the state.
+// the state: the entry blobcache drops whenever a blob or an index leaves
+// the cache (its KeyCovered), so a mark never covers an entry that is gone.
 const (
 	spaceBlobs = "blobs"
 	syncKey    = "sync"

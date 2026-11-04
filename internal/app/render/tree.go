@@ -143,7 +143,11 @@ func TreePlan(tree *domain.Tree, top domain.ItemID, dir string, all bool) []Plan
 // RenderTree implements port.Rendering. Each document is downloaded,
 // packed and drawn as Render draws one, opts.Jobs at a time; a document
 // that fails is reported and the others go on. Only the directories that
-// receive a PDF are created.
+// receive a PDF are created. The directory keeps a manifest, [ManifestName],
+// of what each PDF was drawn from and with which options: an incremental
+// drawing keeps a PDF only when it records the same document, modified at
+// the same time, drawn with the same options, and the PDF still has that
+// time. A manifest missing or unreadable keeps nothing.
 func (s *Service) RenderTree(
 	ctx context.Context, query, dir string, opts port.RenderOptions, tree port.RenderTreeOptions,
 ) (port.RenderTreeReport, error) {
@@ -169,6 +173,13 @@ func (s *Service) RenderTree(
 		return port.RenderTreeReport{}, err
 	}
 	plan := TreePlan(lib, top, dir, tree.All)
+	options := fingerprint(opts)
+	recorded, dropped := pruned(readManifest(s.files, dir), dir, plan, options)
+	if dropped {
+		if err = writeManifest(ctx, s.files, dir, recorded); err != nil {
+			return port.RenderTreeReport{}, err
+		}
+	}
 	report := port.RenderTreeReport{Dir: dir, Documents: make([]port.RenderedDocument, len(plan))}
 	done := make([]bool, len(plan))
 	indexes := make([]int, len(plan))
@@ -180,7 +191,10 @@ func (s *Service) RenderTree(
 		jobs = DefaultJobs
 	}
 	err = concurrency.Process(ctx, indexes, func(ctx context.Context, i int) error {
-		d := s.renderOne(ctx, plan[i], opts, tree.Incremental)
+		// What is left recorded of the plan was drawn from the document as it
+		// is now, with these options: only its PDF's time is left to check.
+		_, known := recorded[manifestKey(dir, plan[i].Path)]
+		d := s.renderOne(ctx, plan[i], opts, tree.Incremental && known)
 		if d.Err != nil && ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -195,6 +209,9 @@ func (s *Service) RenderTree(
 		}
 	}
 	report.Documents = finished
+	if werr := s.record(ctx, dir, recorded, finished, options); werr != nil {
+		return report, errors.Join(err, werr)
+	}
 	if err != nil {
 		return report, err
 	}
@@ -202,6 +219,22 @@ func (s *Service) RenderTree(
 		return report, fmt.Errorf("%d of %d %w", failed, len(report.Documents), ErrDocumentsFailed)
 	}
 	return report, nil
+}
+
+// record adds the documents drawn to the manifest of dir, recorded, and
+// writes it, if any was.
+func (s *Service) record(ctx context.Context, dir string, recorded map[string]manifestEntry, docs []port.RenderedDocument, opts string) error {
+	drawn := false
+	for _, d := range docs {
+		if d.Status == port.RenderRendered && !d.Document.Modified.IsZero() {
+			recorded[manifestKey(dir, d.Report.Path)] = entryOf(d.Document, opts)
+			drawn = true
+		}
+	}
+	if !drawn {
+		return nil
+	}
+	return writeManifest(ctx, s.files, dir, recorded)
 }
 
 // topFolder is the folder query names and the directory name it is drawn

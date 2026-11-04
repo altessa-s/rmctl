@@ -364,3 +364,103 @@ func TestNewRootNeedsItsDependencies(t *testing.T) {
 		}()
 	}
 }
+
+// fill puts n distinct blobs of size bytes into c, each used a second
+// after the one before, and returns their hashes, oldest first.
+func fill(t *testing.T, c *blobcache.Cache, n, size int) []string {
+	t.Helper()
+	hashes := make([]string, n)
+	base := time.Now().Add(-time.Hour)
+	for i := range n {
+		data := bytes.Repeat([]byte{byte('a' + i)}, size)
+		hashes[i] = hashOf(data)
+		c.Put(hashes[i], data)
+		at := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(filepath.Join(c.Dir(), blobcache.SpaceBlobs, hashes[i]), at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return hashes
+}
+
+// Whatever leaves the blobs or the indexes, evicted or dropped, takes the
+// record of the last complete sync with it: it never vouches for an entry
+// that is gone. The state is never evicted otherwise.
+func TestEvictionForgetsTheSync(t *testing.T) {
+	t.Parallel()
+	c := blobcache.New(t.TempDir(), 100, clock.Real(), nil)
+	hashes := fill(t, c, 3, 30)
+	c.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+	c.PutEntry(blobcache.SpaceState, "root", []byte("pointer"))
+	// Within the budget: nothing goes, the mark stays.
+	c.PutEntry(blobcache.SpaceIndexes, hashOf([]byte("i")), []byte("i"))
+	if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+		t.Fatal("a write within the budget dropped the mark")
+	}
+	// Past it: the oldest blobs go, and the mark with them.
+	big := bytes.Repeat([]byte("z"), 50)
+	c.Put(hashOf(big), big)
+	if _, ok := c.Get(hashes[0]); ok {
+		t.Fatal("nothing was evicted")
+	}
+	if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+		t.Fatal("an eviction kept the mark")
+	}
+	if _, ok := c.Entry(blobcache.SpaceState, "root"); !ok {
+		t.Fatal("an eviction took other state")
+	}
+	// A blob or an index dropped takes it too; a miss does not.
+	for _, space := range []string{blobcache.SpaceBlobs, blobcache.SpaceIndexes} {
+		data := []byte("dropped " + space)
+		c.PutEntry(space, hashOf(data), data)
+		c.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+		c.Drop(space, hashOf([]byte("never kept")))
+		if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+			t.Fatalf("%s: dropping a miss dropped the mark", space)
+		}
+		c.Drop(space, hashOf(data))
+		if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+			t.Fatalf("%s: a drop kept the mark", space)
+		}
+	}
+}
+
+// A profile's cache filled under a larger budget is evicted down to the
+// one it is opened with: the report never shows more than the budget. One
+// within its budget, or under no limit, loses nothing, mark included.
+func TestRootReconcilesALoweredBudget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	large, err := blobcache.NewRoot(dir, blobcache.Fixed(1<<20), clock.Real(), nil).Profile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := fill(t, large, 10, 100)
+	large.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+	for _, limit := range []int64{0, 1 << 20} {
+		again, _ := blobcache.NewRoot(dir, blobcache.Fixed(limit), clock.Real(), nil).Profile("work")
+		if bytes, _ := again.Usage(); bytes != 1000 {
+			t.Fatalf("budget %d: %d bytes left", limit, bytes)
+		}
+		if _, ok := again.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+			t.Fatalf("budget %d: the mark went", limit)
+		}
+	}
+	small, err := blobcache.NewRoot(dir, blobcache.Fixed(450), clock.Real(), nil).Profile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, entries := small.Usage()
+	if bytes > small.Budget() || bytes != 400 || entries[blobcache.SpaceBlobs] != 4 {
+		t.Fatalf("%d bytes in %v, budget %d", bytes, entries, small.Budget())
+	}
+	// The least recently used went.
+	for i, h := range hashes {
+		if _, ok := small.Get(h); ok != (i >= 6) {
+			t.Fatalf("blob %d kept %v", i, ok)
+		}
+	}
+	if _, ok := small.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+		t.Fatal("the reconciled cache kept the mark")
+	}
+}
