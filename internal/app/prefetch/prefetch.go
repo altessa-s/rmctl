@@ -38,17 +38,16 @@ var _ port.Syncer = (*Service)(nil)
 // New returns the sync use case. roots must read the live root; blobs is
 // the cloud's store the files are downloaded from. A nil dependency panics.
 func New(roots port.RootStore, lib *library.Library, blobs port.BlobStore, cache port.SyncCache, clk port.Clock) *Service {
-	switch {
-	case roots == nil:
-		panic("prefetch: RootStore is required")
-	case lib == nil:
-		panic("prefetch: Library is required")
-	case blobs == nil:
-		panic("prefetch: BlobStore is required")
-	case cache == nil:
-		panic("prefetch: SyncCache is required")
-	case clk == nil:
-		panic("prefetch: Clock is required")
+	for _, dep := range []struct {
+		name    string
+		missing bool
+	}{
+		{"RootStore", roots == nil}, {"Library", lib == nil}, {"BlobStore", blobs == nil},
+		{"SyncCache", cache == nil}, {"Clock", clk == nil},
+	} {
+		if dep.missing {
+			panic("prefetch: " + dep.name + " is required")
+		}
 	}
 	return &Service{roots: roots, lib: lib, blobs: blobs, cache: cache, clock: clk}
 }
