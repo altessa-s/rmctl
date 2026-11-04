@@ -24,7 +24,16 @@ The scripts are written for PowerShell 7 (`pwsh`); [Windows PowerShell 5.1](#win
 
 ## Install
 
-Every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, `LICENSE` and `README.md`, and `checksums.txt` with the SHA-256 of every archive. The binary is self-contained: it needs no runtime and no DLL beyond Windows' own. It is built for x64; Windows on Arm runs it under emulation.
+The simplest way is a package manager, which also puts `rmctl` on the `Path` and updates it:
+
+```powershell
+scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket
+scoop install rmctl          # later: scoop update rmctl
+
+winget install Altessa.rmctl # later: winget upgrade Altessa.rmctl
+```
+
+By hand: every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, `LICENSE` and `README.md`, and `checksums.txt` with the SHA-256 of every archive. The binary is self-contained: it needs no runtime and no DLL beyond Windows' own. It is built for x64; Windows on Arm runs it under emulation.
 
 Download both files from the [releases page](https://github.com/altessa-s/rmctl/releases), or from PowerShell:
 

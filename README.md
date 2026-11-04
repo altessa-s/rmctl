@@ -32,7 +32,7 @@ rmctl find 'go|rust' --tag reading --json
 - **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request.
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
-- **Platforms:** macOS, Linux and Windows, with Homebrew; rendering on macOS and Linux.
+- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on macOS and Linux.
 - **Automation:** scheduled backups, hot folders, exports to Markdown and more in [docs/automation.md](docs/automation.md).
 
 ## Install
@@ -41,6 +41,15 @@ With [Homebrew](https://brew.sh) on macOS or Linux:
 
 ```sh
 brew install altessa-s/tap/rmctl
+```
+
+On Windows, with [Scoop](https://scoop.sh) or [winget](https://learn.microsoft.com/windows/package-manager/winget/):
+
+```powershell
+scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket
+scoop install rmctl
+
+winget install Altessa.rmctl
 ```
 
 Every release also attaches archives: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows. `checksums.txt` lists their SHA-256.
