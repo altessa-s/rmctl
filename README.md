@@ -41,7 +41,7 @@ With [Homebrew](https://brew.sh) on macOS or Linux:
 brew install altessa-s/tap/rmctl
 ```
 
-Every release also attaches archives for macOS, Linux and Windows.
+Every release also attaches archives: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows. `checksums.txt` lists their SHA-256.
 
 From source, with Go 1.27 or newer and a C23 compiler for the page and archive commands (see below):
 
