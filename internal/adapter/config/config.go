@@ -53,10 +53,12 @@ type Config struct {
 	// cloud, and Offline whether --offline is the profile's default.
 	CacheTTL time.Duration
 	Offline  bool
-	// CacheBudget bounds the profile's cache in bytes; 0 is none set.
-	CacheBudget int64
-	TokenPath   string
-	Endpoints   rmcloud.Endpoints
+	// CacheBudget bounds the profile's cache, and CacheBudgets every
+	// profile's: each profile's cache is bounded by its own.
+	CacheBudget  Budget
+	CacheBudgets Budgets
+	TokenPath    string
+	Endpoints    rmcloud.Endpoints
 	// ConfigFile is the configuration file read, present or not, and
 	// ProfileTable whether it holds a table of the profile's own.
 	ConfigFile   string
@@ -153,7 +155,7 @@ func LoadFrom(env map[string]string, profileFlag string, dirs BaseDirs, read Rea
 	if err != nil {
 		return Config{}, err
 	}
-	budget, err := budgetOf(env, file, profile)
+	budgets, err := budgetsOf(env, file)
 	if err != nil {
 		return Config{}, err
 	}
@@ -164,7 +166,8 @@ func LoadFrom(env map[string]string, profileFlag string, dirs BaseDirs, read Rea
 		ProfileTable:    table,
 		CacheTTL:        ttl,
 		Offline:         offline,
-		CacheBudget:     budget,
+		CacheBudget:     budgets.Of(profile),
+		CacheBudgets:    budgets,
 		Profile:         profile,
 		ConfigDir:       configDir,
 		CacheDir:        cacheDir,

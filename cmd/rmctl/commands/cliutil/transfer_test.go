@@ -60,3 +60,43 @@ func TestTransferRedrawsAtMostEveryTenth(t *testing.T) {
 		done()
 	}
 }
+
+// A dumb terminal cannot clear a line, so a shorter line is padded over
+// the longer one before it; with no clock given the machine's is used.
+func TestTransferOnADumbTerminal(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	getenv := func(name string) string {
+		if name == "TERM" {
+			return "dumb"
+		}
+		return ""
+	}
+	update, done := Transfer(Streams{Err: &buf, IsTerminal: true, Getenv: getenv}, "syncing")
+	update(port.SyncProgress{Files: 1, FilesTotal: 10000, Bytes: 1 << 30, BytesTotal: 3 << 30})
+	first := strings.TrimPrefix(buf.String(), "\r")
+	buf.Reset()
+	// A finished sync draws at once, however soon.
+	update(port.SyncProgress{Files: 1, FilesTotal: 1, Bytes: 1, BytesTotal: 1})
+	done()
+	out := buf.String()
+	if strings.Contains(first+out, "\x1b") || !strings.HasPrefix(out, "\r") || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("escape sequences or no carriage return: %q %q", first, out)
+	}
+	last := strings.TrimSuffix(strings.TrimPrefix(out, "\r"), "\n")
+	text := strings.TrimRight(last, " ")
+	if len(last) != len(first) || len(text) >= len(first) || !strings.HasPrefix(text, "syncing [====================] 100%") {
+		t.Fatalf("the shorter line does not cover the longer one:\n%q\n%q", first, last)
+	}
+}
+
+// A cache budget of 0 is no limit, and reads so.
+func TestBudget(t *testing.T) {
+	t.Parallel()
+	if c := BudgetCell(0); c.Text != "unlimited" {
+		t.Fatalf("%+v", c)
+	}
+	if c := BudgetCell(1 << 20); c.Int != 1<<20 || c.Text != "" {
+		t.Fatalf("%+v", c)
+	}
+}

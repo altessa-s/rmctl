@@ -19,7 +19,10 @@ import (
 type ProfileStore interface {
 	Store
 	Dir() string
+	// Budget bounds the blobs and indexes, 0 for no limit, and
+	// BudgetSource says what set it.
 	Budget() int64
+	BudgetSource() string
 	Usage() (bytes int64, entries map[string]int)
 	Clear() error
 }
@@ -99,7 +102,7 @@ func status(profiles Profiles, name string, log *slog.Logger) (port.ProfileCache
 		return port.ProfileCache{}, err
 	}
 	bytes, entries := store.Usage()
-	pc := port.ProfileCache{Profile: name, Dir: store.Dir(), Bytes: bytes, Budget: store.Budget(), Entries: entries}
+	pc := port.ProfileCache{Profile: name, Dir: store.Dir(), Bytes: bytes, Budget: store.Budget(), BudgetSource: store.BudgetSource(), Entries: entries}
 	if p, ok := readPointer(store, log); ok {
 		pc.RootHash, pc.RootGeneration, pc.Confirmed = p.Hash, p.Generation, p.Confirmed
 	}

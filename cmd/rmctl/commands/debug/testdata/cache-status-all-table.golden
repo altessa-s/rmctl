@@ -3,7 +3,7 @@ ttl       10m0s
 offline   no
 no cache  no
 
-PROFILE     BYTES     BUDGET  BLOBS  INDEXES  ROOT                                                              GENERATION  CONFIRMED
-───────  ────────  ─────────  ─────  ───────  ────────────────────────────────────────────────────────────────  ──────────  ────────────────
-home      2.0 KiB  512.0 MiB      4        3  -                                                                          -  -
-work     10.0 MiB  512.0 MiB    120       61  abababababababababababababababababababababababababababababababab          42  2026-11-01 09:30
+PROFILE     BYTES     BUDGET  FROM     BLOBS  INDEXES  ROOT                                                              GENERATION  CONFIRMED
+───────  ────────  ─────────  ───────  ─────  ───────  ────────────────────────────────────────────────────────────────  ──────────  ────────────────
+home      2.0 KiB  unlimited  profile      4        3  -                                                                          -  -
+work     10.0 MiB  512.0 MiB  config     120       61  abababababababababababababababababababababababababababababababab          42  2026-11-01 09:30

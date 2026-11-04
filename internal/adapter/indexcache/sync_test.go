@@ -169,3 +169,31 @@ func TestNewSyncsNeedsAStore(t *testing.T) {
 	}()
 	indexcache.NewSyncs(nil, nil)
 }
+
+// The sync cache reports the profile's own budget and what set it, as sync
+// answers them.
+func TestSyncsReportTheProfilesBudget(t *testing.T) {
+	t.Parallel()
+	root := blobcache.NewRoot(t.TempDir(), func(profile string) blobcache.Limit {
+		if profile == "archive" {
+			return blobcache.Limit{Source: port.BudgetFromProfile}
+		}
+		return blobcache.Limit{Bytes: 64 << 20, Source: port.BudgetFromConfig}
+	}, porttest.NewClock(time.Unix(1_700_000_000, 0)), nil)
+	for profile, want := range map[string]struct {
+		bytes  int64
+		source string
+	}{
+		"archive": {0, port.BudgetFromProfile},
+		"work":    {64 << 20, port.BudgetFromConfig},
+	} {
+		st, err := root.Profile(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := indexcache.NewSyncs(st, nil)
+		if s.Budget() != want.bytes || s.BudgetSource() != want.source {
+			t.Errorf("%s: %d %q", profile, s.Budget(), s.BudgetSource())
+		}
+	}
+}

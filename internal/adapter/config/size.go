@@ -11,11 +11,16 @@ import (
 	"strings"
 )
 
-// EnvCacheBudget is the cache budget over the configuration file.
+// EnvCacheBudget is the cache budget over the configuration file, for
+// every profile.
 const EnvCacheBudget = "RMCTL_CACHE_BUDGET"
 
-// MinCacheBudget is the smallest budget a profile's cache takes: a cache
-// smaller than one page of a notebook keeps nothing worth keeping.
+// DefaultCacheBudget bounds a profile's cache when nothing sets a budget.
+const DefaultCacheBudget int64 = 512 << 20
+
+// MinCacheBudget is the smallest budget a profile's cache takes, other than
+// 0 for no limit: a cache smaller than one page of a notebook keeps nothing
+// worth keeping.
 const MinCacheBudget int64 = 1 << 20
 
 // sizeUnits are the units a size takes, by their lower-case name: binary
@@ -36,6 +41,13 @@ const (
 // a number, then a unit (any case, a space between allowed), bytes without
 // one.
 func ParseSize(s string) (int64, bool) {
+	bytes, ok := parseSize(s)
+	return int64(bytes), ok
+}
+
+// parseSize is ParseSize before the bytes are rounded down to a whole
+// number: "0.5" is half a byte, not 0.
+func parseSize(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	i := strings.IndexFunc(s, func(r rune) bool { return (r < '0' || r > '9') && r != '.' })
 	if i < 0 {
@@ -53,31 +65,65 @@ func ParseSize(s string) (int64, bool) {
 	if bytes >= math.MaxInt64 {
 		return 0, false
 	}
-	return int64(bytes), true
+	return bytes, true
 }
 
-// parseBudget reads a cache budget: a size of at least MinCacheBudget, ""
-// for none. There is no unlimited budget, and 0 does not turn the cache
-// off (--no-cache does): a cache is always bounded.
+// parseBudget reads a cache budget: 0 (in any unit) for no limit, else a
+// size of at least MinCacheBudget; "" is none set. 0 keeps everything, it
+// does not turn the cache off: --no-cache does.
 func parseBudget(key, value string) (int64, error) {
 	if value == "" {
 		return 0, nil
 	}
-	n, ok := ParseSize(value)
-	if !ok || n < MinCacheBudget {
-		return 0, fmt.Errorf("%w: %s = %q: a budget is a size such as \"512MiB\" or \"4GiB\", at least 1MiB", ErrConfig, key, value)
+	n, ok := parseSize(value)
+	if !ok || (n != 0 && n < float64(MinCacheBudget)) {
+		return 0, fmt.Errorf("%w: %s = %q: a budget is a size of at least 1MiB, such as \"512MiB\" or \"4GiB\", or 0 for no limit", ErrConfig, key, value)
 	}
-	return n, nil
+	return int64(n), nil
 }
 
-// budgetOf chooses a profile's cache budget: RMCTL_CACHE_BUDGET, then the
-// profile's [profiles.<name>.cache], then [cache]; 0 is none set.
-func budgetOf(env map[string]string, f File, profile string) (int64, error) {
-	if v := env[EnvCacheBudget]; v != "" {
-		return parseBudget(EnvCacheBudget, v)
+// Budget is a profile's cache budget: Bytes of blobs and indexes, 0 for no
+// limit, and Source, what set it: SourceEnv, SourceProfile, SourceConfig
+// (the file's [cache]) or SourceDefault.
+type Budget struct {
+	Bytes  int64
+	Source string
+}
+
+// Unlimited reports a budget of no limit.
+func (b Budget) Unlimited() bool { return b.Bytes == 0 }
+
+// Budgets chooses the cache budget of any profile, as LoadFrom read the
+// environment and the configuration file: every profile's cache is bounded
+// by its own.
+type Budgets struct {
+	// env is RMCTL_CACHE_BUDGET and file the configuration file, both
+	// already checked.
+	env  string
+	file File
+}
+
+// Of is the budget of profile: RMCTL_CACHE_BUDGET, which applies to every
+// profile, then the profile's [profiles.<name>.cache], then [cache], then
+// DefaultCacheBudget.
+func (b Budgets) Of(profile string) Budget {
+	for _, c := range []struct{ value, source string }{
+		{b.env, SourceEnv},
+		{b.file.Profiles[profile].Cache.Budget, SourceProfile},
+		{b.file.Cache.Budget, SourceConfig},
+	} {
+		if c.value != "" {
+			n, _ := parseBudget("", c.value) //nolint:errcheck // LoadFrom and ParseFile checked it
+			return Budget{Bytes: n, Source: c.source}
+		}
 	}
-	if v := f.Profiles[profile].Cache.Budget; v != "" {
-		return parseBudget("profiles."+profile+".cache.budget", v)
+	return Budget{Bytes: DefaultCacheBudget, Source: SourceDefault}
+}
+
+// budgetsOf checks RMCTL_CACHE_BUDGET and keeps it with the file.
+func budgetsOf(env map[string]string, f File) (Budgets, error) {
+	if _, err := parseBudget(EnvCacheBudget, env[EnvCacheBudget]); err != nil {
+		return Budgets{}, err
 	}
-	return parseBudget("cache.budget", f.Cache.Budget)
+	return Budgets{env: env[EnvCacheBudget], file: f}, nil
 }

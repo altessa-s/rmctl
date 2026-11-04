@@ -4,7 +4,9 @@
     "current": true,
     "registered": true,
     "secrets": "file",
-    "cache_bytes": 2048
+    "cache_bytes": 2048,
+    "cache_budget": 536870912,
+    "cache_budget_source": "default"
   },
   {
     "profile": "travel",
@@ -12,13 +14,17 @@
     "registered": false,
     "token_error": "the Keychain is locked",
     "secrets": "keychain",
-    "cache_bytes": 0
+    "cache_bytes": 0,
+    "cache_budget": 0,
+    "cache_budget_source": "profile"
   },
   {
     "profile": "work",
     "current": false,
     "registered": true,
     "secrets": "keychain",
-    "cache_bytes": 0
+    "cache_bytes": 0,
+    "cache_budget": 4294967296,
+    "cache_budget_source": "config"
   }
 ]

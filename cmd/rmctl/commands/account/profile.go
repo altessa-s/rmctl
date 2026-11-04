@@ -63,6 +63,9 @@ type profileView struct {
 	TokenError string `json:"token_error,omitempty"`
 	Secrets    string `json:"secrets"`
 	CacheBytes int64  `json:"cache_bytes"`
+	// CacheBudget is 0 for no limit.
+	CacheBudget       int64  `json:"cache_budget"`
+	CacheBudgetSource string `json:"cache_budget_source"`
 }
 
 func newProfileList(env *cliutil.Env) *cobra.Command {
@@ -72,9 +75,9 @@ func newProfileList(env *cliutil.Env) *cobra.Command {
 		Long: heredoc.Doc(`
 			Lists every profile this machine keeps something of — a directory, a table
 			in config.toml, a cache — and the one in use when it is registered: whether
-			it holds a device token, where its tokens are kept, and what its cache
-			takes. The profile this command runs as is marked current. Nothing is
-			changed, and nothing is asked of the cloud.
+			it holds a device token, where its tokens are kept, what its cache takes,
+			and its own cache budget ("unlimited" for 0). The profile this command runs
+			as is marked current. Nothing is changed, and nothing is asked of the cloud.
 		`),
 		Example: heredoc.Doc(`
 			rmctl profile ls
@@ -98,9 +101,11 @@ func newProfileList(env *cliutil.Env) *cobra.Command {
 				{Title: keyRegistered},
 				{Title: keySecrets, Role: output.RoleKind},
 				{Title: "cache", Role: output.RoleSize},
+				{Title: "budget", Role: output.RoleSize},
 			}}
 			for _, s := range list {
-				v := profileView{Profile: s.Name, Current: s.Current, Registered: s.Registered, Secrets: string(s.Backend), CacheBytes: s.CacheBytes}
+				v := profileView{Profile: s.Name, Current: s.Current, Registered: s.Registered, Secrets: string(s.Backend), CacheBytes: s.CacheBytes,
+					CacheBudget: s.CacheBudget, CacheBudgetSource: s.CacheBudgetSource}
 				registered := output.Bool(s.Registered)
 				if s.TokenErr != nil {
 					v.TokenError = s.TokenErr.Error()
@@ -112,7 +117,8 @@ func newProfileList(env *cliutil.Env) *cobra.Command {
 					name = name.With(output.Muted)
 				}
 				views = append(views, v)
-				t.Rows = append(t.Rows, []output.Cell{name, output.Bool(s.Current), registered, output.Text(v.Secrets), output.Size(s.CacheBytes)})
+				t.Rows = append(t.Rows, []output.Cell{name, output.Bool(s.Current), registered, output.Text(v.Secrets), output.Size(s.CacheBytes),
+					cliutil.BudgetCell(s.CacheBudget)})
 			}
 			return env.Emit(cmd, output.Result{JSON: views, Doc: output.Doc{t}})
 		},
@@ -185,6 +191,7 @@ type profileInfoView struct {
 	CacheDir        string         `json:"cache_dir"`
 	CacheBytes      int64          `json:"cache_bytes"`
 	CacheBudget     int64          `json:"cache_budget"`
+	CacheBudgetFrom string         `json:"cache_budget_source"`
 	CacheEntries    map[string]int `json:"cache_entries"`
 	Confirmed       string         `json:"confirmed,omitempty"`
 	ConfigFile      string         `json:"config_file"`
@@ -264,7 +271,8 @@ func newProfileInfo(env *cliutil.Env) *cobra.Command {
 				{Key: "sync_scope", Value: output.Text(v.SyncScope)},
 				{Key: "cache_dir", Value: output.Path(v.CacheDir)},
 				{Key: "cache_bytes", Value: output.Size(v.CacheBytes)},
-				{Key: "cache_budget", Value: output.Size(v.CacheBudget)},
+				{Key: "cache_budget", Value: cliutil.BudgetCell(v.CacheBudget)},
+				{Key: "cache_budget_source", Value: output.Text(v.CacheBudgetFrom)},
 				{Key: "cache_blobs", Value: output.Count(v.CacheEntries["blobs"])},
 				{Key: "cache_indexes", Value: output.Count(v.CacheEntries["indexes"])},
 				{Key: "confirmed", Value: output.Time(info.Cache.Confirmed)},
@@ -283,7 +291,8 @@ func infoOf(info port.ProfileInfo) profileInfoView {
 		ConfigDir: info.ConfigDir, ConfigDirExists: info.DirExists,
 		Secrets: string(info.Backend), SecretsSource: info.BackendSource, TokenLocation: info.TokenLocation,
 		Tokens: info.Tokens, Registered: info.Registered,
-		CacheDir: info.Cache.Dir, CacheBytes: info.Cache.Bytes, CacheBudget: info.Cache.Budget, CacheEntries: info.Cache.Entries,
+		CacheDir: info.Cache.Dir, CacheBytes: info.Cache.Bytes, CacheEntries: info.Cache.Entries,
+		CacheBudget: info.Cache.Budget, CacheBudgetFrom: info.Cache.BudgetSource,
 		Confirmed:  cliutil.Stamp(info.Cache.Confirmed),
 		ConfigFile: info.ConfigFile, ConfigTable: info.Table, CacheTTLSeconds: int64(info.CacheTTL / time.Second), Offline: info.Offline,
 	}

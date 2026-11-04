@@ -92,6 +92,9 @@ type ProfileState struct {
 	Dir, Table, Cache  bool
 	KeptDir, KeptCache bool
 	CacheBytes         int64
+	// Budget is the cache's budget and what set it; the zero Budget is
+	// CacheBudget, set by default.
+	Budget Budget
 	// File and Keychain are its vaults; nil is an empty one.
 	File, Keychain *Vault
 }
@@ -119,8 +122,15 @@ var (
 	_ port.ProfileRegistries = (*Profiles)(nil)
 )
 
-// CacheBudget is the budget of every cache [Profiles] reports.
+// CacheBudget is the budget of a cache [Profiles] reports when its
+// ProfileState sets none.
 const CacheBudget int64 = 1 << 20
+
+// Budget is a profile's cache budget, 0 bytes for no limit, and what set it.
+type Budget struct {
+	Bytes  int64
+	Source string
+}
 
 // ErrBadName is what Profiles answers for a name ValidName refuses.
 var ErrBadName = errors.New("porttest: not a profile name")
@@ -293,7 +303,11 @@ func (p *Profiles) Status(name string) (port.ProfileCache, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	st := p.state(name)
-	return port.ProfileCache{Profile: name, Dir: "/cache/" + name, Bytes: st.CacheBytes, Budget: CacheBudget}, nil
+	budget := st.Budget
+	if budget == (Budget{}) {
+		budget = Budget{Bytes: CacheBudget, Source: port.BudgetFromDefault}
+	}
+	return port.ProfileCache{Profile: name, Dir: "/cache/" + name, Bytes: st.CacheBytes, Budget: budget.Bytes, BudgetSource: budget.Source}, nil
 }
 
 // Remove implements port.ProfileCaches.

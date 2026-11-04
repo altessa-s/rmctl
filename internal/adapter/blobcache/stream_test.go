@@ -149,3 +149,42 @@ func TestFillEvictsTheOldestFirst(t *testing.T) {
 		}
 	}
 }
+
+// Open misses, rather than fails, when there is no blob to read: no blobs
+// directory yet, or something other than a file under the hash's name.
+func TestOpenMisses(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "p")
+	c := blobcache.New(dir, 1<<20, clock.Real(), nil)
+	h := hashOf([]byte("absent"))
+	if _, _, ok := c.Open(h); ok {
+		t.Fatal("a blob in a cache with no blobs directory")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, blobcache.SpaceBlobs, h), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := c.Open(h); ok {
+		t.Fatal("a directory read as a blob")
+	}
+	if _, _, ok := c.Open("not-a-hash"); ok {
+		t.Fatal("a name that is not a hash was opened")
+	}
+}
+
+// A fill reports what keeps it from the disk, as the command asked for it.
+func TestFillReportsADirectoryItCannotMake(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "p")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The blobs directory is taken by a file.
+	if err := os.WriteFile(filepath.Join(dir, blobcache.SpaceBlobs), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := blobcache.New(dir, 1<<20, clock.Real(), nil)
+	data := []byte("x")
+	if err := c.Fill(hashOf(data), func(w io.Writer) error { _, err := w.Write(data); return err }); err == nil {
+		t.Fatal("a fill with nowhere to go succeeded")
+	}
+}

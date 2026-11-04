@@ -47,8 +47,11 @@ func TestNewPanics(t *testing.T) {
 func TestList(t *testing.T) {
 	t.Parallel()
 	p := porttest.NewProfiles(map[string]*porttest.ProfileState{
-		"work":    {Dir: true, File: registered(), Cache: true, CacheBytes: 42},
-		"travel":  {Table: true, Settings: port.ProfileSettings{Backend: port.SecretsKeychain}},
+		"work": {
+			Dir: true, File: registered(), Cache: true, CacheBytes: 42,
+			Budget: porttest.Budget{Bytes: 4 << 30, Source: port.BudgetFromProfile},
+		},
+		"travel":  {Table: true, Settings: port.ProfileSettings{Backend: port.SecretsKeychain}, Budget: porttest.Budget{Source: port.BudgetFromProfile}},
 		"old":     {Cache: true},
 		"default": {File: registered()},
 	})
@@ -56,11 +59,13 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each profile lists its own cache budget.
+	def := porttest.CacheBudget
 	want := []port.ProfileSummary{
-		{Name: "default", Current: true, Registered: true, Backend: port.SecretsFile},
-		{Name: "old", Backend: port.SecretsFile},
-		{Name: "travel", Backend: port.SecretsKeychain},
-		{Name: "work", Registered: true, Backend: port.SecretsFile, CacheBytes: 42},
+		{Name: "default", Current: true, Registered: true, Backend: port.SecretsFile, CacheBudget: def, CacheBudgetSource: port.BudgetFromDefault},
+		{Name: "old", Backend: port.SecretsFile, CacheBudget: def, CacheBudgetSource: port.BudgetFromDefault},
+		{Name: "travel", Backend: port.SecretsKeychain, CacheBudgetSource: port.BudgetFromProfile},
+		{Name: "work", Registered: true, Backend: port.SecretsFile, CacheBytes: 42, CacheBudget: 4 << 30, CacheBudgetSource: port.BudgetFromProfile},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)

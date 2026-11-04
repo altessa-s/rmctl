@@ -18,11 +18,13 @@ import (
 var ErrNoCacheToSync = errors.New("sync fills the cache, and --no-cache turns it off")
 
 // OverBudgetError means a sync would not fit the profile's cache: Needed
-// bytes must be kept at once, and the budget is Budget. Nothing was
-// downloaded.
+// bytes must be kept at once, and the budget is Budget, set by Source (one
+// of BudgetFrom...). Nothing was downloaded. A budget of no limit never
+// refuses.
 type OverBudgetError struct {
 	Needed int64
 	Budget int64
+	Source string
 }
 
 func (e *OverBudgetError) Error() string {
@@ -70,9 +72,11 @@ type SyncReport struct {
 	Bytes   int64
 	// Needed is what the sync keeps in the cache at once.
 	Needed int64
-	// CacheBytes is what the profile's cache takes now; Budget bounds it.
-	CacheBytes int64
-	Budget     int64
+	// CacheBytes is what the profile's cache takes now; Budget bounds it,
+	// 0 for no limit, and BudgetSource says what set it.
+	CacheBytes   int64
+	Budget       int64
+	BudgetSource string
 }
 
 // Syncer is the input port of rmctl sync: it fills the profile's cache
@@ -115,9 +119,11 @@ type SyncCache interface {
 	// Fill keeps the blob of hash that write produces, streamed to disk
 	// and checked against hash; nothing is kept when write fails.
 	Fill(hash string, write func(w io.Writer) error) error
-	// Usage is what the cache takes now, and Budget what bounds it.
+	// Usage is what the cache takes now, and Budget what bounds it, 0 for
+	// no limit; BudgetSource says what set the budget (BudgetFrom...).
 	Usage() int64
 	Budget() int64
+	BudgetSource() string
 	// LastSync is the last complete sync; MarkSync records one, and
 	// DropSync forgets it.
 	LastSync() (SyncMark, bool)

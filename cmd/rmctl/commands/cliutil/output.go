@@ -79,6 +79,17 @@ func Stamp(t time.Time) string {
 // Size is a byte count for a person: 512 B, 1.5 KiB, 3.2 MiB.
 func Size(n int64) string { return output.HumanSize(n) }
 
+// unlimited is how a cache budget of no limit reads.
+const unlimited = "unlimited"
+
+// BudgetCell is a cache budget as a cell: a size, or "unlimited" for 0.
+func BudgetCell(n int64) output.Cell {
+	if n == 0 {
+		return output.Text(unlimited)
+	}
+	return output.Size(n)
+}
+
 // ItemColumns are the columns of a list of items: the name and the kind,
 // with long the modification time and the size, then the identifier, and
 // whether the item is pinned or in the trash.

@@ -97,8 +97,11 @@ type ProfileSummary struct {
 	Registered bool
 	TokenErr   error
 	Backend    SecretsBackend
-	// CacheBytes is what its cache takes.
-	CacheBytes int64
+	// CacheBytes is what its cache takes, and CacheBudget what bounds it,
+	// 0 for no limit, set by CacheBudgetSource (BudgetFrom...).
+	CacheBytes        int64
+	CacheBudget       int64
+	CacheBudgetSource string
 }
 
 // ProfileInfo is one profile in detail.

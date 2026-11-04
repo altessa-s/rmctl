@@ -65,7 +65,7 @@ func (c *Cache) Fill(hash string, write func(w io.Writer) error) error {
 	switch {
 	case hex.EncodeToString(sum.Sum(nil)) != hash:
 		return ErrMismatch
-	case counter.n > c.maxBytes:
+	case !c.fits(counter.n):
 		return ErrTooLarge
 	}
 	c.mu.Lock()

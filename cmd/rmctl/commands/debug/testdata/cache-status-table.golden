@@ -5,6 +5,7 @@ offline          no
 no cache         no
 bytes            10.0 MiB
 budget           512.0 MiB
+budget source    config
 blobs            120
 indexes          61
 root hash        abababababababababababababababababababababababababababababababab

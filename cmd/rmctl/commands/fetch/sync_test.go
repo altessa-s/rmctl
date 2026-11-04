@@ -18,7 +18,7 @@ import (
 // synced is a sync that fetched three files of five.
 var synced = port.SyncReport{ //nolint:gochecknoglobals // a test answer
 	Path: "/Books", Root: "abc123", Generation: 42, Documents: 2, Fetched: 3, Cached: 2,
-	Bytes: 3 << 20, Needed: 4 << 20, CacheBytes: 5 << 20, Budget: 512 << 20,
+	Bytes: 3 << 20, Needed: 4 << 20, CacheBytes: 5 << 20, Budget: 512 << 20, BudgetSource: port.BudgetFromDefault,
 }
 
 func TestSync(t *testing.T) {
@@ -39,6 +39,17 @@ func TestSync(t *testing.T) {
 	current.Current, current.Fetched, current.Bytes = true, 0, 0
 	r = run(t, &clitest.Fake{Synced: current}, clitest.Options{}, "sync")
 	if !strings.HasPrefix(r.Out, "current\tyes\n") && !strings.HasPrefix(r.Out, "current\ttrue\n") {
+		t.Fatalf("%q", r.Out)
+	}
+	// A budget of 0 is no limit: a person reads "unlimited", --json 0.
+	unlimited := synced
+	unlimited.Budget, unlimited.BudgetSource = 0, port.BudgetFromProfile
+	r = run(t, &clitest.Fake{Synced: unlimited}, clitest.Options{}, "sync")
+	if r.Code != 0 || !strings.Contains(r.Out, "budget\tunlimited\nbudget_source\tprofile\n") {
+		t.Fatalf("%d %q", r.Code, r.Out)
+	}
+	r = run(t, &clitest.Fake{Synced: unlimited}, clitest.Options{}, "sync", "--json")
+	if !strings.Contains(r.Out, `"budget": 0,`) || !strings.Contains(r.Out, `"budget_source": "profile"`) {
 		t.Fatalf("%q", r.Out)
 	}
 }
@@ -66,15 +77,24 @@ func TestSyncUsage(t *testing.T) {
 
 func TestSyncErrors(t *testing.T) {
 	t.Parallel()
-	over := &port.OverBudgetError{Needed: 700<<20 + 1, Budget: 512 << 20}
-	r := run(t, &clitest.Fake{Err: over}, clitest.Options{}, "sync", "/Books", "-P", "work")
-	want := "sync /Books: it needs 700.0 MiB in the cache of profile work, and the budget is 512.0 MiB; nothing was downloaded. " +
-		"Raise the budget to at least 701MiB with budget under [cache] in config.toml or RMCTL_CACHE_BUDGET, or sync a smaller path"
-	if r.Code != cliutil.CodeError || r.Error.Error() != want {
-		t.Fatalf("%d\n%v\n%s", r.Code, r.Error, want)
+	// The refusal names the setting that chose the profile's budget.
+	const head = "sync /Books: it needs 700.0 MiB in the cache of profile work, and the budget is 512.0 MiB; nothing was downloaded. "
+	for source, advice := range map[string]string{
+		port.BudgetFromEnv:     "Raise RMCTL_CACHE_BUDGET, which bounds every profile, to at least 701MiB (0 is no limit)",
+		port.BudgetFromProfile: "Raise the budget to at least 701MiB with budget under [profiles.work.cache] in config.toml (0 is no limit)",
+		port.BudgetFromConfig: "Raise budget under [cache] in config.toml to at least 701MiB for every profile, " +
+			"or set it under [profiles.work.cache] for this one alone (0 is no limit)",
+		port.BudgetFromDefault: "Raise the budget to at least 701MiB with budget under [profiles.work.cache] in config.toml (0 is no limit)",
+	} {
+		over := &port.OverBudgetError{Needed: 700<<20 + 1, Budget: 512 << 20, Source: source}
+		r := run(t, &clitest.Fake{Err: over}, clitest.Options{}, "sync", "/Books", "-P", "work")
+		want := head + advice + ", or sync a smaller path"
+		if r.Code != cliutil.CodeError || r.Error.Error() != want {
+			t.Errorf("%s: %d\n%v\n%s", source, r.Code, r.Error, want)
+		}
 	}
 	// A sync that stops says what it kept.
-	r = run(t, &clitest.Fake{Err: context.Canceled, Synced: port.SyncReport{Fetched: 4, Bytes: 2048}}, clitest.Options{}, "sync")
+	r := run(t, &clitest.Fake{Err: context.Canceled, Synced: port.SyncReport{Fetched: 4, Bytes: 2048}}, clitest.Options{}, "sync")
 	if r.Code != cliutil.CodeError || !errors.Is(r.Error, context.Canceled) ||
 		r.Err != "4 files (2.0 KiB) fetched before the sync stopped stay in the cache\n" {
 		t.Fatalf("%d %v %q", r.Code, r.Error, r.Err)

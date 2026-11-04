@@ -197,10 +197,10 @@ func TestSyncSkipsWhatTheCacheHolds(t *testing.T) {
 func TestSyncRefusesWhatDoesNotFit(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	f.cache.Max = 64
+	f.cache.Max, f.cache.Source = 64, port.BudgetFromProfile
 	r, err := f.service().Sync(t.Context(), "/", port.SyncOptions{Files: true})
 	over, ok := errors.AsType[*port.OverBudgetError](err)
-	if !ok || over.Budget != 64 || over.Needed <= 64 || over.Needed != r.Needed {
+	if !ok || over.Budget != 64 || over.Needed <= 64 || over.Needed != r.Needed || over.Source != port.BudgetFromProfile {
 		t.Fatalf("%+v %v", r, err)
 	}
 	if f.cloud.Count("Download") != 0 || f.cache.Fills() != 0 {
@@ -216,6 +216,25 @@ func TestSyncRefusesWhatDoesNotFit(t *testing.T) {
 	}
 	if _, err := f.service().Sync(t.Context(), "/", port.SyncOptions{}); !errors.As(err, &over) {
 		t.Fatalf("the indexes were not counted: %v", err)
+	}
+}
+
+// A budget of 0 is no limit: however much a sync keeps, it is never
+// refused, and it reports the budget and what set it.
+func TestSyncUnderNoLimitNeverRefuses(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.cache.Max, f.cache.Source = 0, port.BudgetFromEnv
+	for _, rec := range f.cloud.Records() {
+		f.cache.Indexes[rec.Hash] = 1 << 40
+	}
+	r, err := f.service().Sync(t.Context(), "/", port.SyncOptions{Files: true, All: true})
+	if err != nil || r.Needed < 1<<40 || r.Fetched == 0 || r.Budget != 0 || r.BudgetSource != port.BudgetFromEnv {
+		t.Fatalf("%+v %v", r, err)
+	}
+	again, err := f.service().Sync(t.Context(), "/", port.SyncOptions{Files: true, All: true})
+	if err != nil || !again.Current || again.Budget != 0 || again.BudgetSource != port.BudgetFromEnv {
+		t.Fatalf("%+v %v", again, err)
 	}
 }
 

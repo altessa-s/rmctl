@@ -14,6 +14,7 @@ sync_scope	sync:fox
 cache_dir	/cache/rmctl/work
 cache_bytes	4096
 cache_budget	536870912
+cache_budget_source	profile
 cache_blobs	2
 cache_indexes	3
 confirmed	2026-11-01T12:00:00Z

@@ -42,7 +42,7 @@ import (
 
 // DefaultCacheBytes bounds each profile's cache on disk, its blobs and
 // indexes together, unless the configuration sets a budget.
-const DefaultCacheBytes int64 = 512 << 20
+const DefaultCacheBytes = config.DefaultCacheBudget
 
 // Options are what the command line knows before anything is built.
 type Options struct {
@@ -54,8 +54,9 @@ type Options struct {
 	Dirs config.BaseDirs
 	// Logger receives the diagnostics of every layer. Required.
 	Logger *slog.Logger
-	// CacheBytes bounds each profile's cache; zero is the configuration's
-	// budget, else DefaultCacheBytes; negative turns the cache off.
+	// CacheBytes bounds every profile's cache over the configuration, for
+	// tests; zero leaves each profile its configured budget, and negative
+	// turns the cache off.
 	CacheBytes int64
 	// Offline is --offline when it was given; nil defers to the profile's
 	// configuration. NoCache is --no-cache: no cache on disk is read or
@@ -212,8 +213,7 @@ func (r refusal) Sync(context.Context, string, port.SyncOptions) (port.SyncRepor
 }
 
 func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock) (built, error) {
-	bytes := cacheBytes(opts.CacheBytes, cfg.CacheBudget)
-	root := blobcache.NewRoot(cfg.CacheDir, max(bytes, 0), clk, opts.Logger)
+	root := blobcache.NewRoot(cfg.CacheDir, limits(opts.CacheBytes, cfg.CacheBudgets), clk, opts.Logger)
 	profile, err := root.Profile(cfg.Profile)
 	if err != nil {
 		return built{}, err
@@ -222,7 +222,7 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 	if opts.Offline != nil {
 		offline = *opts.Offline
 	}
-	caching := !opts.NoCache && bytes > 0
+	caching := !opts.NoCache && opts.CacheBytes >= 0
 	if offline && !caching {
 		return built{}, ErrOfflineNoCache
 	}
@@ -283,15 +283,14 @@ func newClient(store rmcloud.SecretStore, cfg config.Config, opts Options) (*rmc
 	return client, nil
 }
 
-// cacheBytes is the budget of each profile's cache: n when given, else
-// the configuration's, else DefaultCacheBytes.
-func cacheBytes(n, configured int64) int64 {
-	switch {
-	case n != 0:
-		return n
-	case configured > 0:
-		return configured
-	default:
-		return DefaultCacheBytes
+// limits are the budgets of every profile's cache: n for each when given,
+// else each profile's own as the configuration chooses it.
+func limits(n int64, budgets config.Budgets) blobcache.Limits {
+	if n != 0 {
+		return blobcache.Fixed(max(n, 0))
+	}
+	return func(profile string) blobcache.Limit {
+		b := budgets.Of(profile)
+		return blobcache.Limit{Bytes: b.Bytes, Source: b.Source}
 	}
 }

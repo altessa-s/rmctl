@@ -26,8 +26,9 @@ type SyncCache struct {
 	blobs   map[string][]byte
 	Indexes map[string]int64
 	mark    *port.SyncMark
-	// Max is the budget it reports.
-	Max int64
+	// Max is the budget it reports, 0 for no limit, and Source what set it.
+	Max    int64
+	Source string
 	// FailFill makes Fill fail.
 	FailFill error
 	fills    int
@@ -127,6 +128,9 @@ func (c *SyncCache) Usage() int64 {
 
 // Budget implements port.SyncCache.
 func (c *SyncCache) Budget() int64 { return c.Max }
+
+// BudgetSource implements port.SyncCache.
+func (c *SyncCache) BudgetSource() string { return c.Source }
 
 // LastSync implements port.SyncCache.
 func (c *SyncCache) LastSync() (port.SyncMark, bool) {

@@ -28,7 +28,9 @@ type syncView struct {
 	Bytes      int64  `json:"bytes_fetched"`
 	Needed     int64  `json:"bytes_needed"`
 	CacheBytes int64  `json:"cache_bytes"`
-	Budget     int64  `json:"budget"`
+	// Budget is 0 for no limit.
+	Budget       int64  `json:"budget"`
+	BudgetSource string `json:"budget_source"`
 }
 
 // mib is a mebibyte, the unit the budget advice rounds up to.
@@ -61,13 +63,14 @@ func newSync(env *cliutil.Env) *cobra.Command {
 			--force walks the library anyway.
 
 			Before downloading, it adds up what it keeps (the sizes are in the indexes)
-			and refuses, with nothing downloaded, a sync that would not fit the cache's
-			budget: 512 MiB per profile unless budget in config.toml or
-			RMCTL_CACHE_BUDGET says otherwise. On a terminal a progress bar shows the
-			bytes and files done, the rate and the time left. Ctrl-C stops it; what was
-			fetched stays in the cache. The answer counts the documents, the files
-			fetched and those already cached, the bytes fetched, and what the cache
-			takes of its budget.
+			and refuses, with nothing downloaded, a sync that would not fit the
+			profile's cache budget: RMCTL_CACHE_BUDGET, else budget under
+			[profiles.<name>.cache] in config.toml, else under [cache], else 512 MiB.
+			A budget of 0 is no limit: sync never refuses and the cache never evicts.
+			On a terminal a progress bar shows the bytes and files done, the rate and
+			the time left. Ctrl-C stops it; what was fetched stays in the cache. The
+			answer counts the documents, the files fetched and those already cached,
+			the bytes fetched, and what the cache takes of its budget.
 		`),
 		Example: heredoc.Doc(`
 			rmctl sync
@@ -113,15 +116,32 @@ func newSync(env *cliutil.Env) *cobra.Command {
 // with how to raise it, or the files it kept before it stopped.
 func syncErr(cmd *cobra.Command, query string, r port.SyncReport, err error) error {
 	if over, ok := errors.AsType[*port.OverBudgetError](err); ok {
-		raise := (over.Needed + mib - 1) / mib
-		return fmt.Errorf("sync %s: it needs %s in the cache of profile %s, and the budget is %s; nothing was downloaded. "+
-			"Raise the budget to at least %dMiB with budget under [cache] in config.toml or RMCTL_CACHE_BUDGET, or sync a smaller path",
-			query, cliutil.Size(over.Needed), cliutil.ProfileName(cmd), cliutil.Size(over.Budget), raise)
+		profile := cliutil.ProfileName(cmd)
+		return fmt.Errorf("sync %s: it needs %s in the cache of profile %s, and the budget is %s; nothing was downloaded. %s, or sync a smaller path",
+			query, cliutil.Size(over.Needed), profile, cliutil.Size(over.Budget), raiseBudget(over, profile))
 	}
 	if r.Fetched > 0 {
 		cliutil.Notef(cmd.ErrOrStderr(), "%d files (%s) fetched before the sync stopped stay in the cache", r.Fetched, cliutil.Size(r.Bytes))
 	}
 	return fmt.Errorf("sync: %w", err)
+}
+
+// raiseBudget names the setting that set the profile's budget, which is the
+// one to raise: RMCTL_CACHE_BUDGET over everything, else the profile's
+// table, else [cache], which bounds every profile, or, when nothing set it,
+// the profile's table.
+func raiseBudget(over *port.OverBudgetError, profile string) string {
+	raise := (over.Needed + mib - 1) / mib
+	switch over.Source {
+	case port.BudgetFromEnv:
+		return fmt.Sprintf("Raise RMCTL_CACHE_BUDGET, which bounds every profile, to at least %dMiB (0 is no limit)", raise)
+	case port.BudgetFromConfig:
+		return fmt.Sprintf("Raise budget under [cache] in config.toml to at least %dMiB for every profile, "+
+			"or set it under [profiles.%s.cache] for this one alone (0 is no limit)", raise, profile)
+	default:
+		return fmt.Sprintf("Raise the budget to at least %dMiB with budget under [profiles.%s.cache] in config.toml (0 is no limit)",
+			raise, profile)
+	}
 }
 
 func syncAnswer(r port.SyncReport) output.Result {
@@ -134,6 +154,7 @@ func syncAnswer(r port.SyncReport) output.Result {
 		output.Field{Key: "bytes_fetched", Value: output.Size(r.Bytes)},
 		output.Field{Key: "bytes_needed", Value: output.Size(r.Needed)},
 		output.Field{Key: "cache_bytes", Value: output.Size(r.CacheBytes)},
-		output.Field{Key: "budget", Value: output.Size(r.Budget)},
+		output.Field{Key: "budget", Value: cliutil.BudgetCell(r.Budget)},
+		output.Field{Key: "budget_source", Value: output.Text(r.BudgetSource)},
 		output.Field{Key: "generation", Value: output.Count(int(r.Generation))})
 }

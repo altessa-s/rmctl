@@ -13,7 +13,8 @@
 // backup and render. Everything is addressed by its hash, so whatever the
 // cache holds is current and is never fetched again. It computes what it
 // keeps before it downloads anything, and refuses a sync that would not fit
-// the cache's budget rather than evict what it just fetched. A complete
+// the cache's budget rather than evict what it just fetched; a budget of no
+// limit never refuses. A complete
 // sync is recorded with its root and scope; the next one at the same root
 // whose scope it covers answers at once.
 package prefetch

@@ -18,9 +18,15 @@ import (
 
 func profileList() []port.ProfileSummary {
 	return []port.ProfileSummary{
-		{Name: "default", Current: true, Registered: true, Backend: port.SecretsFile, CacheBytes: 2048},
-		{Name: "travel", Backend: port.SecretsKeychain, TokenErr: errors.New("the Keychain is locked")},
-		{Name: "work", Registered: true, Backend: port.SecretsKeychain},
+		{
+			Name: "default", Current: true, Registered: true, Backend: port.SecretsFile, CacheBytes: 2048,
+			CacheBudget: 512 << 20, CacheBudgetSource: port.BudgetFromDefault,
+		},
+		{
+			Name: "travel", Backend: port.SecretsKeychain, TokenErr: errors.New("the Keychain is locked"),
+			CacheBudgetSource: port.BudgetFromProfile,
+		},
+		{Name: "work", Registered: true, Backend: port.SecretsKeychain, CacheBudget: 4 << 30, CacheBudgetSource: port.BudgetFromConfig},
 	}
 }
 
@@ -75,7 +81,7 @@ func profileInfo() port.ProfileInfo {
 		Exists: true, TokenLocation: "/cfg/rmctl/work/token.json", Tokens: []string{port.DeviceToken, "userToken"}, Registered: true,
 		Account: port.AccountInfo{Registered: true, Plan: port.Plan{Level: "connect", SyncScope: "sync:fox"}},
 		Cache: port.ProfileCache{
-			Profile: "work", Dir: "/cache/rmctl/work", Bytes: 4096, Budget: 1 << 29, Entries: map[string]int{"blobs": 2, "indexes": 3},
+			Profile: "work", Dir: "/cache/rmctl/work", Bytes: 4096, Budget: 1 << 29, BudgetSource: port.BudgetFromProfile, Entries: map[string]int{"blobs": 2, "indexes": 3},
 			Confirmed: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC),
 		},
 	}

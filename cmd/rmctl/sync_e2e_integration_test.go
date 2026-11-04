@@ -28,6 +28,7 @@ type syncAnswer struct {
 	Needed     int64  `json:"bytes_needed"`
 	CacheBytes int64  `json:"cache_bytes"`
 	Budget     int64  `json:"budget"`
+	Source     string `json:"budget_source"`
 }
 
 func (e *e2e) sync(args ...string) (syncAnswer, map[string]int) {
@@ -57,7 +58,7 @@ func TestE2E_SyncThenOffline(t *testing.T) {
 	}
 
 	pages, _ := e.sync()
-	if pages.Current || pages.Documents != 2 || pages.Fetched == 0 || pages.Budget != 512<<20 || pages.Path != "/" {
+	if pages.Current || pages.Documents != 2 || pages.Fetched == 0 || pages.Budget != 512<<20 || pages.Source != "default" || pages.Path != "/" {
 		t.Fatalf("sync: %+v", pages)
 	}
 	// Without --files the originals stay in the cloud.
@@ -160,8 +161,18 @@ func TestE2E_SyncRefusals(t *testing.T) {
 	if code, _, errOut = e.rmctl("get", "/Big", "-o", t.TempDir()+"/", "--offline"); code != 1 || !strings.Contains(errOut, "big-0000.pdf is not in the cache") {
 		t.Fatalf("a refused sync kept the original: exit %d %q", code, errOut)
 	}
-	t.Setenv("RMCTL_CACHE_BUDGET", "0")
+	t.Setenv("RMCTL_CACHE_BUDGET", "512KiB")
 	if code, _, errOut = e.rmctl("ls"); code == 0 || !strings.Contains(errOut, "at least 1MiB") {
-		t.Fatalf("a budget of 0: exit %d %q", code, errOut)
+		t.Fatalf("a budget below the least: exit %d %q", code, errOut)
+	}
+	// A budget of 0 is no limit: what the small budget refused now syncs,
+	// and every original stays.
+	t.Setenv("RMCTL_CACHE_BUDGET", "0")
+	a, _ := e.sync("--files")
+	if a.Budget != 0 || a.Source != "env" || a.Fetched == 0 || a.Needed < 2<<20 {
+		t.Fatalf("no limit: %+v", a)
+	}
+	if code, _, errOut = e.rmctl("get", "/Big", "-o", t.TempDir()+"/", "--offline"); code != 0 {
+		t.Fatalf("no limit kept no original: exit %d %q", code, errOut)
 	}
 }

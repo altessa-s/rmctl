@@ -14,14 +14,26 @@ import (
 // not hold, or a change was asked of the cloud under --offline.
 var ErrOffline = errors.New("run without --offline to read it from the cloud")
 
+// What set a profile's cache budget: RMCTL_CACHE_BUDGET, the profile's
+// [profiles.<name>.cache] table, the configuration file's [cache] table, or
+// nothing (the built-in 512 MiB).
+const (
+	BudgetFromEnv     = "env"
+	BudgetFromProfile = "profile"
+	BudgetFromConfig  = "config"
+	BudgetFromDefault = "default"
+)
+
 // ProfileCache is what the cache on disk holds for one profile.
 type ProfileCache struct {
 	Profile string
 	// Dir is the profile's cache directory.
 	Dir string
-	// Bytes is what its blobs and indexes take; Budget bounds them.
-	Bytes  int64
-	Budget int64
+	// Bytes is what its blobs and indexes take; Budget bounds them, 0 for
+	// no limit, and BudgetSource says what set it (BudgetFrom...).
+	Bytes        int64
+	Budget       int64
+	BudgetSource string
 	// Entries counts its entries by kind: blobs, indexes, state.
 	Entries map[string]int
 	// RootHash and RootGeneration are its last known root, and Confirmed

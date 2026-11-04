@@ -54,15 +54,18 @@ var nameKey = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`) //nolint:gocheckn
 
 // Cache is one profile's cache: a directory with a subdirectory per space,
 // the blobs and indexes bounded together by one byte budget,
-// evicting the least recently used. Writes go through a staging file and a
+// evicting the least recently used; a budget of 0 is no limit, and nothing
+// is ever evicted. Writes go through a staging file and a
 // rename, so another rmctl process reads an entry whole or not at all; no
 // cache error ever fails a command.
 type Cache struct {
 	dir      string
 	maxBytes int64
-	log      *slog.Logger
-	clock    port.Clock
-	mu       sync.Mutex
+	// source says what set the budget, for reports.
+	source string
+	log    *slog.Logger
+	clock  port.Clock
+	mu     sync.Mutex
 	// total is what the evictable spaces take, as far as this process
 	// knows: counted once, then added to by each write, and counted again
 	// whenever it passes the budget. known says it was counted.
@@ -73,7 +76,7 @@ type Cache struct {
 var _ port.BlobCache = (*Cache)(nil)
 
 // New returns a cache under dir holding at most maxBytes of blobs and
-// indexes. dir and clock are required.
+// indexes, or any amount when maxBytes is 0. dir and clock are required.
 func New(dir string, maxBytes int64, clock port.Clock, log *slog.Logger) *Cache {
 	if dir == "" {
 		panic("blobcache: a directory is required")
@@ -84,14 +87,21 @@ func New(dir string, maxBytes int64, clock port.Clock, log *slog.Logger) *Cache 
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Cache{dir: dir, maxBytes: maxBytes, log: log, clock: clock}
+	return &Cache{dir: dir, maxBytes: max(maxBytes, 0), log: log, clock: clock}
 }
 
 // Dir is the cache's root directory.
 func (c *Cache) Dir() string { return c.dir }
 
-// Budget is the byte budget of the blobs and indexes.
+// Budget is the byte budget of the blobs and indexes, 0 for no limit.
 func (c *Cache) Budget() int64 { return c.maxBytes }
+
+// BudgetSource is what set the budget, as the [Root] that opened the cache
+// was told; "" for a cache made by New.
+func (c *Cache) BudgetSource() string { return c.source }
+
+// fits reports whether n bytes fit the budget at all.
+func (c *Cache) fits(n int64) bool { return c.maxBytes == 0 || n <= c.maxBytes }
 
 // Get implements port.BlobCache: the blob of hash, checked against it.
 func (c *Cache) Get(hash string) ([]byte, bool) {
@@ -164,7 +174,7 @@ func (c *Cache) Entry(space, key string) ([]byte, bool) {
 // PutEntry stores data as the entry key of space, replacing any, then
 // evicts down to the budget.
 func (c *Cache) PutEntry(space, key string, data []byte) {
-	if !validKey(space, key) || (evictable(space) && int64(len(data)) > c.maxBytes) {
+	if !validKey(space, key) || (evictable(space) && !c.fits(int64(len(data)))) {
 		return
 	}
 	c.mu.Lock()
@@ -181,8 +191,12 @@ func (c *Cache) PutEntry(space, key string, data []byte) {
 // account adds n bytes just written to the total, and evicts when the
 // total passes the budget. The total may count a replaced entry twice, or
 // miss what another process wrote; the count it evicts by is always the
-// one on disk. The caller holds mu.
+// one on disk. Without a limit nothing is counted or evicted. The caller
+// holds mu.
 func (c *Cache) account(n int64) {
+	if c.maxBytes == 0 {
+		return
+	}
 	if c.known {
 		c.total += n
 		if c.total <= c.maxBytes {

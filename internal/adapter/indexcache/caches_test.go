@@ -21,7 +21,7 @@ import (
 func TestCaches(t *testing.T) {
 	t.Parallel()
 	clk := porttest.NewClock(time.Unix(1_700_000_000, 0))
-	root := blobcache.NewRoot(t.TempDir(), 1<<20, clk, nil)
+	root := blobcache.NewRoot(t.TempDir(), blobcache.Fixed(1<<20), clk, nil)
 	for _, name := range []string{"work", "home"} {
 		st, err := root.Profile(name)
 		if err != nil {
@@ -76,7 +76,7 @@ func TestCachesRemoveFailure(t *testing.T) {
 	}
 	clk := porttest.NewClock(time.Unix(1_700_000_000, 0))
 	dir := t.TempDir()
-	root := blobcache.NewRoot(dir, 1<<20, clk, nil)
+	root := blobcache.NewRoot(dir, blobcache.Fixed(1<<20), clk, nil)
 	st, err := root.Profile("work")
 	if err != nil {
 		t.Fatal(err)

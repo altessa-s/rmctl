@@ -82,11 +82,13 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 	p := s.plan(state, tree, docs, opts.Files)
 	report := port.SyncReport{
 		Path: displayPath(tree, scope), Root: state.Hash, Generation: state.Generation,
-		Documents: len(docs), Cached: p.cached, Needed: p.needed, Budget: s.cache.Budget(),
+		Documents: len(docs), Cached: p.cached, Needed: p.needed,
+		Budget: s.cache.Budget(), BudgetSource: s.cache.BudgetSource(),
 	}
-	if p.needed > report.Budget {
+	// A budget of 0 is no limit: it never refuses.
+	if report.Budget > 0 && p.needed > report.Budget {
 		report.CacheBytes = s.cache.Usage()
-		return report, &port.OverBudgetError{Needed: p.needed, Budget: report.Budget}
+		return report, &port.OverBudgetError{Needed: p.needed, Budget: report.Budget, Source: report.BudgetSource}
 	}
 	fetched, bytes, err := s.fetch(ctx, p, opts)
 	report.Fetched, report.Bytes = fetched, bytes
@@ -111,7 +113,7 @@ func (s *Service) current(state port.RootState, mark port.SyncMark) port.SyncRep
 	return port.SyncReport{
 		Current: true, Path: mark.Path, Root: state.Hash, Generation: state.Generation,
 		Documents: mark.Documents, Cached: mark.FileCount, Needed: mark.Needed,
-		CacheBytes: s.cache.Usage(), Budget: s.cache.Budget(),
+		CacheBytes: s.cache.Usage(), Budget: s.cache.Budget(), BudgetSource: s.cache.BudgetSource(),
 	}
 }
 

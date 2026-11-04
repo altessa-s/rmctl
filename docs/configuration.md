@@ -4,7 +4,14 @@ Back to the [README](../README.md).
 
 ## Cache
 
-Every profile keeps its own cache under `<user cache dir>/rmctl/<profile>/` (`RMCTL_CACHE_DIR` replaces `<user cache dir>/rmctl`): directories of mode 0700, files of mode 0600. It holds the indexes of the library — the root index by its hash, each document's index by its record hash — the `.metadata` and `.content` files, what writes upload, and the profile's last known root with the time the cloud confirmed it; `sync` adds the page files and, with `--files`, the originals. Profiles share nothing, not even files with the same hash: they are different accounts' documents. Each profile's cache is bounded by a budget of indexes and files together, 512 MiB unless `budget` in config.toml or `RMCTL_CACHE_BUDGET` sets another, least recently used first; the root pointer and the record of the last sync are never evicted.
+Every profile keeps its own cache under `<user cache dir>/rmctl/<profile>/` (`RMCTL_CACHE_DIR` replaces `<user cache dir>/rmctl`): directories of mode 0700, files of mode 0600. It holds the indexes of the library — the root index by its hash, each document's index by its record hash — the `.metadata` and `.content` files, what writes upload, and the profile's last known root with the time the cloud confirmed it; `sync` adds the page files and, with `--files`, the originals. Profiles share nothing, not even files with the same hash: they are different accounts' documents. Each profile's cache is bounded by its own budget of indexes and files together, evicted least recently used first; the root pointer and the record of the last sync are never evicted. The budget is chosen per profile, the first that is set winning:
+
+1. `RMCTL_CACHE_BUDGET`, which applies to every profile (as `RMCTL_CACHE_TTL` does);
+2. `budget` under the profile's `[profiles.<name>.cache]` in config.toml;
+3. `budget` under `[cache]`, the default of every profile;
+4. 512 MiB.
+
+A budget of `0` is no limit: that profile's cache never evicts, and `sync` never refuses for its size. It does not turn the cache off; `--no-cache` does.
 
 Everything kept is addressed by its content, so nothing goes stale and nothing needs invalidating:
 
@@ -20,16 +27,16 @@ Everything kept is addressed by its content, so nothing goes stale and nothing n
 `rmctl sync [path]` fills the cache ahead of time, so later reads download nothing and run under `--offline`. It reads the live root, then fetches what the cache lacks of: every index of the library and every `.metadata` and `.content` (every read builds the whole tree from them), and the `.pagedata` and `.rm` pages of the documents below the path (`/` by default), which `text`, `highlights`, `find --text` and `debug page` read. `--files` also fetches each document's original and every other file of its index, which `get`, `export`, `mget`, `backup` and `render` read. Documents in the trash stay out unless `--all`; `--jobs N` transfers N files at a time (4 by default). It changes nothing in the library.
 
 - **Only what changed costs anything.** Everything is addressed by its hash, so a file the cache holds is never fetched again. A complete sync is recorded in the cache with the root it reached and its scope (the path, `--files`, `--all`); the next sync at the same root whose scope it covers (the same path, or any path after a sync of the whole library, with no more `--files` or `--all`) answers at once that the cache is current: one request, for the root, no walk and no download. A different root walks the library and fetches only the files whose hash is new. A sync that is interrupted, refused or failed records nothing, so the next one walks. `--force` walks anyway.
-- **The budget is checked first.** Before downloading, `sync` adds up what it keeps: the indexes, every `.metadata` and `.content`, and the files of the scope, those already cached included, since they must all fit at once. When that is more than the budget it downloads nothing and exits 1 with a message that names the bytes needed, the budget and how to raise it, rather than evicting what it just fetched. Whatever the cache holds of the scope counts as just used, so eviction takes other files first.
+- **The budget is checked first.** Before downloading, `sync` adds up what it keeps: the indexes, every `.metadata` and `.content`, and the files of the scope, those already cached included, since they must all fit at once. When that is more than the profile's budget it downloads nothing and exits 1 with a message that names the bytes needed, the budget and the setting to raise — `RMCTL_CACHE_BUDGET` when it set the budget, else `budget` under `[profiles.<name>.cache]` (or under `[cache]` when that set it, which raises every profile's) — rather than evicting what it just fetched. Under a budget of `0` it never refuses. Whatever the cache holds of the scope counts as just used, so eviction takes other files first.
 - **Progress:** on a terminal, a line on standard error shows a bar, the bytes and files done of their totals, the rate and the time left; anywhere else nothing is printed. Ctrl-C stops it; every file fetched so far stays in the cache, and the next sync fetches only the rest.
-- **The answer** (table, plain or JSON) says whether the cache was already current, the path, the documents, the files fetched and those already cached, the bytes fetched and needed, what the cache takes now and its budget. After an answer of `current`, the counts are those of the sync that covers it. `debug cache status` counts what sync kept.
+- **The answer** (table, plain or JSON) says whether the cache was already current, the path, the documents, the files fetched and those already cached, the bytes fetched and needed, what the cache takes now, its budget (`unlimited` for 0; `0` in JSON) and what set the budget (`budget_source`: `env`, `profile`, `config` or `default`). After an answer of `current`, the counts are those of the sync that covers it. `debug cache status` counts what sync kept.
 
 ```sh
 rmctl sync /Books --files      # before a flight
 rmctl --offline text /Books/Notes
 rmctl --offline get /Books/Paper -o paper.pdf
 ```
-- **`debug cache status`** reports the profile's cache: its directory, size and budget, entries by kind, and the last known root with when it was confirmed; `--all` lists every profile. **`debug cache clear`** empties it, or every profile's with `--all`, after a question that names them.
+- **`debug cache status`** reports the profile's cache: its directory, size, its budget and what set it (`budget_source`), entries by kind, and the last known root with when it was confirmed; `--all` lists every profile, each with its own budget. **`debug cache clear`** empties it, or every profile's with `--all`, after a question that names them.
 - **`register` and `logout`** clear the profile's cache, so whoever registers next under the profile never sees the last account's files.
 
 Older versions kept one blob directory for every profile; it is removed on first use, since nothing says whose its files were.
@@ -42,7 +49,7 @@ Older versions kept one blob directory for every profile; it is removed on first
 | Profile directory (holds `token.json`) | `<user config dir>/rmctl/<profile>` | `RMCTL_CONFIG_DIR` |
 | Cache directory (one subdirectory per profile) | `<user cache dir>/rmctl` | `RMCTL_CACHE_DIR` |
 | Cache TTL | `0` (off) | `config.toml` `ttl`, `RMCTL_CACHE_TTL` |
-| Cache budget (per profile) | `512MiB` | `config.toml` `budget`, `RMCTL_CACHE_BUDGET` |
+| Cache budget (per profile; `0` is no limit) | `512MiB` | `RMCTL_CACHE_BUDGET`, `config.toml` `[profiles.<name>.cache]` `budget`, then `[cache]` `budget` |
 | Offline | off | `--offline`, `config.toml` `offline` |
 | Hosts | production | `RMCLOUD_HOST`, `RMCLOUD_AUTH_HOST`, `RMCLOUD_SYNC_HOST` |
 | Wire log | off | `RMCLOUD_WIRE_LOG=headers\|bodies` (standard error, credentials masked) |
@@ -60,15 +67,15 @@ A profile is one account on this machine: its tokens (`token.json` in its direct
 
 ```sh
 rmctl profile add work abcdefgh      # register a new profile, as rmctl -P work register abcdefgh does
-rmctl profile ls                     # every profile: current, registered, where its tokens are, what its cache takes
+rmctl profile ls                     # every profile: current, registered, where its tokens are, its cache and budget
 rmctl profile info work              # one profile in detail, with what account shows
 rmctl -P work ls /Books              # use it
 rmctl profile del work               # remove it entirely, after a question
 ```
 
-- **`profile ls`** lists every profile this machine keeps something of — a directory, a table in config.toml, a cache — and the one in use once it is registered, and marks the one the command runs as. It reads only this machine.
+- **`profile ls`** lists every profile this machine keeps something of — a directory, a table in config.toml, a cache — and the one in use once it is registered, and marks the one the command runs as, with what its cache takes and its own budget (`cache_budget` and `cache_budget_source` in JSON). It reads only this machine.
 - **`profile add <name> <code>`** registers a new profile with a one-time code. A profile that already holds a device token is refused; `rmctl -P <name> register --replace <code>` registers it again.
-- **`profile info [name]`** shows one profile, the one in use unless named: its directory, where its tokens are and which are there (never their values), its cache with its size and budget, and the config.toml settings that apply to it. For a registered profile the cloud is asked what `account` shows; under `--offline`, or when the cloud does not answer, a note says so and the rest is shown.
+- **`profile info [name]`** shows one profile, the one in use unless named: its directory, where its tokens are and which are there (never their values), its cache with its size, its budget and what set it (`cache_budget_source`), and the config.toml settings that apply to it. For a registered profile the cloud is asked what `account` shows; under `--offline`, or when the cloud does not answer, a note says so and the rest is shown.
 - **`profile del <name>`** removes the profile in this order: its tokens, from its file and from the Keychain; its directory; its cache; and its tables in config.toml. Only the tables' header and key lines leave config.toml: every other line and comment stays, the result is read back before it replaces the file, and settings written in another form (dotted keys under `[profiles]`, an inline table) are refused with a request to edit the file by hand. Files rmctl did not write stay where they are, with their directory. A step that fails stops the removal there; the profile is still listed until its tables go last, and running `profile del` again finishes it. Like `logout`, it tells the cloud nothing: the device stays on the account until it is removed there; `--revoke` removes it first, and a revoke that fails changes nothing. It asks first, naming the profile and saying when it is the one in use; `--yes` answers.
 
 ### config.toml
@@ -93,13 +100,19 @@ It also sets the [cache](#cache), for every profile and per profile:
 [cache]
 ttl = "5m"          # reads trust a root confirmed less than 5 minutes ago
 offline = false
-budget = "2GiB"     # each profile's cache holds up to 2 GiB
+budget = "2GiB"     # every profile's cache holds up to 2 GiB, unless its table says otherwise
+
+[profiles.work.cache]
+budget = "8GiB"     # this profile's cache holds up to 8 GiB
+
+[profiles.archive.cache]
+budget = "0"        # no limit: this profile's cache never evicts
 
 [profiles.travel.cache]
 offline = true      # this profile reads from the cache unless --offline=false
 ```
 
-`RMCTL_CACHE_TTL` overrides `ttl`, `RMCTL_CACHE_BUDGET` overrides `budget`; `--offline` and `--offline=false` override `offline`. A budget is a size such as `512MiB`, `4GiB` or `1.5GB` (binary `KiB`, `MiB`, `GiB`, `TiB`, decimal `KB`, `MB`, `GB`, `TB`, or bytes without a unit), at least `1MiB`. There is no unlimited budget, and `0` is refused rather than read as one: a cache is always bounded, and `--no-cache` is the way to turn it off.
+A profile's table overrides `[cache]` key by key: above, `travel` keeps the 2 GiB budget and the 5-minute TTL. `RMCTL_CACHE_TTL` overrides `ttl`, and `RMCTL_CACHE_BUDGET` overrides `budget`, both for every profile; `--offline` and `--offline=false` override `offline`. A budget is a string: a size such as `"512MiB"`, `"4GiB"` or `"1.5GB"` (binary `KiB`, `MiB`, `GiB`, `TiB`, decimal `KB`, `MB`, `GB`, `TB`, or bytes without a unit) of at least `1MiB`, or `"0"` (in any unit) for no limit. A size between 0 and 1 MiB is refused with an error that names the setting: a cache that small keeps nothing worth keeping. `--no-cache`, not a budget of 0, turns the cache off.
 
 ### The macOS Keychain
 

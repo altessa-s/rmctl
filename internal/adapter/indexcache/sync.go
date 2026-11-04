@@ -77,6 +77,9 @@ func (s *Syncs) Usage() int64 {
 // Budget implements port.SyncCache.
 func (s *Syncs) Budget() int64 { return s.store.Budget() }
 
+// BudgetSource implements port.SyncCache.
+func (s *Syncs) BudgetSource() string { return s.store.BudgetSource() }
+
 // mark is a port.SyncMark on disk.
 type mark struct {
 	Version    int       `json:"v"`

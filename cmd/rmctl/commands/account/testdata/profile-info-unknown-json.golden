@@ -13,6 +13,7 @@
   "cache_dir": "",
   "cache_bytes": 0,
   "cache_budget": 0,
+  "cache_budget_source": "",
   "cache_entries": {},
   "config_file": "",
   "config_table": false,

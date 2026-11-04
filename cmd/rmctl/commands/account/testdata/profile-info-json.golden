@@ -18,6 +18,7 @@
   "cache_dir": "/cache/rmctl/work",
   "cache_bytes": 4096,
   "cache_budget": 536870912,
+  "cache_budget_source": "profile",
   "cache_entries": {
     "blobs": 2,
     "indexes": 3

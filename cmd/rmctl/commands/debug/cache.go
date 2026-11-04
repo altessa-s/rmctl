@@ -31,7 +31,9 @@ func newCache(env *cliutil.Env) *cobra.Command {
 			Every profile keeps its own cache: the indexes of its library by hash,
 			its .metadata and .content files, and its last known root with the time
 			the cloud confirmed it. status reports the current profile's, or every
-			profile's with --all; clear empties it, or every profile's with --all.
+			profile's with --all, each with its own budget and what set it (env,
+			profile, config or default); clear empties it, or every profile's with
+			--all.
 		`),
 		Args:         cliutil.Args(cobra.NoArgs),
 		SilenceUsage: true,
@@ -54,6 +56,7 @@ type profileCacheView struct {
 	Dir            string         `json:"dir"`
 	Bytes          int64          `json:"bytes"`
 	Budget         int64          `json:"budget"`
+	BudgetSource   string         `json:"budget_source"`
 	Entries        map[string]int `json:"entries"`
 	RootHash       string         `json:"root_hash"`
 	RootGeneration int64          `json:"root_generation"`
@@ -104,7 +107,7 @@ func cacheResult(r port.CacheReport, all bool) output.Result {
 	}
 	for _, p := range r.Profiles {
 		pv := profileCacheView{
-			Profile: p.Profile, Dir: p.Dir, Bytes: p.Bytes, Budget: p.Budget, Entries: p.Entries,
+			Profile: p.Profile, Dir: p.Dir, Bytes: p.Bytes, Budget: p.Budget, BudgetSource: p.BudgetSource, Entries: p.Entries,
 			RootHash: p.RootHash, RootGeneration: p.RootGeneration, Confirmed: cliutil.Stamp(p.Confirmed),
 		}
 		if pv.Entries == nil {
@@ -123,7 +126,8 @@ func cacheResult(r port.CacheReport, all bool) output.Result {
 		fields := append([]output.Field{{Key: "profile", Value: output.Text(p.Profile)}}, settings...)
 		fields = append(fields,
 			output.Field{Key: "bytes", Value: output.Size(p.Bytes)},
-			output.Field{Key: "budget", Value: output.Size(p.Budget)},
+			output.Field{Key: "budget", Value: cliutil.BudgetCell(p.Budget)},
+			output.Field{Key: "budget_source", Value: output.Text(p.BudgetSource)},
 			output.Field{Key: entryBlobs, Value: output.Count(p.Entries[entryBlobs])},
 			output.Field{Key: entryIndexes, Value: output.Count(p.Entries[entryIndexes])},
 			output.Field{Key: "root_hash", Value: output.ID(p.RootHash)},
@@ -136,6 +140,7 @@ func cacheResult(r port.CacheReport, all bool) output.Result {
 		{Title: "profile", Role: output.RoleName},
 		{Title: "bytes", Role: output.RoleSize},
 		{Title: "budget", Role: output.RoleSize},
+		{Title: "from", Role: output.RoleKind},
 		{Title: entryBlobs, Role: output.RoleCount},
 		{Title: entryIndexes, Role: output.RoleCount},
 		{Title: "root", Role: output.RoleHash},
@@ -148,7 +153,8 @@ func cacheResult(r port.CacheReport, all bool) output.Result {
 			name = name.With(output.Muted)
 		}
 		t.Rows = append(t.Rows, []output.Cell{
-			name, output.Size(p.Bytes), output.Size(p.Budget), output.Count(p.Entries[entryBlobs]), output.Count(p.Entries[entryIndexes]),
+			name, output.Size(p.Bytes), cliutil.BudgetCell(p.Budget), output.Text(p.BudgetSource),
+			output.Count(p.Entries[entryBlobs]), output.Count(p.Entries[entryIndexes]),
 			output.ID(p.RootHash), generationCell(p), output.Time(p.Confirmed),
 		})
 	}

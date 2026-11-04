@@ -9,7 +9,8 @@
       "profile": "home",
       "dir": "/c/rmctl/home",
       "bytes": 2048,
-      "budget": 536870912,
+      "budget": 0,
+      "budget_source": "profile",
       "entries": {
         "blobs": 4,
         "indexes": 3,
@@ -23,6 +24,7 @@
       "dir": "/c/rmctl/work",
       "bytes": 10485760,
       "budget": 536870912,
+      "budget_source": "config",
       "entries": {
         "blobs": 120,
         "indexes": 61,

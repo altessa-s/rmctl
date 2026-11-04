@@ -30,7 +30,7 @@ func (p profiles) Open(name string) (indexcache.ProfileStore, error) {
 func TestAdmin(t *testing.T) {
 	t.Parallel()
 	clk := porttest.NewClock(time.Unix(1_700_000_000, 0))
-	root := blobcache.NewRoot(t.TempDir(), 1<<20, clk, nil)
+	root := blobcache.NewRoot(t.TempDir(), blobcache.Fixed(1<<20), clk, nil)
 	for _, name := range []string{"work", "home"} {
 		st, err := root.Profile(name)
 		if err != nil {
@@ -84,7 +84,7 @@ func (r registry) Forget(context.Context) error           { return r.fail }
 func TestRegistryClearsTheProfile(t *testing.T) {
 	t.Parallel()
 	clk := porttest.NewClock(time.Unix(1_700_000_000, 0))
-	root := blobcache.NewRoot(t.TempDir(), 1<<20, clk, nil)
+	root := blobcache.NewRoot(t.TempDir(), blobcache.Fixed(1<<20), clk, nil)
 	fill := func() *blobcache.Cache {
 		st, _ := root.Profile("work")
 		read(t, newCache(newSource(1), st, clk, indexcache.Live, 0, nil))

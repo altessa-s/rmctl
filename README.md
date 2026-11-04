@@ -29,7 +29,7 @@ rmctl find 'go|rust' --tag reading --json
 - **Trash and restore:** `trash` and `restore` as the tablet does, `rm` for good.
 - **[Space and duplicates](docs/library.md#space-and-duplicates):** `du` adds up folders and kinds, `dupes` finds documents made from the same file.
 - **[Profiles and the Keychain](docs/configuration.md#profiles):** several accounts side by side, each with its own token and cache; tokens in a 0600 file or the macOS Keychain.
-- **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within a budget set in config.toml.
+- **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within each profile's own budget set in config.toml (`0` for no limit).
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
 - **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on macOS and Linux.

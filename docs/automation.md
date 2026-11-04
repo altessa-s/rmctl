@@ -39,7 +39,7 @@ The scripts were run against a test account, the writes with `--dry-run`, and pa
 
 ## Working offline
 
-`rmctl sync` fills the profile's cache ahead of time: run it while online, and everything below the path reads from the cache afterwards, with `--offline` or without a download. A second `sync` while the library is unchanged costs one request, so a scheduler can run it often; `--files` takes the originals too, within the cache's budget (`budget` in config.toml, or `RMCTL_CACHE_BUDGET`), and a sync that would not fit exits 1 before downloading anything.
+`rmctl sync` fills the profile's cache ahead of time: run it while online, and everything below the path reads from the cache afterwards, with `--offline` or without a download. A second `sync` while the library is unchanged costs one request, so a scheduler can run it often; `--files` takes the originals too, within the profile's cache budget (`budget` under `[profiles.<name>.cache]` or `[cache]` in config.toml, or `RMCTL_CACHE_BUDGET`; `0` is no limit), and a sync that would not fit exits 1 before downloading anything.
 
 ```sh
 RMCTL_CACHE_BUDGET=4GiB rmctl sync /Books --files --json | jq '{fetched, bytes_fetched, cache_bytes}'

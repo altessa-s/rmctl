@@ -118,7 +118,7 @@ func (s *Service) List(ctx context.Context) ([]port.ProfileSummary, error) {
 		}
 		out = append(out, port.ProfileSummary{
 			Name: name, Current: name == s.current, Registered: st.registered(), TokenErr: st.tokenErr,
-			Backend: st.settings.Backend, CacheBytes: cache.Bytes,
+			Backend: st.settings.Backend, CacheBytes: cache.Bytes, CacheBudget: cache.Budget, CacheBudgetSource: cache.BudgetSource,
 		})
 	}
 	return out, nil
