@@ -13,6 +13,26 @@ rmctl mv /Inbox/paper "/Books/Paper" --yes
 rmctl find 'go|rust' --tag reading --json
 ```
 
+## Features
+
+- **Browse and search:** `ls`, `tree` and `stat`, and `find` by name pattern, tag, star, folder or the typed and highlighted text of pages.
+- **Download:** a document's PDF or EPUB with `get`, a folder tree with `mget`, documents whole with their ink as one `.rmdoc` with `export`.
+- **Upload:** PDFs, EPUBs and `.rmdoc` archives with `put` and `mput`, checked before anything is sent; `--content-only` replaces a PDF and keeps its annotations.
+- **Notebooks from Markdown:** `put --notebook` turns a `.md` or `.txt` file into a notebook of typed text laid out for the tablet (`rm2`, `pure`, `pro`, `move`).
+- **Typed text and highlights:** `text` and `highlights` as plain text, Markdown or JSON, from the cloud or from a local `.rmdoc`.
+- **Rendering:** `render` draws a document with its ink as a PDF, or a page as PNG, JPEG or SVG.
+- **Backups:** `backup` keeps an incremental local copy, one `.rmdoc` per document with a manifest, and `backup restore` puts it back.
+- **Watch and exec:** `watch` follows the library's notifications live, and `--exec` runs a program on each batch of changes.
+- **Edits in place:** `rename`, `pin`, `unpin` and `tag` change only the metadata, `mv` and `mkdir` organize, and `unmark` erases highlights.
+- **Trash and restore:** `trash` and `restore` as the tablet does, `rm` for good.
+- **Space and duplicates:** `du` adds up folders and kinds, `dupes` finds documents made from the same file.
+- **Profiles and the Keychain:** several accounts side by side, each with its own token and cache; tokens in a 0600 file or the macOS Keychain.
+- **Offline cache:** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request.
+- **Output and exit codes:** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
+- **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
+- **Platforms:** macOS, Linux and Windows, with Homebrew; rendering on macOS and Linux.
+- **Automation:** scheduled backups, hot folders, exports to Markdown and more in [docs/automation.md](docs/automation.md).
+
 ## Install
 
 With [Homebrew](https://brew.sh) on macOS or Linux:
@@ -33,7 +53,7 @@ go install github.com/altessa-s/rmctl/cmd/rmctl@latest
 
 ## Examples
 
-The answers below are from a test account, in the `table` format a terminal gets.
+The answers below are from a test account, in the `table` format a terminal gets. Complete scripts for backups, hot folders, Markdown exports, rendering and reports are in [docs/automation.md](docs/automation.md).
 
 ### Browsing
 
