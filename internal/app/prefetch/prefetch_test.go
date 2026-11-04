@@ -709,6 +709,57 @@ func TestSyncAfterAnEvictionWalks(t *testing.T) {
 	}
 }
 
+// Another process removes an entry after a sync checked that it kept
+// everything, and before it records the mark: the removal forgets the
+// mark that was there, and the mark written after it names the generation
+// before the removal, so the next sync at the same root walks and fetches
+// back what went, instead of answering that the cache is current.
+func TestSyncRacingARemovalIsNotTrusted(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	epub := f.files["d3aaaaaa.epub"].Hash
+	var once sync.Once
+	f.cache.BeforeMark = func() { once.Do(func() { f.cache.Drop(epub) }) }
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); r.Current || r.Fetched == 0 {
+		t.Fatalf("%+v", r)
+	}
+	if f.cache.Holds(epub) {
+		t.Fatal("the removal did not happen")
+	}
+	if m, ok := f.cache.LastSync(); !ok || m.Removals != "0" {
+		t.Fatalf("the racing sync recorded %+v %v", m, ok)
+	}
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); r.Current || r.Fetched != 1 || !f.cache.Holds(epub) {
+		t.Fatalf("the next sync trusted a stale mark: %+v", r)
+	}
+	if m, _ := f.cache.LastSync(); m.Removals != "1" {
+		t.Fatalf("mark %+v", m)
+	}
+	if r := f.sync(t, "/", port.SyncOptions{Files: true}); !r.Current {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// A generation the cache cannot tell vouches for no mark: every sync walks.
+func TestSyncWithAnUnknownGenerationWalks(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sync(t, "/", port.SyncOptions{})
+	f.cache.UnknownRemovals = true
+	for range 2 {
+		before := f.cloud.Count("Files")
+		if r := f.sync(t, "/", port.SyncOptions{}); r.Fetched != 0 || f.cloud.Count("Files") == before {
+			t.Fatalf("a sync took the fast path on an unknown generation: %+v", r)
+		}
+	}
+	f.cache.UnknownRemovals = false
+	f.sync(t, "/", port.SyncOptions{})
+	calls := len(f.cloud.Calls())
+	if r := f.sync(t, "/", port.SyncOptions{}); !r.Current || len(f.cloud.Calls()) != calls+1 {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestSyncNotFound(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

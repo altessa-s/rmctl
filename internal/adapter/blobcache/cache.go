@@ -47,8 +47,9 @@ func Spaces() []string { return []string{SpaceBlobs, SpaceIndexes, SpaceState} }
 
 // KeyCovered is the name, among the state, of the entry that vouches for
 // what the blobs and indexes hold: the last complete sync. Whatever leaves
-// those spaces, evicted or dropped, drops it, so it never vouches for an
-// entry that is gone.
+// those spaces, evicted or dropped, bumps [KeyRemovals] and drops it; a
+// record written by a sync that raced the removal still names the
+// generation before it, so it never vouches for an entry that is gone.
 const KeyCovered = "sync"
 
 // evictable are the spaces the byte budget covers.
@@ -213,16 +214,27 @@ func (c *Cache) account(n int64) {
 }
 
 // Drop removes the entry key of space, if there is one. An entry of the
-// blobs or indexes that goes takes the entry [KeyCovered] with it.
+// blobs or indexes that goes bumps [KeyRemovals] and takes the entry
+// [KeyCovered] with it.
 func (c *Cache) Drop(space, key string) {
 	if !validKey(space, key) {
 		return
 	}
-	err := os.Remove(filepath.Join(c.dir, space, key))
+	path := filepath.Join(c.dir, space, key)
+	// The mark goes before the entry: a process stopped between the two
+	// leaves no mark vouching for an entry that is gone, only one sync
+	// that walks again. The bump after the removal covers a sync that
+	// records a mark in between.
+	if evictable(space) {
+		if _, err := os.Stat(path); err == nil {
+			c.uncover()
+		}
+	}
+	err := os.Remove(path)
 	switch {
 	case err == nil:
 		if evictable(space) {
-			c.uncover()
+			c.removed()
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		c.log.Debug("cache drop failed", "space", space, "err", err)
@@ -318,6 +330,9 @@ func (c *Cache) evict() {
 		return
 	}
 	slices.SortFunc(all, func(a, b cached) int { return cmp.Compare(a.used.UnixNano(), b.used.UnixNano()) })
+	// As in Drop, the mark goes before anything is evicted and the
+	// generation is bumped after.
+	c.uncover()
 	evicted := false
 	for _, f := range all {
 		if total <= c.maxBytes {
@@ -332,7 +347,7 @@ func (c *Cache) evict() {
 	}
 	c.total = total
 	if evicted {
-		c.uncover()
+		c.removed()
 	}
 }
 

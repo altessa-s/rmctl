@@ -64,7 +64,7 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 	}
 	mark, marked := s.cache.LastSync()
 	sameRoot := marked && mark.Root == state.Hash
-	if sameRoot && !opts.Force && covers(mark, query, opts) {
+	if sameRoot && !opts.Force && s.unremoved(mark) && covers(mark, query, opts) {
 		return s.current(state, mark), nil
 	}
 	if marked && !sameRoot {
@@ -100,6 +100,10 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 	if err != nil {
 		return report, err
 	}
+	// The removal generation is read before the check: whatever leaves
+	// the cache after the check changes it, so a mark recorded with it
+	// stops vouching then, even when the removal raced the mark.
+	removals, _ := s.cache.Removals()
 	// What the cache evicted while the sync ran is not there for a read
 	// to find: the sync is not complete.
 	if !s.kept(p) {
@@ -107,15 +111,25 @@ func (s *Service) Sync(ctx context.Context, query string, opts port.SyncOptions)
 		return report, s.overBudget(p.needed, true)
 	}
 	report.Current = len(p.fetch) == 0
-	// An eviction since this sync began may have forgotten the last mark.
-	if mark, marked = s.cache.LastSync(); !marked || mark.Root != state.Hash || !coversTree(mark, tree, scope, opts) {
+	// An eviction since this sync began may have forgotten the last mark,
+	// and a mark of another generation vouches for nothing any more.
+	if mark, marked = s.cache.LastSync(); !marked || mark.Root != state.Hash || mark.Removals != removals ||
+		!coversTree(mark, tree, scope, opts) {
 		s.cache.MarkSync(port.SyncMark{
 			Root: state.Hash, Generation: state.Generation, Query: query, Path: report.Path, Scope: scope,
 			Files: opts.Files, All: opts.All, Documents: len(docs), FileCount: p.files, Needed: p.needed,
-			At: s.clock.Now(),
+			At: s.clock.Now(), Removals: removals,
 		})
 	}
 	return report, nil
+}
+
+// unremoved reports whether nothing left the cache since mark was recorded:
+// the cache's removal generation is still the one mark names. A generation
+// that cannot be told vouches for no mark.
+func (s *Service) unremoved(mark port.SyncMark) bool {
+	removals, ok := s.cache.Removals()
+	return ok && mark.Removals == removals
 }
 
 // current is the answer of a sync the last complete one covers: what that

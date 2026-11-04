@@ -29,6 +29,10 @@ func TestSyncsKeepTheMark(t *testing.T) {
 	want := port.SyncMark{
 		Root: "r", Generation: 7, Query: "/Books", Path: "/Books", Scope: "f1", Files: true, All: true,
 		Documents: 3, FileCount: 9, Needed: 1234, At: time.Unix(1_700_000_000, 0).UTC(),
+		Removals: "3-0123456789abcdef",
+	}
+	if g, ok := s.Removals(); !ok || g != blobcache.NoRemovals {
+		t.Fatalf("a fresh cache: %q %v", g, ok)
 	}
 	s.MarkSync(want)
 	// Another process reads what this one recorded.
@@ -232,6 +236,9 @@ func TestSyncsForgetTheMarkOnEviction(t *testing.T) {
 	keep(bytes.Repeat([]byte("c"), 30))
 	if _, ok := s.LastSync(); ok || s.Usage() > st.Budget() {
 		t.Fatalf("an eviction kept the mark, or the cache takes %d", s.Usage())
+	}
+	if g, ok := s.Removals(); !ok || g == blobcache.NoRemovals {
+		t.Fatalf("an eviction left the generation: %q %v", g, ok)
 	}
 	s.MarkSync(mark)
 	st, s = open(40)

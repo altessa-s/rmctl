@@ -116,13 +116,19 @@ type SyncMark struct {
 	FileCount int
 	Needed    int64
 	At        time.Time
+	// Removals is the cache's removal generation the sync read before it
+	// checked that everything it keeps is there: the mark vouches for the
+	// cache only while SyncCache.Removals still reads it.
+	Removals string
 }
 
 // SyncCache is the profile's cache as sync fills it. Blobs are addressed by
 // their sha256; whatever this reports present counts as just used, so it
 // is the last to be evicted. Whenever a blob or an index leaves the cache,
-// evicted or dropped, the last complete sync is forgotten with it: a mark
-// never vouches for an entry that is gone.
+// evicted or dropped, the removal generation changes and the last complete
+// sync is forgotten with it; a mark recorded by a sync that raced the
+// removal names the generation before it, so a mark that names the current
+// generation never vouches for an entry that is gone.
 type SyncCache interface {
 	// Holds reports whether the blob of hash is kept.
 	Holds(hash string) bool
@@ -142,4 +148,8 @@ type SyncCache interface {
 	LastSync() (SyncMark, bool)
 	MarkSync(m SyncMark)
 	DropSync()
+	// Removals is the removal generation: a value that changes whenever a
+	// blob or an index leaves the cache, evicted or dropped. False means it
+	// cannot be told, and no mark may be trusted.
+	Removals() (string, bool)
 }

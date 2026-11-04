@@ -197,8 +197,9 @@ func TestSpacesShareTheBudget(t *testing.T) {
 	if _, ok := c.Entry(blobcache.SpaceState, "root"); !ok {
 		t.Fatal("the state was evicted")
 	}
+	// The state is the root and the removal generation the eviction bumped.
 	bytes, entries := c.Usage()
-	if bytes != int64(len(blob)) || entries["blobs"] != 1 || entries["indexes"] != 0 || entries["state"] != 1 {
+	if bytes != int64(len(blob)) || entries["blobs"] != 1 || entries["indexes"] != 0 || entries["state"] != 2 {
 		t.Fatalf("%d %v", bytes, entries)
 	}
 	for _, bad := range [][2]string{{"blobs", "x"}, {"state", "../x"}, {"state", ".hidden"}, {"other", "root"}} {

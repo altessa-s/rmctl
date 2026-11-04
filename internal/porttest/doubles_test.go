@@ -83,6 +83,24 @@ func TestSyncCache(t *testing.T) {
 	if _, ok := c.LastSync(); ok {
 		t.Fatal("a dropped sync is still the last")
 	}
+
+	// Every removal changes the generation and forgets the mark; a hook
+	// runs before a mark is kept.
+	if g, ok := c.Removals(); !ok || g != "1" {
+		t.Fatalf("after one drop: %q %v", g, ok)
+	}
+	c.BeforeMark = func() { c.DropIndex("idx") }
+	c.MarkSync(mark)
+	if g, _ := c.Removals(); g != "2" {
+		t.Fatalf("after the hook: %q", g)
+	}
+	if _, ok := c.LastSync(); !ok {
+		t.Fatal("the mark after the hook was not kept")
+	}
+	c.UnknownRemovals = true
+	if _, ok := c.Removals(); ok {
+		t.Fatal("an unknown generation was told")
+	}
 }
 
 func TestVault(t *testing.T) {

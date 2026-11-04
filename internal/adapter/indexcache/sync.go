@@ -30,6 +30,9 @@ type FillStore interface {
 	Size(space, key string) (int64, bool)
 	// Fill keeps the blob of hash that write streams, checked against it.
 	Fill(hash string, write func(w io.Writer) error) error
+	// Removals is the removal generation, which every blob or index that
+	// leaves the store changes; false when it cannot be told.
+	Removals() (string, bool)
 }
 
 // Syncs implements port.SyncCache over a profile's cache: the blobs and
@@ -95,6 +98,9 @@ type mark struct {
 	FileCount  int       `json:"file_count"`
 	Needed     int64     `json:"needed"`
 	At         time.Time `json:"at"`
+	// Removals is absent from a mark written before the generation was:
+	// "" never matches one, so such a mark is walked past once.
+	Removals string `json:"removals,omitempty"`
 }
 
 // LastSync implements port.SyncCache. A mark that does not decode is
@@ -113,6 +119,7 @@ func (s *Syncs) LastSync() (port.SyncMark, bool) {
 	return port.SyncMark{
 		Root: m.Root, Generation: m.Generation, Query: m.Query, Path: m.Path, Scope: domain.ItemID(m.Scope),
 		Files: m.Files, All: m.All, Documents: m.Documents, FileCount: m.FileCount, Needed: m.Needed, At: m.At,
+		Removals: m.Removals,
 	}, true
 }
 
@@ -121,7 +128,7 @@ func (s *Syncs) MarkSync(sm port.SyncMark) {
 	data, err := json.Marshal(mark{
 		Version: entryVersion, Root: sm.Root, Generation: sm.Generation, Query: sm.Query, Path: sm.Path,
 		Scope: string(sm.Scope), Files: sm.Files, All: sm.All, Documents: sm.Documents, FileCount: sm.FileCount,
-		Needed: sm.Needed, At: sm.At,
+		Needed: sm.Needed, At: sm.At, Removals: sm.Removals,
 	})
 	if err != nil {
 		s.log.Debug("sync mark not encoded", "err", err)
@@ -132,3 +139,6 @@ func (s *Syncs) MarkSync(sm port.SyncMark) {
 
 // DropSync implements port.SyncCache.
 func (s *Syncs) DropSync() { s.store.Drop(spaceState, syncKey) }
+
+// Removals implements port.SyncCache.
+func (s *Syncs) Removals() (string, bool) { return s.store.Removals() }

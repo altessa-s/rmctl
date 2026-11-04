@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strconv"
 	"sync"
 
 	"github.com/altessa-s/rmctl/internal/port"
@@ -31,7 +32,15 @@ type SyncCache struct {
 	Source string
 	// FailFill makes Fill fail.
 	FailFill error
-	fills    int
+	// UnknownRemovals makes Removals report that the generation cannot be
+	// told, as a damaged one on disk.
+	UnknownRemovals bool
+	// BeforeMark, when set, runs as MarkSync starts, before the mark is
+	// kept: a test removes entries there, as another process would after
+	// the sync checked them.
+	BeforeMark func()
+	fills      int
+	removals   int
 }
 
 // NewSyncCache returns an empty cache with budget max.
@@ -110,7 +119,7 @@ func (c *SyncCache) Drop(hash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.blobs, hash)
-	c.mark = nil
+	c.removed()
 }
 
 // KeepIndex keeps an index of size under hash, as reading it through the
@@ -129,7 +138,7 @@ func (c *SyncCache) DropIndex(hash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.Indexes, hash)
-	c.mark = nil
+	c.removed()
 }
 
 // Usage implements port.SyncCache: the bytes of the blobs and the sizes of
@@ -165,6 +174,9 @@ func (c *SyncCache) LastSync() (port.SyncMark, bool) {
 
 // MarkSync implements port.SyncCache.
 func (c *SyncCache) MarkSync(m port.SyncMark) {
+	if c.BeforeMark != nil {
+		c.BeforeMark()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.mark = &m
@@ -174,5 +186,23 @@ func (c *SyncCache) MarkSync(m port.SyncMark) {
 func (c *SyncCache) DropSync() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.mark = nil
+}
+
+// Removals implements port.SyncCache: how many entries Drop and DropIndex
+// removed.
+func (c *SyncCache) Removals() (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.UnknownRemovals {
+		return "", false
+	}
+	return strconv.Itoa(c.removals), true
+}
+
+// removed records a removal, as blobcache does: the generation changes and
+// the last complete sync is forgotten. The caller holds mu.
+func (c *SyncCache) removed() {
+	c.removals++
 	c.mark = nil
 }
