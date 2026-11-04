@@ -81,3 +81,12 @@ xcrun notarytool store-credentials rmctl-notary --apple-id <apple-id> --team-id 
 ```
 
 `make release-macos TAG=v1.2.0` runs it.
+
+## Windows package managers
+
+After a release (not a pre-release) is published, the release workflow updates two package managers from its Windows archive. A job whose token is not set warns and does nothing.
+
+- **Scoop.** `scoop-manifest.sh VERSION CHECKSUMS` writes `rmctl.json` from the release's `checksums.txt`; the `scoop` job commits it as `bucket/rmctl.json` to [altessa-s/scoop-bucket](https://github.com/altessa-s/scoop-bucket). It needs `SCOOP_BUCKET_TOKEN`, a token with contents: write on that repository. Users install with `scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket` and `scoop install rmctl`.
+- **winget.** The `winget` job runs [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser), which opens a pull request to `microsoft/winget-pkgs` for `Altessa.rmctl` from the fork of that repository under altessa-s. It needs `WINGET_TOKEN`, a classic token with the `public_repo` and `workflow` scopes, and it only updates a package already there: the first version is submitted once by hand, for example with [Komac](https://github.com/russellbanks/Komac) (`komac new Altessa.rmctl --version <version> --urls <url of rmctl_<version>_windows_amd64.zip> --submit`, a zip with `rmctl.exe` as its nested portable installer, command `rmctl`). Microsoft reviews every pull request before `winget install Altessa.rmctl` sees the version.
+
+The Windows binary is not signed yet, so SmartScreen may warn when it is started from Explorer; installed by either manager and run from a terminal, it is not.

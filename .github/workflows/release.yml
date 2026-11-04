@@ -200,3 +200,92 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}
+
+  # The Windows package managers install the archive this release published.
+  # Pre-releases leave them alone; a job whose token is not set says so and
+  # does nothing, so a release never waits on them.
+  scoop:
+    name: Scoop manifest
+    needs: release
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+    steps:
+      - name: Require the bucket token
+        id: token
+        run: |
+          if [[ -z "$BUCKET_TOKEN" ]]; then
+            echo "::warning::SCOOP_BUCKET_TOKEN is not set; the Scoop manifest is not updated"
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.token.outputs.set == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Write the manifest
+        if: steps.token.outputs.set == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --dir artifacts
+          .github/scripts/scoop-manifest.sh "${TAG#v}" artifacts/checksums.txt > rmctl.json
+          cat rmctl.json
+
+      - name: Push it to the bucket
+        if: steps.token.outputs.set == 'true'
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${BUCKET_TOKEN}@github.com/altessa-s/scoop-bucket.git" bucket
+          mkdir -p bucket/bucket
+          cp rmctl.json bucket/bucket/rmctl.json
+          cd bucket
+          git add bucket/rmctl.json
+          if git diff --cached --quiet; then
+            echo "the manifest is already current"
+            exit 0
+          fi
+          git -c user.name=DM -c user.email=dm@altessa-s.com commit -m "feat(rmctl): update to ${TAG#v}"
+          git push origin HEAD
+
+  # winget-releaser opens a pull request to microsoft/winget-pkgs from the
+  # fork under altessa-s, with manifests based on the version already there;
+  # the first version is submitted by hand (see .github/scripts/README.md).
+  winget:
+    name: winget manifest
+    needs: release
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Require the winget token
+        id: token
+        run: |
+          if [[ -z "$WINGET_TOKEN" ]]; then
+            echo "::warning::WINGET_TOKEN is not set; no winget pull request is opened"
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request
+        if: steps.token.outputs.set == 'true'
+        uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        with:
+          identifier: Altessa.rmctl
+          installers-regex: '_windows_amd64\.zip$'
+          release-tag: ${{ inputs.tag || github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
