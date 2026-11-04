@@ -42,8 +42,10 @@ var ErrProfile = errors.New("a profile name is 1-64 characters of a-z, 0-9, _ an
 // it talks to.
 type Config struct {
 	Profile string
-	// ConfigDir holds the profile's token file.
-	ConfigDir string
+	// ConfigRoot is the directory of every profile's directory, and
+	// ConfigDir the profile's own, which holds its token file.
+	ConfigRoot string
+	ConfigDir  string
 	// CacheDir is the cache directory of every profile; each profile's
 	// cache is the subdirectory named after it, and shares nothing.
 	CacheDir string
@@ -53,8 +55,10 @@ type Config struct {
 	Offline   bool
 	TokenPath string
 	Endpoints rmcloud.Endpoints
-	// ConfigFile is the configuration file read, present or not.
-	ConfigFile string
+	// ConfigFile is the configuration file read, present or not, and
+	// ProfileTable whether it holds a table of the profile's own.
+	ConfigFile   string
+	ProfileTable bool
 	// Secrets is the token backend, BackendFile or BackendKeychain, and
 	// SecretsSource what chose it.
 	Secrets       string
@@ -148,7 +152,10 @@ func LoadFrom(env map[string]string, profileFlag string, dirs BaseDirs, read Rea
 		return Config{}, err
 	}
 	configDir := filepath.Join(configRoot, profile)
+	_, table := file.Profiles[profile]
 	return Config{
+		ConfigRoot:      configRoot,
+		ProfileTable:    table,
 		CacheTTL:        ttl,
 		Offline:         offline,
 		Profile:         profile,

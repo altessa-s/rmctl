@@ -83,18 +83,27 @@ func (a *Admin) Status(_ context.Context, all bool) (port.CacheReport, error) {
 		Offline: a.settings.Offline, Disabled: a.settings.Disabled,
 	}
 	for _, name := range a.names(all) {
-		store, err := a.profiles.Open(name)
+		pc, err := status(a.profiles, name, a.log)
 		if err != nil {
 			return port.CacheReport{}, err
-		}
-		bytes, entries := store.Usage()
-		pc := port.ProfileCache{Profile: name, Dir: store.Dir(), Bytes: bytes, Budget: store.Budget(), Entries: entries}
-		if p, ok := readPointer(store, a.log); ok {
-			pc.RootHash, pc.RootGeneration, pc.Confirmed = p.Hash, p.Generation, p.Confirmed
 		}
 		report.Profiles = append(report.Profiles, pc)
 	}
 	return report, nil
+}
+
+// status is what the cache of profile holds.
+func status(profiles Profiles, name string, log *slog.Logger) (port.ProfileCache, error) {
+	store, err := profiles.Open(name)
+	if err != nil {
+		return port.ProfileCache{}, err
+	}
+	bytes, entries := store.Usage()
+	pc := port.ProfileCache{Profile: name, Dir: store.Dir(), Bytes: bytes, Budget: store.Budget(), Entries: entries}
+	if p, ok := readPointer(store, log); ok {
+		pc.RootHash, pc.RootGeneration, pc.Confirmed = p.Hash, p.Generation, p.Confirmed
+	}
+	return pc, nil
 }
 
 // Clear implements port.Cache.

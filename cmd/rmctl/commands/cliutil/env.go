@@ -43,6 +43,7 @@ type Services struct {
 	Archives  port.Archives
 	Rendering port.Rendering
 	Secrets   port.Secrets
+	Profiles  port.Profiles
 	Cache     port.Cache
 	// Offline says the services never reach the cloud: --offline, or the
 	// profile's configuration.

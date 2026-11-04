@@ -31,6 +31,7 @@ packages:
   - internal/adapter/rmpages
   - internal/adapter/rmdocs
   - internal/app/secrets
+  - internal/app/profile
   - internal/wiring
   - cmd/rmctl/commands
   - cmd/rmctl/commands/output

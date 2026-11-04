@@ -21,8 +21,6 @@ import (
 	"github.com/altessa-s/rmctl/internal/adapter/renderer"
 	"github.com/altessa-s/rmctl/internal/adapter/rmdocs"
 	"github.com/altessa-s/rmctl/internal/adapter/rmpages"
-	"github.com/altessa-s/rmctl/internal/adapter/secretfile"
-	"github.com/altessa-s/rmctl/internal/adapter/vault"
 	"github.com/altessa-s/rmctl/internal/app/account"
 	"github.com/altessa-s/rmctl/internal/app/archives"
 	"github.com/altessa-s/rmctl/internal/app/browse"
@@ -30,6 +28,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/app/pages"
+	"github.com/altessa-s/rmctl/internal/app/profile"
 	"github.com/altessa-s/rmctl/internal/app/render"
 	"github.com/altessa-s/rmctl/internal/app/secrets"
 	"github.com/altessa-s/rmctl/internal/app/watch"
@@ -69,7 +68,14 @@ type Options struct {
 	Client []rmcloud.Option
 	// ReadConfig reads the configuration file; nil reads the machine's.
 	ReadConfig config.ReadFunc
+	// Keychain is the Keychain the tokens of a profile may be kept in; nil
+	// is the login Keychain. A test keeps the user's Keychain out of reach
+	// with it.
+	Keychain KeychainItems
 }
+
+// KeychainItems are the Keychain as the keychain adapter needs it.
+type KeychainItems = keychain.Items
 
 // Services are the input ports, built and connected.
 type Services struct {
@@ -83,6 +89,7 @@ type Services struct {
 	Archives  port.Archives
 	Rendering port.Rendering
 	Secrets   port.Secrets
+	Profiles  port.Profiles
 	// Cache reports and clears the caches on disk.
 	Cache port.Cache
 	// Offline says this run never reaches the cloud.
@@ -113,26 +120,15 @@ func Build(opts Options) (Services, error) {
 	if err != nil {
 		return Services{}, err
 	}
-	service := cfg.KeychainService
-	if service == "" {
-		service = keychain.DefaultService
-	}
-	fileStore := secretfile.New(cfg.TokenPath)
-	keyStore := keychain.New(service, cfg.Profile)
-	fileVault := vault.New(fileStore, port.SecretsFile, fileStore.Path())
-	keyVault := vault.New(keyStore, port.SecretsKeychain, keyStore.Location())
-	var store rmcloud.SecretStore = fileStore
+	tokens := secretsOf(cfg, opts.Keychain)
+	fileVault, keyVault := tokens.vaults()
 	current := fileVault
 	if cfg.Secrets == config.BackendKeychain {
-		store, current = keyStore, keyVault
+		current = keyVault
 	}
-	clientOpts := append([]rmcloud.Option{
-		rmcloud.WithEndpoints(cfg.Endpoints),
-		rmcloud.WithLogger(opts.Logger),
-	}, opts.Client...)
-	client, err := rmcloud.New(store, clientOpts...)
+	client, err := newClient(tokens.inUse(cfg), cfg, opts)
 	if err != nil {
-		return Services{}, fmt.Errorf("start the transport: %w", err)
+		return Services{}, err
 	}
 
 	remote := cloud.New(client)
@@ -164,6 +160,8 @@ func Build(opts Options) (Services, error) {
 		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
+		Profiles: profile.New(newProfileStore(cfg, opts, read), indexcache.NewCaches(profiles{st.root}, opts.Logger),
+			registries{opts: opts, read: read, root: st.root}, cfg.Profile, st.offline),
 		Cache:   st.admin,
 		Offline: st.offline,
 		Config:  cfg,
@@ -180,6 +178,7 @@ type built struct {
 	blobs     port.BlobStore
 	blobCache port.BlobCache
 	profile   *blobcache.Cache
+	root      *blobcache.Root
 	admin     *indexcache.Admin
 	offline   bool
 }
@@ -199,7 +198,7 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 	if offline && !caching {
 		return built{}, ErrOfflineNoCache
 	}
-	b := built{roots: remote, docs: remote, blobs: remote, profile: profile, offline: offline}
+	b := built{roots: remote, docs: remote, blobs: remote, profile: profile, root: root, offline: offline}
 	b.admin = indexcache.NewAdmin(profiles{root}, indexcache.Settings{
 		Profile: cfg.Profile, TTL: cfg.CacheTTL, Offline: offline, Disabled: !caching,
 	}, opts.Logger)
@@ -232,6 +231,20 @@ func (p profiles) Dir() string     { return p.root.Dir() }
 func (p profiles) Names() []string { return p.root.Profiles() }
 func (p profiles) Open(profile string) (indexcache.ProfileStore, error) {
 	return p.root.Profile(profile)
+}
+
+// newClient is the transport of the profile cfg describes, keeping its
+// tokens in store.
+func newClient(store rmcloud.SecretStore, cfg config.Config, opts Options) (*rmcloud.Client, error) {
+	clientOpts := append([]rmcloud.Option{
+		rmcloud.WithEndpoints(cfg.Endpoints),
+		rmcloud.WithLogger(opts.Logger),
+	}, opts.Client...)
+	client, err := rmcloud.New(store, clientOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("start the transport: %w", err)
+	}
+	return client, nil
 }
 
 func cacheBytes(n int64) int64 {

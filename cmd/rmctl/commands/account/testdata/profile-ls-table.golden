@@ -1,0 +1,5 @@
+PROFILE  CURRENT  REGISTERED  SECRETS     CACHE
+───────  ───────  ──────────  ────────  ───────
+default  yes      yes         file      2.0 KiB
+travel   no       unknown     keychain      0 B
+work     no       yes         keychain      0 B

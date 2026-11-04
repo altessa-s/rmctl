@@ -44,3 +44,13 @@ func TestVaultOverAStore(t *testing.T) {
 	}()
 	vault.New(nil, port.SecretsFile, "")
 }
+
+// The profile use case knows a registered profile by port.DeviceToken: it
+// must be the name the transport keeps the device token under.
+func TestDeviceTokenIsTheTransports(t *testing.T) {
+	t.Parallel()
+	v := vault.New(secretfile.New(filepath.Join(t.TempDir(), "token.json")), port.SecretsFile, "")
+	if v.Names()[0] != port.DeviceToken {
+		t.Fatalf("%v", v.Names())
+	}
+}

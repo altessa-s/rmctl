@@ -202,7 +202,7 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 
 | Group | Commands |
 |---|---|
-| Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
+| Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]`, `profile ls`, `profile add <name> <code>`, `profile info [name]`, `profile del <name> [--revoke]` |
 | Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `render <path\|id\|file.rmdoc> [-o file] [--mode fresh\|preserving\|recomposed] [--paper a4\|letter\|tablet] [--page N --png [--scale S]] [--id id]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
@@ -264,7 +264,8 @@ Everything kept is addressed by its content, so nothing goes stale and nothing n
   confirmed less than that long ago, without asking. Writes ignore it.
 - **`--offline`** makes no request at all. `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights`, `debug page`, `debug sweep`, `rmdoc`,
   `secrets status` and `debug cache` read the last known root and its indexes from the cache; anything missing is an error that names it.
-  A root older than a day draws a warning. Every other command refuses to run offline.
+  A root older than a day draws a warning. `profile ls`, `profile info` and `profile del` (without `--revoke`) run offline too, from what
+  this machine keeps. Every other command refuses to run offline.
 - **`--no-cache`** neither reads nor writes the cache, for debugging.
 - **`debug cache status`** reports the profile's cache: its directory, size and budget, entries by kind, and the last known root with
   when it was confirmed; `--all` lists every profile. **`debug cache clear`** empties it, or every profile's with `--all`, after a question
@@ -291,6 +292,36 @@ Older versions kept one blob directory for every profile; it is removed on first
 | Color | on a color terminal | `--color`, `NO_COLOR`, `TERM=dumb` |
 
 Profiles keep several accounts apart: each has its own token and its own cache.
+
+### Profiles
+
+A profile is one account on this machine: its tokens (`token.json` in its directory, or the Keychain), its directory
+`<user config dir>/rmctl/<profile>`, its cache `<user cache dir>/rmctl/<profile>/`, and its tables in config.toml
+(`[profiles.<profile>.…]`). `--profile/-P` or `RMCTL_PROFILE` chooses the one a command uses, `default` when neither does. A name is
+1-64 characters of `a-z`, `0-9`, `_` and `-`, starting with a letter or digit.
+
+```sh
+rmctl profile add work abcdefgh      # register a new profile, as rmctl -P work register abcdefgh does
+rmctl profile ls                     # every profile: current, registered, where its tokens are, what its cache takes
+rmctl profile info work              # one profile in detail, with what account shows
+rmctl -P work ls /Books              # use it
+rmctl profile del work               # remove it entirely, after a question
+```
+
+- **`profile ls`** lists every profile this machine keeps something of — a directory, a table in config.toml, a cache — and the one in
+  use once it is registered, and marks the one the command runs as. It reads only this machine.
+- **`profile add <name> <code>`** registers a new profile with a one-time code. A profile that already holds a device token is refused;
+  `rmctl -P <name> register --replace <code>` registers it again.
+- **`profile info [name]`** shows one profile, the one in use unless named: its directory, where its tokens are and which are there (never
+  their values), its cache with its size and budget, and the config.toml settings that apply to it. For a registered profile the cloud is
+  asked what `account` shows; under `--offline`, or when the cloud does not answer, a note says so and the rest is shown.
+- **`profile del <name>`** removes the profile in this order: its tokens, from its file and from the Keychain; its directory; its cache;
+  and its tables in config.toml. Only the tables' header and key lines leave config.toml: every other line and comment stays, the result
+  is read back before it replaces the file, and settings written in another form (dotted keys under `[profiles]`, an inline table) are
+  refused with a request to edit the file by hand. Files rmctl did not write stay where they are, with their directory. A step that fails
+  stops the removal there; the profile is still listed until its tables go last, and running `profile del` again finishes it. Like
+  `logout`, it tells the cloud nothing: the device stays on the account until it is removed there; `--revoke` removes it first, and a
+  revoke that fails changes nothing. It asks first, naming the profile and saying when it is the one in use; `--yes` answers.
 
 ### config.toml
 
@@ -353,8 +384,9 @@ adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So
 **Use cases**
 
 - `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict.
-- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render` — one input port
-  each; `pages.Reader` is shared with `browse`, and `render` downloads a document through `fetch.Pack`, as `export` does.
+- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render`, `profile` — one
+  input port each; `pages.Reader` is shared with `browse`, `render` downloads a document through `fetch.Pack`, as `export` does, and
+  `profile` registers, revokes and reads the account of any profile through the `account` use case.
 
 **Adapters** (`internal/adapter/…`)
 
@@ -364,11 +396,12 @@ adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So
 - `localfs`, `blobcache`, `pdf` — the local file system, the cache on disk (one directory per profile, one budget each), and a PDF's
   page count through pdfcpu.
 - `indexcache` — decorators of the root, document, blob and registry ports that keep the library's indexes in the profile's cache, serve
-  `--offline` and the TTL, and report and clear the cache.
+  `--offline` and the TTL, and report, clear and remove the caches of every profile.
 - `rmpages`, `rmdocs` — `.rm` pages through rmlines-go and `.rmdoc` archives through rmdoc-go; nothing else imports those two.
 - `renderer` — drawing through rmrender-go on macOS and Linux with cgo, and a stub that says rendering is not available everywhere
   else; nothing else imports rmrender-go.
-- `config`, `ids`, `clock` — profile resolution from config.toml, random v4 UUIDs, and time over go-atlas-core.
+- `config`, `ids`, `clock` — profile resolution from config.toml, the profile directories and the edits of config.toml, random v4 UUIDs,
+  and time over go-atlas-core.
 
 **Composition root and command line**
 

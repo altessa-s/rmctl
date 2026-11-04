@@ -1,0 +1,21 @@
+{
+  "profile": "",
+  "current": true,
+  "exists": false,
+  "config_dir": "",
+  "config_dir_exists": false,
+  "secrets": "file",
+  "secrets_source": "",
+  "token_location": "",
+  "tokens": [],
+  "registered": false,
+  "account": "",
+  "cache_dir": "",
+  "cache_bytes": 0,
+  "cache_budget": 0,
+  "cache_entries": {},
+  "config_file": "",
+  "config_table": false,
+  "cache_ttl_seconds": 0,
+  "offline": false
+}

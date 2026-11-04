@@ -80,6 +80,15 @@ type Fake struct {
 	// domain.ErrRenderUnsupported).
 	Rendered  port.RenderReport
 	RenderErr error
+	// ProfileList is what Profiles.List answers, ProfileInfo what Info
+	// answers (with the name asked for filled in when it has none), and
+	// ProfilesErr fails List, Info and Add. Removal is what Remove answers,
+	// with RemoveErr: a removal that stopped part way.
+	ProfileList []port.ProfileSummary
+	ProfileInfo port.ProfileInfo
+	ProfilesErr error
+	Removal     port.ProfileRemoval
+	RemoveErr   error
 
 	mu    sync.Mutex
 	calls []string
@@ -90,6 +99,7 @@ func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
 		Archives: (*archivesFake)(f), Rendering: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Profiles: (*profilesFake)(f),
 	}
 }
 
@@ -611,4 +621,49 @@ func (c *cacheFake) Clear(ctx context.Context, all bool) ([]string, error) {
 		names = append(names, p.Profile)
 	}
 	return names, nil
+}
+
+// profilesFake is the Fake's port.Profiles.
+type profilesFake Fake
+
+var _ port.Profiles = (*profilesFake)(nil)
+
+// List implements port.Profiles.
+func (p *profilesFake) List(context.Context) ([]port.ProfileSummary, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileList"); err != nil {
+		return nil, err
+	}
+	return f.ProfileList, f.ProfilesErr
+}
+
+// Info implements port.Profiles.
+func (p *profilesFake) Info(_ context.Context, name string, account bool) (port.ProfileInfo, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileInfo", name, opt(account, "account")); err != nil {
+		return port.ProfileInfo{}, err
+	}
+	info := f.ProfileInfo
+	if info.Name == "" {
+		info.Name = name
+	}
+	return info, f.ProfilesErr
+}
+
+// Add implements port.Profiles.
+func (p *profilesFake) Add(_ context.Context, name, code string) error {
+	f := (*Fake)(p)
+	if err := f.record("ProfileAdd", name, code); err != nil {
+		return err
+	}
+	return f.ProfilesErr
+}
+
+// Remove implements port.Profiles.
+func (p *profilesFake) Remove(_ context.Context, name string, o port.RemoveProfileOptions) (port.ProfileRemoval, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileRemove", name, opt(o.Revoke, "revoke")); err != nil {
+		return port.ProfileRemoval{}, err
+	}
+	return f.Removal, f.RemoveErr
 }

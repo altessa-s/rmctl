@@ -1,0 +1,24 @@
+[
+  {
+    "profile": "default",
+    "current": true,
+    "registered": true,
+    "secrets": "file",
+    "cache_bytes": 2048
+  },
+  {
+    "profile": "travel",
+    "current": false,
+    "registered": false,
+    "token_error": "the Keychain is locked",
+    "secrets": "keychain",
+    "cache_bytes": 0
+  },
+  {
+    "profile": "work",
+    "current": false,
+    "registered": true,
+    "secrets": "keychain",
+    "cache_bytes": 0
+  }
+]
