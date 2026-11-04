@@ -8,7 +8,10 @@
 #
 # VERSION is the release version without the leading "v"; CHECKSUMS is the
 # release's checksums.txt. The formula installs the prebuilt macOS and Linux
-# archives of that release.
+# archives of that release. A Linux archive carries libpdfium.so, which the
+# binary finds in its own directory through its $ORIGIN run path, so both go
+# into libexec and bin links to the binary; Cairo and Pango come from the
+# system.
 set -euo pipefail
 
 version=${1:?version}
@@ -54,7 +57,13 @@ class Rmctl < Formula
   end
 
   def install
-    bin.install "rmctl"
+    if OS.linux?
+      libexec.install "rmctl", "libpdfium.so"
+      bin.install_symlink libexec/"rmctl"
+    else
+      bin.install "rmctl"
+    end
+    doc.install "licenses" if File.directory?("licenses")
   end
 
   test do

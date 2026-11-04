@@ -28,6 +28,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Run golangci-lint
         # make golangci builds the linter from devtools/go.mod (its module
         # graph pins a golang.org/x/tools that reads Go 1.27 export data; the
@@ -37,12 +42,12 @@ jobs:
 
       - name: Run go vet and check go fix modernizers
         # go fix -diff exits non-zero when any modernizer would rewrite code.
-        # The runner's GCC 13 compiles the C23 page library through cgo.
+        # clang 19 compiles the C23 libraries through cgo.
         run: make vet
 
       - name: Build without cgo
         # Where no C23 compiler is found rmctl builds without its page
-        # commands; this keeps that build compiling.
+        # commands and without rendering; this keeps that build compiling.
         run: make build-nocgo
 
       - name: Check duplicate code
@@ -64,6 +69,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
 
       - name: Run tests
         # Runs each directory of the Makefile's MODULES and merges the
@@ -106,6 +116,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Run integration tests
         run: make test-integration
 
@@ -142,8 +157,9 @@ jobs:
     strategy:
       matrix:
         # linux is covered by the main build; guard the platform-gated
-        # code (*_darwin.go / *_other.go) against build-tag rot on the
-        # other supported targets.
+        # code (*_darwin.go / *_other.go, the renderer's stub) against
+        # build-tag rot on the other supported targets. Cross-compiling
+        # turns cgo off.
         goos: [darwin, windows]
     steps:
       - name: Checkout
@@ -178,6 +194,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
 
       - name: Run govulncheck
         run: make govulncheck

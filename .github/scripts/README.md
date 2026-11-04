@@ -61,3 +61,11 @@ use `make bench-compare BASE=<ref>`.
 `coverage-gate.sh [PROFILE]` reads the threshold and the package list from [`.coverage.yml`](../../.coverage.yml) and fails when any listed
 package's statement-weighted coverage in `PROFILE` (default `coverage.out`) is below it. Subpackages are gated on their own entries; a package
 with no statements yet is reported as skipped. CI runs it on the profile `make coverage` writes; locally use `make coverage-gate`.
+
+## Rendering on Linux
+
+`setup-render-linux.sh [RPATH]` prepares a Linux runner to build rmctl with rendering: it installs clang 19, which rmrender-go's C23 needs,
+and the Cairo stack's development packages, fetches the PDFium build rmrender-lib pins with the `fetch-pdfium.py` vendored in rmrender-go
+(checksum-verified), and writes `CC`, `CGO_CFLAGS`, `CGO_LDFLAGS` and `PDFIUM_DIR` to `$GITHUB_ENV`. `RPATH` is the run path
+the binary finds `libpdfium.so` on: PDFium's own directory by default, for tests run in place; the release passes `'$ORIGIN'` and puts the
+library beside the binary in its archive. Every Linux job that compiles the module with cgo runs it after setting up Go.

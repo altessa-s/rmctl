@@ -34,6 +34,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:

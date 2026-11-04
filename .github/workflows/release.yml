@@ -22,8 +22,11 @@ jobs:
     secrets: inherit
 
   # The page and archive commands link rmlines-lib and rmdoc-lib, C23
-  # libraries built through cgo, so every binary is built natively on its own runner;
-  # goreleaser only publishes them and writes the changelog.
+  # libraries built through cgo, and rendering links rmrender-lib on macOS and
+  # Linux, so every binary is built natively on its own runner; goreleaser
+  # only publishes them and writes the changelog. A Linux archive carries
+  # libpdfium.so beside the binary, which finds it through its $ORIGIN run
+  # path; Cairo and Pango come from the system.
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: checks
@@ -34,8 +37,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: gcc }
-          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: gcc }
+          # rmrender-lib's C23 needs clang 19; setup-render-linux.sh installs it.
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: clang-19 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: clang-19 }
           - { runner: macos-latest, goos: darwin, goarch: arm64, cc: clang }
           # Apple's clang builds the other architecture with -arch.
           - { runner: macos-latest, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
@@ -54,6 +58,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up the renderer's Linux build
+        # The binary looks for libpdfium.so in its own directory.
+        if: matrix.goos == 'linux'
+        run: bash .github/scripts/setup-render-linux.sh '$ORIGIN'
 
       - name: Set up MinGW-w64
         if: matrix.goos == 'windows'
@@ -90,6 +99,16 @@ jobs:
             -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
             -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
           cp LICENSE README.md out/
+          if [[ "$GOOS" != windows ]]; then
+            # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
+            mkdir -p out/licenses/fonts
+            cp "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)"/fonts/*-OFL.txt out/licenses/fonts/
+          fi
+          if [[ "$GOOS" == linux ]]; then
+            cp "$PDFIUM_DIR/lib/libpdfium.so" out/
+            mkdir -p out/licenses/pdfium
+            cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
+          fi
           name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"
           if [[ "$GOOS" == windows ]]; then
             (cd out && 7z a -tzip "../artifacts/${name}.zip" . >/dev/null)
@@ -112,6 +131,21 @@ jobs:
             fi
           fi
           "$bin" version --full
+          sample=internal/adapter/renderer/testdata/Notes.rmdoc
+          if [[ "${{ matrix.goos }}" == windows ]]; then
+            # The Windows build has the command and says it cannot draw.
+            if out=$("$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf" 2>&1); then
+              echo "::error::rmctl.exe rendered a document"
+              exit 1
+            fi
+            grep -q "not available in this build" <<<"$out" || { echo "$out"; exit 1; }
+          else
+            if [[ "${{ matrix.goos }}" == linux ]]; then
+              readelf -d "$bin" | grep -E 'R(UN)?PATH' | grep -qF '[$ORIGIN]' || { echo "::error::no \$ORIGIN run path"; exit 1; }
+            fi
+            "$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf"
+            "$bin" render "$sample" --page 1 --png -o "$RUNNER_TEMP/smoke.png"
+          fi
 
       - name: Upload the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
