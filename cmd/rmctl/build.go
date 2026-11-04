@@ -50,6 +50,7 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, extra ...r
 		Secrets:   svc.Secrets,
 		Pages:     svc.Pages,
 		Archives:  svc.Archives,
+		Rendering: svc.Rendering,
 		Cache:     svc.Cache,
 		Offline:   svc.Offline,
 	}, svc.Close, nil

@@ -34,3 +34,5 @@ packages:
   - internal/wiring
   - cmd/rmctl/commands
   - cmd/rmctl/commands/output
+  - internal/app/render
+  - internal/adapter/renderer

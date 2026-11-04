@@ -31,6 +31,10 @@ const pageFormat = "github.com/altessa-s/rmlines-go"
 // archiveFormat is the .rmdoc library only the rmdocs adapter may import.
 const archiveFormat = "github.com/altessa-s/rmdoc-go"
 
+// renderLib is the renderer only the renderer adapter may import, with
+// its bundled fonts below it.
+const renderLib = "github.com/altessa-s/rmrender-go"
+
 // keychainLib is the Keychain binding only keychain/system may import, and
 // configFormat the TOML parser only the config adapter may.
 const (
@@ -49,7 +53,7 @@ type rule struct {
 func useCase(allow ...string) rule {
 	return rule{
 		allow:  append([]string{"internal/domain", "internal/port"}, allow...),
-		forbid: []string{"os", "net/http", "github.com/spf13/cobra", transport, pageFormat, archiveFormat, keychainLib, configFormat},
+		forbid: []string{"os", "net/http", "github.com/spf13/cobra", transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat},
 	}
 }
 
@@ -57,7 +61,7 @@ func useCase(allow ...string) rule {
 // stands on, and none of the others ("" for none).
 func adapter(own string) rule {
 	r := rule{allow: []string{"internal/domain", "internal/port"}, forbid: []string{"github.com/spf13/cobra"}}
-	for _, framework := range []string{transport, pageFormat, archiveFormat, keychainLib, configFormat} {
+	for _, framework := range []string{transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat} {
 		if framework != own {
 			r.forbid = append(r.forbid, framework)
 		}
@@ -70,13 +74,13 @@ func adapter(own string) rule {
 func command() rule {
 	return rule{
 		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/output"},
-		forbid: []string{transport, pageFormat, archiveFormat, keychainLib, configFormat},
+		forbid: []string{transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat},
 	}
 }
 
 var layers = map[string]rule{
-	"internal/domain": {forbid: []string{"os", "syscall", "log/slog", "net", "net/http", "io/fs", transport, pageFormat, archiveFormat}},
-	"internal/port":   {allow: []string{"internal/domain"}, forbid: []string{"os", "net/http", transport, pageFormat, archiveFormat}},
+	"internal/domain": {forbid: []string{"os", "syscall", "log/slog", "net", "net/http", "io/fs", transport, pageFormat, archiveFormat, renderLib}},
+	"internal/port":   {allow: []string{"internal/domain"}, forbid: []string{"os", "net/http", transport, pageFormat, archiveFormat, renderLib}},
 
 	"internal/app/library":  useCase(),
 	"internal/app/account":  useCase(),
@@ -88,6 +92,7 @@ var layers = map[string]rule{
 	"internal/app/inspect":  useCase("internal/app/library"),
 	"internal/app/archives": useCase("internal/app/pages"),
 	"internal/app/secrets":  useCase(),
+	"internal/app/render":   useCase("internal/app/library", "internal/app/fetch"),
 
 	"internal/adapter/cloud":      adapter(transport),
 	"internal/adapter/config":     {allow: []string{"internal/domain"}, forbid: []string{keychainLib}},
@@ -99,6 +104,7 @@ var layers = map[string]rule{
 	"internal/adapter/clock":      adapter(""),
 	"internal/adapter/rmpages":    adapter(pageFormat),
 	"internal/adapter/rmdocs":     adapter(archiveFormat),
+	"internal/adapter/renderer":   adapter(renderLib),
 	"internal/adapter/vault":      adapter(transport),
 	"internal/adapter/indexcache": adapter(""),
 	"internal/adapter/keychain": func() rule {
@@ -115,7 +121,7 @@ var layers = map[string]rule{
 		"internal/adapter/cloud", "internal/adapter/config", "internal/adapter/secretfile", "internal/adapter/localfs",
 		"internal/adapter/pdf", "internal/adapter/blobcache", "internal/adapter/ids", "internal/adapter/clock",
 		"internal/adapter/rmpages", "internal/adapter/rmdocs", "internal/adapter/keychain", "internal/adapter/vault",
-		"internal/app/secrets", "internal/adapter/indexcache",
+		"internal/app/secrets", "internal/adapter/indexcache", "internal/app/render", "internal/adapter/renderer",
 	}},
 
 	"internal/porttest":    {allow: []string{"internal/domain", "internal/port"}},
@@ -128,15 +134,15 @@ var layers = map[string]rule{
 		"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/account",
 		"cmd/rmctl/commands/browse", "cmd/rmctl/commands/fetch", "cmd/rmctl/commands/write",
 		"cmd/rmctl/commands/watch", "cmd/rmctl/commands/debug", "cmd/rmctl/commands/version",
-		"cmd/rmctl/commands/rmdoc",
-	}, forbid: []string{transport, pageFormat, archiveFormat}},
+		"cmd/rmctl/commands/rmdoc", "cmd/rmctl/commands/render",
+	}, forbid: []string{transport, pageFormat, archiveFormat, renderLib}},
 	"cmd/rmctl/commands/cliutil": {
 		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/output"},
-		forbid: []string{transport, pageFormat, archiveFormat},
+		forbid: []string{transport, pageFormat, archiveFormat, renderLib},
 	},
 	// output renders answers: it knows nothing of the library, the ports or
 	// the command line.
-	"cmd/rmctl/commands/output":  {forbid: []string{"github.com/spf13/cobra", "os", transport, pageFormat, archiveFormat}},
+	"cmd/rmctl/commands/output":  {forbid: []string{"github.com/spf13/cobra", "os", transport, pageFormat, archiveFormat, renderLib}},
 	"cmd/rmctl/commands/account": command(),
 	"cmd/rmctl/commands/browse":  command(),
 	"cmd/rmctl/commands/fetch":   command(),
@@ -145,6 +151,7 @@ var layers = map[string]rule{
 	"cmd/rmctl/commands/debug":   command(),
 	"cmd/rmctl/commands/version": command(),
 	"cmd/rmctl/commands/rmdoc":   command(),
+	"cmd/rmctl/commands/render":  command(),
 	"cmd/rmctl/commands/clitest": {allow: []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/output"}},
 }
 

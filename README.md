@@ -1,11 +1,12 @@
 # rmctl
 
 `rmctl` works with a reMarkable cloud library from the shell: list, find, download, upload, move, trash and restore documents and
-folders, read the typed text and highlights of pages, pack and unpack `.rmdoc` archives, follow live notifications, and look at what
-the cloud holds when something is wrong.
+folders, read the typed text and highlights of pages, draw documents with their annotations as PDF or PNG, pack and unpack `.rmdoc`
+archives, follow live notifications, and look at what the cloud holds when something is wrong.
 
 It is built on **[rmcloud-go](https://github.com/altessa-s/rmcloud-go)** for the cloud, **[rmlines-go](https://github.com/altessa-s/rmlines-go)**
-for the `.rm` page format and **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** for the `.rmdoc` container. Part of
+for the `.rm` page format, **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** for the `.rmdoc` container and
+**[rmrender-go](https://github.com/altessa-s/rmrender-go)** for drawing. Part of
 **[Slate Drive](https://slatedrive.app)** ([repository](https://github.com/altessa-s/slatedrive)), the macOS app that shows a reMarkable library
 in Finder.
 
@@ -39,7 +40,7 @@ go install github.com/altessa-s/rmctl/cmd/rmctl@latest
 The page commands read and write the `.rm` page format through [rmlines-go](https://github.com/altessa-s/rmlines-go), which compiles a
 C23 library through cgo: they need clang 19+ or GCC 13+ (`CC=clang-19 go install …` when the default compiler is older). Built with
 `CGO_ENABLED=0`, rmctl keeps every other command and answers the page commands with "built without cgo". The released binaries are built
-with cgo on each platform's own runner.
+with cgo on each platform's own runner. Rendering has its own needs; see [Rendering](#rendering).
 
 ## Pages
 
@@ -60,8 +61,37 @@ The `.rmdoc` container goes through [rmdoc-go](https://github.com/altessa-s/rmdo
 |---|---|
 | Export | `export` packs documents into one archive stored the way the tablet writes one: each document's files under their record names, in index order. A folder, or `/`, stands for every document below it that is not in the trash on its own; a document named twice is packed once. Every name is checked before anything is downloaded. The tablet imports one document per archive. |
 | Import | `put file.rmdoc [folder]` adds every document of an archive with its pages, annotations and tags, in one commit; it mixes with PDFs and EPUBs in one `put`. A document whose identifier the library already holds takes a fresh identifier and its files are renamed to it, so the library's document is never touched: its row of the answer names the identifier it had under `renamed_from`. The `.metadata` is filed under the folder and taken out of the trash; nothing else in it changes. `--dry-run` only opens the archive and lists what it would import. |
-| Offline | `rmdoc <file>` lists an archive's documents, kinds and files, names masked unless `--raw`. `text` and `highlights` read a local archive's pages without the cloud: an argument ending with `.rmdoc` that is a local file is read from it, every document in turn (in JSON, always an array). |
+| Offline | `rmdoc <file>` lists an archive's documents, kinds and files, names masked unless `--raw`. `text` and `highlights` read a local archive's pages without the cloud: an argument ending with `.rmdoc` that is a local file is read from it, every document in turn (in JSON, always an array). `render` draws a document of a local archive the same way, `--id` picking one of several. |
 | Limits | An entry is read only up to 1 GiB, an archive up to 4 GiB; rmdoc-go's own bounds hold the entry count, the names and the expansion ratio. |
+
+## Rendering
+
+`rmctl render <path|id|file.rmdoc>` draws a document the way the tablet shows it — handwriting with its pen textures, typed text,
+highlights, images and page templates, over the pages of the PDF or EPUB it was made from — through
+[rmrender-go](https://github.com/altessa-s/rmrender-go), with the fonts and templates it bundles. A cloud document is downloaded and
+packed as `export` packs it, then drawn; an argument ending with `.rmdoc` that is a local file, such as one `export` or `backup` wrote, is
+drawn from that archive without the cloud (`./` in front, or the identifier, names a cloud document whose name ends with `.rmdoc`).
+
+| What | Behavior |
+|---|---|
+| PDF | The whole document, its pages in the document's order. `--mode` matters only for a document made from a PDF: `fresh` (the default) draws a new PDF, keeping links and the outline but not forms or other annotations; `preserving` appends the marks to the original PDF as an incremental update, its bytes untouched, and refuses a document whose pages were moved, added or hidden; `recomposed` writes a new PDF from the original's objects, keeping forms and annotations, and breaks signatures. |
+| PNG | `--page N --png` draws page N, from 1, on white. `--scale` is pixels per tablet unit: at 1, the default, a page is 1404 pixels wide, as on the tablet's screen. |
+| Paper | `--paper a4\|letter\|tablet` (A4 by default) is the sheet a notebook page is laid out on; a page of a PDF keeps its own size. |
+| Output | Without `-o`, `<name>-rendered.pdf` or `<name>-p<N>.png` in the working directory, so it never takes the place of the document's own PDF; a directory takes that name inside it. The file appears only once it is whole. The answer is the path, the pages drawn and what could not be kept: blocks of pages that did not parse, pages naming a page the PDF does not have, links a fresh PDF could not carry over; each also noted on standard error. |
+
+Rendering is in the macOS and Linux builds:
+
+- **macOS** draws with CoreGraphics and CoreText; nothing else is needed.
+- **Linux** draws with Cairo, Pango and PDFium. Cairo, Pango, Fontconfig, HarfBuzz and GdkPixbuf come from the system: the binary needs
+  them to start (on Debian or Ubuntu, `libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libfontconfig1`, `libharfbuzz0b` and
+  `libgdk-pixbuf-2.0-0`). PDFium is not packaged by distributions: the release archive carries `libpdfium.so` beside `rmctl`, which finds it
+  in its own directory through its `$ORIGIN` run path, so keep the two together; the Homebrew formula installs both. The licences of PDFium
+  and of the bundled fonts are under `licenses/` in the archive.
+- **Windows** has the command, which says rendering is not available in this build.
+
+Built from source, rendering needs a C23 compiler that reads rmrender-go's sources (clang 19+, GCC 15+ or a current Apple clang) and, on
+Linux, the Cairo stack's development packages and PDFium, which `.github/scripts/setup-render-linux.sh` sets up the way CI does; see
+rmrender-go's README. Without cgo, or on another system, `render` says it is not available. The bundled fonts add about 27 MB to the binary.
 
 ## Uploads
 
@@ -173,7 +203,7 @@ item — is reported as `unchanged` and commits nothing. Each command is one com
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format …]`, `render <path\|id\|file.rmdoc> [-o file] [--mode fresh\|preserving\|recomposed] [--paper a4\|letter\|tablet] [--page N --png [--scale S]] [--id id]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
@@ -323,8 +353,8 @@ adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So
 **Use cases**
 
 - `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict.
-- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets` — one input port each;
-  `pages.Reader` is shared with `browse`.
+- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render` — one input port
+  each; `pages.Reader` is shared with `browse`, and `render` downloads a document through `fetch.Pack`, as `export` does.
 
 **Adapters** (`internal/adapter/…`)
 
@@ -336,6 +366,8 @@ adapts a `SecretStore` to the secrets port, and `config` reads its endpoints. So
 - `indexcache` — decorators of the root, document, blob and registry ports that keep the library's indexes in the profile's cache, serve
   `--offline` and the TTL, and report and clear the cache.
 - `rmpages`, `rmdocs` — `.rm` pages through rmlines-go and `.rmdoc` archives through rmdoc-go; nothing else imports those two.
+- `renderer` — drawing through rmrender-go on macOS and Linux with cgo, and a stub that says rendering is not available everywhere
+  else; nothing else imports rmrender-go.
 - `config`, `ids`, `clock` — profile resolution from config.toml, random v4 UUIDs, and time over go-atlas-core.
 
 **Composition root and command line**
@@ -365,6 +397,8 @@ whole tool against the emulated cloud), the security scanners and the duplicate-
 - **[rmdoc-lib](https://github.com/altessa-s/rmdoc-lib)** — the `.rmdoc` container as a portable C23 library.
 - **[rmmarks-lib](https://github.com/altessa-s/rmmarks-lib)**, **[rmmarks-go](https://github.com/altessa-s/rmmarks-go)** and
   **[rmmarks-swift](https://github.com/altessa-s/rmmarks-swift)** — geometry for marked text: where a highlight lies on a page and which words it covers.
+- **[rmrender-go](https://github.com/altessa-s/rmrender-go)** — drawing reMarkable pages and documents to PDF or PNG for Go, the renderer
+  `render` uses.
 - **[rmrender-swift](https://github.com/altessa-s/rmrender-swift)** — drawing reMarkable notebooks into PDF or images, from Swift.
 - **[Slate Drive](https://slatedrive.app)** ([repository](https://github.com/altessa-s/slatedrive)) — the app these packages are part of.
 

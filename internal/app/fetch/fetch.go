@@ -116,9 +116,7 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (po
 
 // pack writes the files of docs into the archive at path and returns how
 // many it holds, also when only the removal of the staging directory
-// failed. Each file is downloaded to a staging directory and the
-// archive is written from there, so no file and no archive is held in
-// memory whole; the archive reaches path only when it is complete.
+// failed. The archive reaches path only when it is complete.
 func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n int, err error) {
 	stage, remove, err := s.files.Stage()
 	if err != nil {
@@ -129,20 +127,8 @@ func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n 
 			err = errors.Join(err, fmt.Errorf("remove the staging directory %s: %w", stage, rerr))
 		}
 	}()
-	var sources []port.ArchiveSource
-	for _, it := range docs {
-		for _, f := range it.Files {
-			// The record name may hold a slash: the file is named by its count.
-			local := filepath.Join(stage, strconv.Itoa(len(sources)))
-			derr := s.files.Produce(ctx, local, func(w io.Writer) error { return s.blobs.Download(ctx, f, w, nil) })
-			if derr != nil {
-				return 0, fmt.Errorf("download %s: %w", f.Name, derr)
-			}
-			sources = append(sources, port.ArchiveSource{Name: f.Name, Path: local})
-		}
-	}
-	archive := filepath.Join(stage, "archive.rmdoc")
-	if err = s.archives.WriteArchive(archive, sources); err != nil {
+	archive, n, err := Pack(ctx, s.blobs, s.files, s.archives, docs, stage)
+	if err != nil {
 		return 0, err
 	}
 	err = s.files.Produce(ctx, path, func(w io.Writer) error {
@@ -157,7 +143,35 @@ func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n 
 	if err != nil {
 		return 0, err
 	}
-	return len(sources), nil
+	return n, nil
+}
+
+// Pack downloads every file of docs into the directory stage and packs
+// them there into one archive the way the tablet writes one, each
+// document's files under their record names, in index order. It returns
+// the archive's path and how many files it holds. No file and no archive
+// is held in memory whole; the caller owns stage and removes it.
+func Pack(
+	ctx context.Context, blobs port.BlobStore, files port.LocalFiles, archives port.ArchiveWriter,
+	docs []domain.Item, stage string,
+) (string, int, error) {
+	var sources []port.ArchiveSource
+	for _, it := range docs {
+		for _, f := range it.Files {
+			// The record name may hold a slash: the file is named by its count.
+			local := filepath.Join(stage, strconv.Itoa(len(sources)))
+			derr := files.Produce(ctx, local, func(w io.Writer) error { return blobs.Download(ctx, f, w, nil) })
+			if derr != nil {
+				return "", 0, fmt.Errorf("download %s: %w", f.Name, derr)
+			}
+			sources = append(sources, port.ArchiveSource{Name: f.Name, Path: local})
+		}
+	}
+	archive := filepath.Join(stage, "archive.rmdoc")
+	if err := archives.WriteArchive(archive, sources); err != nil {
+		return "", 0, err
+	}
+	return archive, len(sources), nil
 }
 
 // Mirror implements port.Fetcher.
@@ -284,10 +298,17 @@ func (s *Service) document(ctx context.Context, query string) (domain.Item, erro
 // destination is dest, the name inside dest when dest is a directory, or
 // the name in the working directory when dest is empty.
 func (s *Service) destination(dest, name string) (string, error) {
+	return Destination(s.files, dest, name)
+}
+
+// Destination is dest, the name inside dest when dest is a directory or
+// ends with a separator, or the name in the working directory when dest is
+// empty.
+func Destination(files port.LocalFiles, dest, name string) (string, error) {
 	if dest == "" {
 		return name, nil
 	}
-	_, isDir, exists, err := s.files.Stat(dest)
+	_, isDir, exists, err := files.Stat(dest)
 	if err != nil {
 		return "", err
 	}

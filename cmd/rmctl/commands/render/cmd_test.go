@@ -1,0 +1,128 @@
+// Copyright 2026 ALTESSA SOLUTIONS INC.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+
+package render
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/clitest"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/internal/domain"
+	"github.com/altessa-s/rmctl/internal/port"
+)
+
+func build(env *cliutil.Env) []*cobra.Command {
+	return []*cobra.Command{cliutil.WithAccess(New(env), cliutil.AccessOffline)}
+}
+
+func run(t *testing.T, f *clitest.Fake, opts clitest.Options, args ...string) clitest.Result {
+	t.Helper()
+	return clitest.Exec(t, f.Services(), opts, build, args...)
+}
+
+func TestRenderPDF(t *testing.T) {
+	t.Parallel()
+	f := &clitest.Fake{Rendered: port.RenderReport{Path: "Notes-rendered.pdf", Pages: 3}}
+	r := run(t, f, clitest.Options{}, "render", "/Notes")
+	want := "path\tNotes-rendered.pdf\npages\t3\nskipped_blocks\t0\nrefused_pages\t0\nlinks_dropped\t0\n"
+	if r.Code != 0 || r.Out != want || r.Err != "" || f.Calls()[0] != "Render /Notes  page=0 mode=fresh paper=a4 scale=0" {
+		t.Fatalf("%d %q %q %v", r.Code, r.Out, r.Err, f.Calls())
+	}
+	f = &clitest.Fake{Rendered: port.RenderReport{Pages: 12, SkippedBlocks: 2, RefusedPages: 1, LinksDropped: 3}}
+	r = run(t, f, clitest.Options{}, "render", "d-paper", "-o", "out.pdf", "--mode", "Recomposed", "--paper", "letter", "--json")
+	if r.Code != 0 || f.Calls()[0] != "Render d-paper out.pdf page=0 mode=recomposed paper=letter scale=0" {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+	clitest.Golden(t, "render-json", r.Out)
+	// What the drawing could not keep is said on standard error.
+	for _, want := range []string{"2 blocks of the pages", "1 pages name a page", "3 links of the original PDF"} {
+		if !strings.Contains(r.Err, want) {
+			t.Fatalf("%q lacks %q", r.Err, want)
+		}
+	}
+}
+
+func TestRenderPNG(t *testing.T) {
+	t.Parallel()
+	f := &clitest.Fake{}
+	r := run(t, f, clitest.Options{}, "render", "/Notes", "--page", "3", "--png", "-o", "p.png")
+	if r.Code != 0 || f.Calls()[0] != "Render /Notes p.png page=3 mode= paper=a4 scale=1" {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+	f = &clitest.Fake{}
+	r = run(t, f, clitest.Options{}, "render", "/Notes", "--page", "1", "--png", "--scale", "2.5", "--paper", "tablet")
+	if r.Code != 0 || f.Calls()[0] != "Render /Notes  page=1 mode= paper=tablet scale=2.5" {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+}
+
+func TestRenderLocalArchive(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	local := filepath.Join(dir, "backup.rmdoc")
+	if err := os.WriteFile(local, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &clitest.Fake{}
+	r := run(t, f, clitest.Options{}, "render", local, "--id", "3f2a", "-o", "x.pdf")
+	if r.Code != 0 || f.Calls()[0] != "RenderFile "+local+" x.pdf page=0 mode=fresh paper=a4 scale=0 id=3f2a" {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+	// A name ending with .rmdoc that is no local file is a cloud document,
+	// which --id does not apply to.
+	f = &clitest.Fake{}
+	if r = run(t, f, clitest.Options{}, "render", "/Backups/old.rmdoc"); r.Code != 0 || !strings.HasPrefix(f.Calls()[0], "Render /Backups/old.rmdoc ") {
+		t.Fatalf("%d %v", r.Code, f.Calls())
+	}
+	if r = run(t, &clitest.Fake{}, clitest.Options{}, "render", "/Notes", "--id", "3f2a"); r.Code != cliutil.CodeUsage {
+		t.Fatalf("%d %v", r.Code, r.Error)
+	}
+}
+
+func TestRenderUsage(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"render"},
+		{"render", "a", "b"},
+		{"render", "x", "--png"},
+		{"render", "x", "--page", "2"},
+		{"render", "x", "--scale", "2"},
+		{"render", "x", "--page", "1", "--png", "--mode", "fresh"},
+		{"render", "x", "--page", "0", "--png"},
+		{"render", "x", "--page", "1", "--png", "--scale", "0"},
+		{"render", "x", "--mode", "draft"},
+		{"render", "x", "--paper", "a3"},
+		{"render", "x", "--page", "n"},
+	} {
+		f := &clitest.Fake{}
+		if r := run(t, f, clitest.Options{}, args...); r.Code != cliutil.CodeUsage || len(f.Calls()) != 0 {
+			t.Fatalf("%v: %d %v %v", args, r.Code, r.Error, f.Calls())
+		}
+	}
+}
+
+func TestRenderErrors(t *testing.T) {
+	t.Parallel()
+	r := run(t, &clitest.Fake{RenderErr: domain.ErrRenderUnsupported}, clitest.Options{}, "render", "x")
+	if r.Code != cliutil.CodeError || !errors.Is(r.Error, cliutil.ErrNoRender) || !strings.Contains(r.Error.Error(), "not available in this build") {
+		t.Fatalf("%d %v", r.Code, r.Error)
+	}
+	r = run(t, &clitest.Fake{RenderErr: domain.ErrNoSuchPage}, clitest.Options{}, "render", "x", "--page", "9", "--png")
+	if r.Code != cliutil.CodeError || r.Error.Error() != "render: no such page" {
+		t.Fatalf("%d %v", r.Code, r.Error)
+	}
+	if r = run(t, &clitest.Fake{Err: errors.New("boom")}, clitest.Options{}, "render", "x"); r.Code != cliutil.CodeError {
+		t.Fatalf("%d %v", r.Code, r.Error)
+	}
+	if r = clitest.Exec(t, cliutil.Services{}, clitest.Options{}, build, "render", "x"); !errors.Is(r.Error, cliutil.ErrNoService) {
+		t.Fatal(r.Error)
+	}
+}

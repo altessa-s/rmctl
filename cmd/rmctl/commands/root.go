@@ -17,6 +17,7 @@ import (
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/debug"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/fetch"
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands/render"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/rmdoc"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/version"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/watch"
@@ -111,6 +112,7 @@ func newRoot(env *cliutil.Env) (*cobra.Command, *cliutil.Env) {
 	root.AddCommand(write.Commands(env)...)
 	root.AddCommand(watch.New(env))
 	root.AddCommand(rmdoc.New(env))
+	root.AddCommand(cliutil.WithAccess(render.New(env), cliutil.AccessOffline))
 	root.AddCommand(debug.New(env))
 	root.AddCommand(version.New(env))
 	root.SetHelpCommandGroupID(account.GroupID)

@@ -18,6 +18,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/adapter/keychain"
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
 	"github.com/altessa-s/rmctl/internal/adapter/pdf"
+	"github.com/altessa-s/rmctl/internal/adapter/renderer"
 	"github.com/altessa-s/rmctl/internal/adapter/rmdocs"
 	"github.com/altessa-s/rmctl/internal/adapter/rmpages"
 	"github.com/altessa-s/rmctl/internal/adapter/secretfile"
@@ -29,6 +30,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/app/pages"
+	"github.com/altessa-s/rmctl/internal/app/render"
 	"github.com/altessa-s/rmctl/internal/app/secrets"
 	"github.com/altessa-s/rmctl/internal/app/watch"
 	"github.com/altessa-s/rmctl/internal/app/write"
@@ -79,6 +81,7 @@ type Services struct {
 	Inspector port.Inspector
 	Pages     port.Pages
 	Archives  port.Archives
+	Rendering port.Rendering
 	Secrets   port.Secrets
 	// Cache reports and clears the caches on disk.
 	Cache port.Cache
@@ -158,6 +161,7 @@ func Build(opts Options) (Services, error) {
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
+		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
 		Cache:   st.admin,

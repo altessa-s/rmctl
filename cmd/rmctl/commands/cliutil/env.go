@@ -41,6 +41,7 @@ type Services struct {
 	Inspector port.Inspector
 	Pages     port.Pages
 	Archives  port.Archives
+	Rendering port.Rendering
 	Secrets   port.Secrets
 	Cache     port.Cache
 	// Offline says the services never reach the cloud: --offline, or the

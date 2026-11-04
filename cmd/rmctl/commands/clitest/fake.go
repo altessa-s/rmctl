@@ -75,6 +75,11 @@ type Fake struct {
 	// Restored what RestoreBackup answers.
 	Backed   port.BackupReport
 	Restored port.RestoreReport
+	// Rendered is what Render and RenderFile answer, with the path filled
+	// in when it has none, and RenderErr fails them alone (such as
+	// domain.ErrRenderUnsupported).
+	Rendered  port.RenderReport
+	RenderErr error
 
 	mu    sync.Mutex
 	calls []string
@@ -84,7 +89,7 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Archives: (*archivesFake)(f), Rendering: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
 	}
 }
 
@@ -309,6 +314,37 @@ func (f *Fake) Backup(_ context.Context, dir, query string, o port.BackupOptions
 	r := f.Backed
 	r.Dir = dir
 	return r, err
+}
+
+// Rendering.
+
+// Render implements port.Rendering.
+func (f *Fake) Render(_ context.Context, query, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	return f.rendered("Render", query, dest, o)
+}
+
+// RenderFile implements port.Rendering.
+func (f *Fake) RenderFile(_ context.Context, path, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	return f.rendered("RenderFile", path, dest, o)
+}
+
+func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	args := []string{from, dest, "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode), "paper=" + string(o.Paper),
+		"scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64)}
+	if o.Document != "" {
+		args = append(args, "id="+o.Document)
+	}
+	if err := f.record(method, args...); err != nil {
+		return port.RenderReport{}, err
+	}
+	if f.RenderErr != nil {
+		return port.RenderReport{}, f.RenderErr
+	}
+	r := f.Rendered
+	if r.Path == "" {
+		r.Path = dest
+	}
+	return r, nil
 }
 
 // Writer.
