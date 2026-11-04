@@ -124,6 +124,7 @@ Formats, colors, Ctrl-C and tokens: [docs/output.md](docs/output.md).
 - [docs/architecture.md](docs/architecture.md) — the layers, ports, use cases and adapters.
 - [docs/automation.md](docs/automation.md) — complete scripts for backups, hot folders, Markdown exports, rendering and reports.
 - [docs/applescript.md](docs/applescript.md) — AppleScript for macOS: Finder Quick Actions, Folder Actions, Mail rules, Preview, Notes and the clipboard.
+- [docs/powershell.md](docs/powershell.md) — PowerShell for Windows: installing, uploads from Explorer, a hot folder, Task Scheduler backups, `watch --exec` handlers and reports.
 
 ## Development
 
