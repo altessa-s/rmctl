@@ -123,6 +123,7 @@ Formats, colors, Ctrl-C and tokens: [docs/output.md](docs/output.md).
 - [docs/configuration.md](docs/configuration.md) — the cache, `--offline`, settings, profiles, config.toml and the macOS Keychain.
 - [docs/architecture.md](docs/architecture.md) — the layers, ports, use cases and adapters.
 - [docs/automation.md](docs/automation.md) — complete scripts for backups, hot folders, Markdown exports, rendering and reports.
+- [docs/applescript.md](docs/applescript.md) — AppleScript for macOS: Finder Quick Actions, Folder Actions, Mail rules, Preview, Notes and the clipboard.
 
 ## Development
 
