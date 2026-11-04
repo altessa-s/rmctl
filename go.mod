@@ -9,8 +9,8 @@ require (
 	github.com/altessa-s/go-atlas-core v0.3.1
 	github.com/altessa-s/go-slogx v0.1.1
 	github.com/altessa-s/rmcloud-go v1.0.0
-	github.com/altessa-s/rmdoc-go v1.0.0
-	github.com/altessa-s/rmlines-go v1.0.0
+	github.com/altessa-s/rmdoc-go v1.1.0
+	github.com/altessa-s/rmlines-go v1.1.0
 	github.com/coder/websocket v1.8.15
 	github.com/keybase/go-keychain v0.0.1
 	github.com/mattn/go-runewidth v0.0.31
