@@ -88,10 +88,11 @@ type fileSecrets struct {
 
 // fileProfile is a [profiles.<name>] table.
 // fileCache is a [cache] table: ttl is a Go duration ("10m"), offline makes
-// --offline the default.
+// --offline the default, budget bounds the cache ("4GiB").
 type fileCache struct {
 	TTL     string `toml:"ttl"`
 	Offline *bool  `toml:"offline"`
+	Budget  string `toml:"budget"`
 }
 
 type fileProfile struct {
@@ -128,6 +129,9 @@ func ParseFile(data []byte) (File, error) {
 	if _, err := parseTTL("cache.ttl", f.Cache.TTL); err != nil {
 		return File{}, err
 	}
+	if _, err := parseBudget("cache.budget", f.Cache.Budget); err != nil {
+		return File{}, err
+	}
 	names := make([]string, 0, len(f.Profiles))
 	for name := range f.Profiles {
 		names = append(names, name)
@@ -141,6 +145,9 @@ func ParseFile(data []byte) (File, error) {
 			return File{}, err
 		}
 		if _, err := parseTTL("profiles."+name+".cache.ttl", f.Profiles[name].Cache.TTL); err != nil {
+			return File{}, err
+		}
+		if _, err := parseBudget("profiles."+name+".cache.budget", f.Profiles[name].Cache.Budget); err != nil {
 			return File{}, err
 		}
 	}

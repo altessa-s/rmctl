@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,6 +43,7 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
 	Cache     port.Cache
@@ -56,7 +58,8 @@ type Services struct {
 // OutTerminal says whether the output stream is one, which makes the answer
 // a table; OutColor whether that terminal shows ANSI color; Width is its
 // width in columns, 0 when unknown. Getenv reads the environment; nil is the
-// process's.
+// process's. Now is the wall clock a progress bar measures its rate by;
+// nil is the machine's.
 type Streams struct {
 	In          io.Reader
 	Out, Err    io.Writer
@@ -65,6 +68,7 @@ type Streams struct {
 	OutColor    bool
 	Width       int
 	Getenv      func(string) string
+	Now         func() time.Time
 }
 
 // Request is what the command line asks of the services: the profile, the

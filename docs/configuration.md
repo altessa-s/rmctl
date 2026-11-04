@@ -4,15 +4,31 @@ Back to the [README](../README.md).
 
 ## Cache
 
-Every profile keeps its own cache under `<user cache dir>/rmctl/<profile>/` (`RMCTL_CACHE_DIR` replaces `<user cache dir>/rmctl`): directories of mode 0700, files of mode 0600. It holds the indexes of the library — the root index by its hash, each document's index by its record hash — the `.metadata` and `.content` files, what writes upload, and the profile's last known root with the time the cloud confirmed it. Profiles share nothing, not even files with the same hash: they are different accounts' documents. Each profile's cache is bounded by 512 MiB of indexes and files together, least recently used first; the root pointer is never evicted.
+Every profile keeps its own cache under `<user cache dir>/rmctl/<profile>/` (`RMCTL_CACHE_DIR` replaces `<user cache dir>/rmctl`): directories of mode 0700, files of mode 0600. It holds the indexes of the library — the root index by its hash, each document's index by its record hash — the `.metadata` and `.content` files, what writes upload, and the profile's last known root with the time the cloud confirmed it; `sync` adds the page files and, with `--files`, the originals. Profiles share nothing, not even files with the same hash: they are different accounts' documents. Each profile's cache is bounded by a budget of indexes and files together, 512 MiB unless `budget` in config.toml or `RMCTL_CACHE_BUDGET` sets another, least recently used first; the root pointer and the record of the last sync are never evicted.
 
 Everything kept is addressed by its content, so nothing goes stale and nothing needs invalidating:
 
 - **A read asks the cloud one question when the library has not changed:** the root's hash and generation. With the same root as last time, the tree is built from disk; with another, only the indexes and files whose hash the cache lacks are fetched.
 - **A write** (`put`, `mkdir`, `mv`, `trash`, `restore`, `rm`, import, `unmark`) always reads the live root and commits with the usual conflict replay; the indexes and files it writes go into the cache.
 - **A TTL** (`ttl` in config.toml, or `RMCTL_CACHE_TTL`, a Go duration; 0, the default, is off) lets a read trust a root the cloud confirmed less than that long ago, without asking. Writes ignore it.
-- **`--offline`** makes no request at all. `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights`, `debug page`, `debug sweep`, `rmdoc`, `secrets status` and `debug cache` read the last known root and its indexes from the cache; anything missing is an error that names it. A root older than a day draws a warning. `profile ls`, `profile info` and `profile del` (without `--revoke`) run offline too, from what this machine keeps. Every other command refuses to run offline.
-- **`--no-cache`** neither reads nor writes the cache, for debugging.
+- **`--offline`** makes no request at all. `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights`, `debug page`, `debug sweep`, `rmdoc`, `secrets status` and `debug cache` read the last known root and its indexes from the cache, and so do `get`, `export`, `mget`, `backup` and `render` of a cloud document, with the files `sync --files` left there; anything missing is an error that names it (exit 1). A root older than a day draws a warning. `profile ls`, `profile info` and `profile del` (without `--revoke`) run offline too, from what this machine keeps. Every other command, `sync` among them, refuses to run offline (exit 2).
+- **Every file is read through the cache first**, online too: a file the cache holds is never downloaded again, since its hash names its bytes. A download is not kept, except by `sync`, so a large original read once does not push out what every read uses.
+- **`--no-cache`** neither reads nor writes the cache, for debugging; `sync` refuses it.
+
+### sync
+
+`rmctl sync [path]` fills the cache ahead of time, so later reads download nothing and run under `--offline`. It reads the live root, then fetches what the cache lacks of: every index of the library and every `.metadata` and `.content` (every read builds the whole tree from them), and the `.pagedata` and `.rm` pages of the documents below the path (`/` by default), which `text`, `highlights`, `find --text` and `debug page` read. `--files` also fetches each document's original and every other file of its index, which `get`, `export`, `mget`, `backup` and `render` read. Documents in the trash stay out unless `--all`; `--jobs N` transfers N files at a time (4 by default). It changes nothing in the library.
+
+- **Only what changed costs anything.** Everything is addressed by its hash, so a file the cache holds is never fetched again. A complete sync is recorded in the cache with the root it reached and its scope (the path, `--files`, `--all`); the next sync at the same root whose scope it covers (the same path, or any path after a sync of the whole library, with no more `--files` or `--all`) answers at once that the cache is current: one request, for the root, no walk and no download. A different root walks the library and fetches only the files whose hash is new. A sync that is interrupted, refused or failed records nothing, so the next one walks. `--force` walks anyway.
+- **The budget is checked first.** Before downloading, `sync` adds up what it keeps: the indexes, every `.metadata` and `.content`, and the files of the scope, those already cached included, since they must all fit at once. When that is more than the budget it downloads nothing and exits 1 with a message that names the bytes needed, the budget and how to raise it, rather than evicting what it just fetched. Whatever the cache holds of the scope counts as just used, so eviction takes other files first.
+- **Progress:** on a terminal, a line on standard error shows a bar, the bytes and files done of their totals, the rate and the time left; anywhere else nothing is printed. Ctrl-C stops it; every file fetched so far stays in the cache, and the next sync fetches only the rest.
+- **The answer** (table, plain or JSON) says whether the cache was already current, the path, the documents, the files fetched and those already cached, the bytes fetched and needed, what the cache takes now and its budget. After an answer of `current`, the counts are those of the sync that covers it. `debug cache status` counts what sync kept.
+
+```sh
+rmctl sync /Books --files      # before a flight
+rmctl --offline text /Books/Notes
+rmctl --offline get /Books/Paper -o paper.pdf
+```
 - **`debug cache status`** reports the profile's cache: its directory, size and budget, entries by kind, and the last known root with when it was confirmed; `--all` lists every profile. **`debug cache clear`** empties it, or every profile's with `--all`, after a question that names them.
 - **`register` and `logout`** clear the profile's cache, so whoever registers next under the profile never sees the last account's files.
 
@@ -26,6 +42,7 @@ Older versions kept one blob directory for every profile; it is removed on first
 | Profile directory (holds `token.json`) | `<user config dir>/rmctl/<profile>` | `RMCTL_CONFIG_DIR` |
 | Cache directory (one subdirectory per profile) | `<user cache dir>/rmctl` | `RMCTL_CACHE_DIR` |
 | Cache TTL | `0` (off) | `config.toml` `ttl`, `RMCTL_CACHE_TTL` |
+| Cache budget (per profile) | `512MiB` | `config.toml` `budget`, `RMCTL_CACHE_BUDGET` |
 | Offline | off | `--offline`, `config.toml` `offline` |
 | Hosts | production | `RMCLOUD_HOST`, `RMCLOUD_AUTH_HOST`, `RMCLOUD_SYNC_HOST` |
 | Wire log | off | `RMCLOUD_WIRE_LOG=headers\|bodies` (standard error, credentials masked) |
@@ -76,12 +93,13 @@ It also sets the [cache](#cache), for every profile and per profile:
 [cache]
 ttl = "5m"          # reads trust a root confirmed less than 5 minutes ago
 offline = false
+budget = "2GiB"     # each profile's cache holds up to 2 GiB
 
 [profiles.travel.cache]
 offline = true      # this profile reads from the cache unless --offline=false
 ```
 
-`RMCTL_CACHE_TTL` overrides `ttl`; `--offline` and `--offline=false` override `offline`.
+`RMCTL_CACHE_TTL` overrides `ttl`, `RMCTL_CACHE_BUDGET` overrides `budget`; `--offline` and `--offline=false` override `offline`. A budget is a size such as `512MiB`, `4GiB` or `1.5GB` (binary `KiB`, `MiB`, `GiB`, `TiB`, decimal `KB`, `MB`, `GB`, `TB`, or bytes without a unit), at least `1MiB`. There is no unlimited budget, and `0` is refused rather than read as one: a cache is always bounded, and `--no-cache` is the way to turn it off.
 
 ### The macOS Keychain
 

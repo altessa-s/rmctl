@@ -95,6 +95,10 @@ type Fake struct {
 	ProfilesErr error
 	Removal     port.ProfileRemoval
 	RemoveErr   error
+	// Synced is what Sync answers, after it reports SyncSteps to the
+	// progress it was given.
+	Synced    port.SyncReport
+	SyncSteps []port.SyncProgress
 
 	mu    sync.Mutex
 	calls []string
@@ -104,7 +108,7 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Rendering: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Archives: (*archivesFake)(f), Rendering: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
 		Profiles: (*profilesFake)(f),
 	}
 }

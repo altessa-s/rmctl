@@ -63,6 +63,11 @@ type Cache struct {
 	log      *slog.Logger
 	clock    port.Clock
 	mu       sync.Mutex
+	// total is what the evictable spaces take, as far as this process
+	// knows: counted once, then added to by each write, and counted again
+	// whenever it passes the budget. known says it was counted.
+	total int64
+	known bool
 }
 
 var _ port.BlobCache = (*Cache)(nil)
@@ -169,8 +174,22 @@ func (c *Cache) PutEntry(space, key string, data []byte) {
 		return
 	}
 	if evictable(space) {
-		c.evict()
+		c.account(int64(len(data)))
 	}
+}
+
+// account adds n bytes just written to the total, and evicts when the
+// total passes the budget. The total may count a replaced entry twice, or
+// miss what another process wrote; the count it evicts by is always the
+// one on disk. The caller holds mu.
+func (c *Cache) account(n int64) {
+	if c.known {
+		c.total += n
+		if c.total <= c.maxBytes {
+			return
+		}
+	}
+	c.evict()
 }
 
 // Drop removes the entry key of space, if there is one.
@@ -244,13 +263,14 @@ func (c *Cache) evict() {
 			total += e.size
 		}
 	}
+	c.total, c.known = total, true
 	if total <= c.maxBytes {
 		return
 	}
 	slices.SortFunc(all, func(a, b cached) int { return cmp.Compare(a.used.UnixNano(), b.used.UnixNano()) })
 	for _, f := range all {
 		if total <= c.maxBytes {
-			return
+			break
 		}
 		if err := os.Remove(f.path); err != nil {
 			c.log.Debug("cache eviction failed", "err", err)
@@ -258,6 +278,7 @@ func (c *Cache) evict() {
 		}
 		total -= f.size
 	}
+	c.total = total
 }
 
 // Usage is what the evictable spaces take in bytes, and the number of
@@ -290,6 +311,7 @@ func (c *Cache) Clear() error {
 		}
 		_ = os.Remove(filepath.Join(c.dir, space))
 	}
+	c.total, c.known = 0, false
 	_ = os.Remove(c.dir)
 	return errors.Join(errs...)
 }

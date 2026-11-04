@@ -5,6 +5,7 @@
 package wiring
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/app/pages"
+	"github.com/altessa-s/rmctl/internal/app/prefetch"
 	"github.com/altessa-s/rmctl/internal/app/profile"
 	"github.com/altessa-s/rmctl/internal/app/render"
 	"github.com/altessa-s/rmctl/internal/app/secrets"
@@ -38,8 +40,8 @@ import (
 	rmcloud "github.com/altessa-s/rmcloud-go"
 )
 
-// DefaultCacheBytes bounds each profile's cache on disk: its blobs and
-// indexes together.
+// DefaultCacheBytes bounds each profile's cache on disk, its blobs and
+// indexes together, unless the configuration sets a budget.
 const DefaultCacheBytes int64 = 512 << 20
 
 // Options are what the command line knows before anything is built.
@@ -52,8 +54,8 @@ type Options struct {
 	Dirs config.BaseDirs
 	// Logger receives the diagnostics of every layer. Required.
 	Logger *slog.Logger
-	// CacheBytes bounds each profile's cache; zero is DefaultCacheBytes,
-	// negative turns the cache off.
+	// CacheBytes bounds each profile's cache; zero is the configuration's
+	// budget, else DefaultCacheBytes; negative turns the cache off.
 	CacheBytes int64
 	// Offline is --offline when it was given; nil defers to the profile's
 	// configuration. NoCache is --no-cache: no cache on disk is read or
@@ -88,6 +90,7 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
 	// Cache reports and clears the caches on disk.
@@ -158,6 +161,7 @@ func Build(opts Options) (Services, error) {
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
 		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
+		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
 		Profiles: profile.New(newProfileStore(cfg, opts, read), indexcache.NewCaches(profiles{st.root}, opts.Logger),
@@ -181,10 +185,34 @@ type built struct {
 	root      *blobcache.Root
 	admin     *indexcache.Admin
 	offline   bool
+	// live reads the live root through the cache, and syncs is the
+	// profile's cache as sync fills it; both nil when the cache is off.
+	live  port.RootStore
+	syncs port.SyncCache
+}
+
+// syncer is the sync use case over the cache, or what refuses it: sync
+// fills the cache from the cloud, so it needs both.
+func (b built) syncer(lib *library.Library, remote port.BlobStore, clk port.Clock) port.Syncer {
+	switch {
+	case b.syncs == nil:
+		return refusal{port.ErrNoCacheToSync}
+	case b.offline:
+		return refusal{fmt.Errorf("sync reads the cloud: %w", port.ErrOffline)}
+	default:
+		return prefetch.New(b.live, lib, remote, b.syncs, clk)
+	}
+}
+
+// refusal is a Syncer that cannot run in this configuration.
+type refusal struct{ err error }
+
+func (r refusal) Sync(context.Context, string, port.SyncOptions) (port.SyncReport, error) {
+	return port.SyncReport{}, r.err
 }
 
 func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock) (built, error) {
-	bytes := cacheBytes(opts.CacheBytes)
+	bytes := cacheBytes(opts.CacheBytes, cfg.CacheBudget)
 	root := blobcache.NewRoot(cfg.CacheDir, max(bytes, 0), clk, opts.Logger)
 	profile, err := root.Profile(cfg.Profile)
 	if err != nil {
@@ -210,7 +238,6 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 	switch {
 	case offline:
 		mode = indexcache.Offline
-		b.blobs = indexcache.OfflineBlobs{}
 	case opts.ReadOnly && cfg.CacheTTL > 0:
 		mode = indexcache.Fresh
 	}
@@ -218,9 +245,18 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 		Profile: cfg.Profile, Mode: mode, TTL: cfg.CacheTTL, Clock: clk, Log: opts.Logger,
 	})
 	b.roots, b.docs, b.blobCache = ic, ic, profile
-	if !offline {
+	// Every read of a file goes through the cache first: what sync left
+	// there is never downloaded, and is all an offline run has.
+	if offline {
+		b.blobs = indexcache.NewBlobs(indexcache.OfflineBlobs{}, profile)
+	} else {
 		b.blobs = indexcache.NewBlobs(remote, profile)
 	}
+	b.live = ic
+	if mode != indexcache.Live {
+		b.live = indexcache.New(remote, profile, indexcache.Options{Profile: cfg.Profile, Mode: indexcache.Live, Clock: clk, Log: opts.Logger})
+	}
+	b.syncs = indexcache.NewSyncs(profile, opts.Logger)
 	return b, nil
 }
 
@@ -247,9 +283,15 @@ func newClient(store rmcloud.SecretStore, cfg config.Config, opts Options) (*rmc
 	return client, nil
 }
 
-func cacheBytes(n int64) int64 {
-	if n == 0 {
+// cacheBytes is the budget of each profile's cache: n when given, else
+// the configuration's, else DefaultCacheBytes.
+func cacheBytes(n, configured int64) int64 {
+	switch {
+	case n != 0:
+		return n
+	case configured > 0:
+		return configured
+	default:
 		return DefaultCacheBytes
 	}
-	return n
 }

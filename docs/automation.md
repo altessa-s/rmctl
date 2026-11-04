@@ -7,6 +7,7 @@ The scripts were run against a test account, the writes with `--dry-run`, and pa
 ## Contents
 
 - [Ground rules for scripts](#ground-rules-for-scripts)
+- [Working offline](#working-offline)
 - [Nightly backup](#nightly-backup)
 - [A hot folder](#a-hot-folder)
 - [Highlights to Markdown](#highlights-to-markdown)
@@ -24,7 +25,7 @@ The scripts were run against a test account, the writes with `--dry-run`, and pa
 - **Name items by identifier.** A path breaks when a document is renamed or moved; the `id` from `find --json` does not. Every command that takes a path takes an id or a unique prefix of one.
 - **Say `--yes`.** A writing command asks first on a terminal and, anywhere else, refuses with exit status 2 unless `--yes` is given. `put`, `backup restore` and `--content-only` also take `--dry-run`, which checks everything and changes nothing.
 - **Pick the account.** `-P name` (or `RMCTL_PROFILE`) chooses the profile; without it, `default`.
-- **Read from the cache.** `--offline` makes no request at all: `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights` and `rmdoc` answer from what the last online read left in the cache, and the commands that need the cloud, such as `get`, `put` and `backup`, refuse (exit 2).
+- **Read from the cache.** `--offline` makes no request at all: `ls`, `tree`, `stat`, `find`, `du`, `dupes`, `text`, `highlights` and `rmdoc` answer from what the last online read left in the cache, and `get`, `export`, `mget`, `backup` and `render` from what `sync --files` left there; a file the cache lacks is an error that names it (exit 1). The commands that need the cloud, such as `put`, `mkdir` and `sync` itself, refuse (exit 2).
 - **Check the exit status.**
 
 | Status | Meaning | What a script should do |
@@ -35,6 +36,15 @@ The scripts were run against a test account, the writes with `--dry-run`, and pa
 | 3 | the profile is not registered | run `rmctl register <code>` (or `rmctl -P name register <code>`) |
 | 4 | the library kept changing under a write, five replays in a row | wait and run the write again |
 | 130 | interrupted | stop |
+
+## Working offline
+
+`rmctl sync` fills the profile's cache ahead of time: run it while online, and everything below the path reads from the cache afterwards, with `--offline` or without a download. A second `sync` while the library is unchanged costs one request, so a scheduler can run it often; `--files` takes the originals too, within the cache's budget (`budget` in config.toml, or `RMCTL_CACHE_BUDGET`), and a sync that would not fit exits 1 before downloading anything.
+
+```sh
+RMCTL_CACHE_BUDGET=4GiB rmctl sync /Books --files --json | jq '{fetched, bytes_fetched, cache_bytes}'
+rmctl --offline export /Books/Notes -o notes.rmdoc
+```
 
 ## Nightly backup
 

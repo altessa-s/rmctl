@@ -6,6 +6,8 @@ package indexcache
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/altessa-s/rmctl/internal/domain"
@@ -60,22 +62,79 @@ func (e *offlineError) Error() string {
 
 func (e *offlineError) Unwrap() error { return port.ErrOffline }
 
-// Blobs keeps what a write uploads in the blob cache, so the read after a
-// write finds the .metadata and .content it just sent instead of fetching
-// them back.
+// BlobFiles are the blobs of the cache, whole or streamed; blobcache's
+// Cache implements it.
+type BlobFiles interface {
+	port.BlobCache
+	// Open is the blob of hash for reading, with its size; the reader fails
+	// at its end when the bytes are not the hash's.
+	Open(hash string) (io.ReadCloser, int64, bool)
+}
+
+// Blobs serves the reads of the blob store from the cache when it holds
+// the file, and keeps what a write uploads, so the read after a write
+// finds the .metadata and .content it just sent instead of fetching them
+// back. A file the cache holds, as sync leaves them, is never downloaded
+// again: it is addressed by its hash. A download is not kept: a file read
+// once, such as an original, would push out what every read uses. Over
+// [OfflineBlobs] it is the blob store of an offline run.
 type Blobs struct {
 	port.BlobStore
-	cache port.BlobCache
+	cache BlobFiles
 }
 
 var _ port.BlobStore = (*Blobs)(nil)
 
 // NewBlobs decorates blobs with cache.
-func NewBlobs(blobs port.BlobStore, cache port.BlobCache) *Blobs {
+func NewBlobs(blobs port.BlobStore, cache BlobFiles) *Blobs {
 	if blobs == nil || cache == nil {
 		panic("indexcache: a blob store and a cache are required")
 	}
 	return &Blobs{BlobStore: blobs, cache: cache}
+}
+
+// Read implements port.BlobStore.
+func (b *Blobs) Read(ctx context.Context, f domain.File) ([]byte, error) {
+	if data, ok := b.cache.Get(f.Hash); ok {
+		return data, nil
+	}
+	return b.BlobStore.Read(ctx, f)
+}
+
+// copyBuffer is how much of a cached file a download copies at a time.
+const copyBuffer = 256 << 10
+
+// Download implements port.BlobStore: the cached file when there is one,
+// streamed and checked against its hash, else the store's.
+func (b *Blobs) Download(ctx context.Context, f domain.File, w io.Writer, progress port.Progress) error {
+	r, size, ok := b.cache.Open(f.Hash)
+	if !ok {
+		return b.BlobStore.Download(ctx, f, w, progress)
+	}
+	defer func() { _ = r.Close() }()
+	var done int64
+	buf := make([]byte, copyBuffer)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			if _, err := w.Write(buf[:n]); err != nil {
+				return err
+			}
+			done += int64(n)
+			if progress != nil {
+				progress(done, size)
+			}
+		}
+		switch {
+		case errors.Is(rerr, io.EOF):
+			return nil
+		case rerr != nil:
+			return fmt.Errorf("%s in the cache: %w", f.Name, rerr)
+		}
+	}
 }
 
 // Upload implements port.BlobStore.

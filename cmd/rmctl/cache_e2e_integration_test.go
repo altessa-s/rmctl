@@ -114,7 +114,9 @@ func TestE2E_OfflineAndTTL(t *testing.T) {
 	if code, _, errOut := e.rmctl("mkdir", "/X", "--yes", "--offline"); code != 2 || !strings.Contains(errOut, "needs the cloud") {
 		t.Fatalf("a write offline: exit %d %q", code, errOut)
 	}
-	if code, _, errOut := e.rmctl("get", "/a Books/a Paper", "--offline"); code != 2 || !strings.Contains(errOut, "needs the cloud") {
+	// get reads the cache under --offline, which holds no original until
+	// sync --files puts it there; the error names the file.
+	if code, _, errOut := e.rmctl("get", "/a Books/a Paper", "--offline"); code != 1 || !strings.Contains(errOut, "a-paper.pdf is not in the cache") {
 		t.Fatalf("get offline: exit %d %q", code, errOut)
 	}
 	if code, _, _ := e.rmctl("ls", "--offline", "--no-cache"); code != 2 {

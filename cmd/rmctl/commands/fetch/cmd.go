@@ -16,12 +16,15 @@ import (
 )
 
 // Commands are get, export, mget and backup, whose restore subcommand
-// writes the library.
+// writes the library, and sync, which fills the cache they read.
 func Commands(env *cliutil.Env) []*cobra.Command {
-	// They download files the cache does not keep: a TTL may answer their
-	// root, but they need the cloud.
-	read := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessRead) }
-	return []*cobra.Command{read(newGet(env)), read(newExport(env)), read(newMget(env)), read(newBackup(env))}
+	// They read every file through the cache: a TTL may answer their root,
+	// and under --offline they run from what sync left there, naming any
+	// file it lacks.
+	offline := func(c *cobra.Command) *cobra.Command { return cliutil.WithAccess(c, cliutil.AccessOffline) }
+	// sync reads the live root, always: whether the cache is current is a
+	// question only the cloud answers, so it refuses --offline.
+	return []*cobra.Command{offline(newGet(env)), offline(newExport(env)), offline(newMget(env)), offline(newBackup(env)), newSync(env)}
 }
 
 func fetcher(cmd *cobra.Command, env *cliutil.Env) (port.Fetcher, error) {
