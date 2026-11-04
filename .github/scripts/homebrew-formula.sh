@@ -10,8 +10,8 @@
 # release's checksums.txt. The formula installs the prebuilt macOS and Linux
 # archives of that release. A Linux archive carries libpdfium.so, which the
 # binary finds in its own directory through its $ORIGIN run path, so both go
-# into libexec and bin links to the binary; Cairo and Pango come from the
-# system.
+# into libexec and bin links to the binary. Every command of the Linux binary
+# loads Cairo, Pango and their libraries, so the formula depends on them.
 set -euo pipefail
 
 version=${1:?version}
@@ -46,6 +46,12 @@ class Rmctl < Formula
   end
 
   on_linux do
+    depends_on "cairo"
+    depends_on "fontconfig"
+    depends_on "gdk-pixbuf"
+    depends_on "harfbuzz"
+    depends_on "pango"
+
     on_arm do
       url "${base}/rmctl_${version}_linux_arm64.tar.gz"
       sha256 "$(sum linux_arm64)"
