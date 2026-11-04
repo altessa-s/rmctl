@@ -80,6 +80,12 @@ type Fake struct {
 	// domain.ErrRenderUnsupported).
 	Rendered  port.RenderReport
 	RenderErr error
+	// RenderFolders are the queries Folder reports as folders, "/" always;
+	// RenderedTree is what RenderTree answers, with the directory filled in when
+	// it has none, and TreeErr the error it answers with.
+	RenderFolders []string
+	RenderedTree  port.RenderTreeReport
+	TreeErr       error
 	// ProfileList is what Profiles.List answers, ProfileInfo what Info
 	// answers (with the name asked for filled in when it has none), and
 	// ProfilesErr fails List, Info and Add. Removal is what Remove answers,
@@ -338,7 +344,32 @@ func (f *Fake) RenderFile(_ context.Context, path, dest string, o port.RenderOpt
 	return f.rendered("RenderFile", path, dest, o)
 }
 
-func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
+// Folder implements port.Rendering; it records no call.
+func (f *Fake) Folder(_ context.Context, query string) (bool, error) {
+	f.mu.Lock()
+	err := f.Err
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return query == "/" || slices.Contains(f.RenderFolders, query), nil
+}
+
+// RenderTree implements port.Rendering.
+func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOptions, t port.RenderTreeOptions) (port.RenderTreeReport, error) {
+	args := append(renderArgs(query, dir, o), opt(t.All, "all"), opt(t.Incremental, "incremental"), "jobs="+strconv.Itoa(t.Jobs))
+	if err := f.record("RenderTree", args...); err != nil {
+		return port.RenderTreeReport{}, err
+	}
+	r := f.RenderedTree
+	if r.Dir == "" {
+		r.Dir = dir
+	}
+	return r, f.TreeErr
+}
+
+// renderArgs are a rendering's arguments as a call records them.
+func renderArgs(from, dest string, o port.RenderOptions) []string {
 	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
 		"paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
 	if o.NoTemplates {
@@ -347,7 +378,11 @@ func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.R
 	if o.Document != "" {
 		args = append(args, "id="+o.Document)
 	}
-	if err := f.record(method, args...); err != nil {
+	return args
+}
+
+func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	if err := f.record(method, renderArgs(from, dest, o)...); err != nil {
 		return port.RenderReport{}, err
 	}
 	if f.RenderErr != nil {

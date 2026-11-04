@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/altessa-s/go-atlas-core/io/files"
 
@@ -87,6 +88,27 @@ func (FS) Stat(path string) (size int64, isDir, exists bool, err error) {
 		return 0, false, false, err
 	}
 	return info.Size(), info.IsDir(), true, nil
+}
+
+// ModTime reports the modification time of the regular file at path.
+func (FS) ModTime(path string) (mtime time.Time, exists bool, err error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return time.Time{}, false, nil
+	}
+	return info.ModTime(), true, nil
+}
+
+// SetModTime sets the modification time of path, and its access time to
+// the same.
+func (FS) SetModTime(path string, mtime time.Time) error {
+	return os.Chtimes(path, mtime, mtime)
 }
 
 // Open opens the regular file at path for reading.

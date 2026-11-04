@@ -169,3 +169,90 @@ func TestRenderErrors(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 }
+
+// treeReport is a folder drawn: one document of each status.
+func treeReport() port.RenderTreeReport {
+	return port.RenderTreeReport{Documents: []port.RenderedDocument{
+		{
+			Document: domain.Item{ID: "d1"}, LibraryPath: "/Notes/A", Status: port.RenderRendered,
+			Report: port.RenderReport{Path: "out/A.pdf", Pages: 4, SkippedBlocks: 2, LinksDropped: 1},
+		},
+		{Document: domain.Item{ID: "d2"}, LibraryPath: "/Notes/B", Status: port.RenderUnchanged, Report: port.RenderReport{Path: "out/B.pdf"}},
+		{
+			Document: domain.Item{ID: "d3"}, LibraryPath: "/Notes/Sub/C", Status: port.RenderFailed,
+			Report: port.RenderReport{Path: "out/Sub/C.pdf"}, Err: errors.New("C: refused: pages moved"),
+		},
+	}}
+}
+
+func TestRenderTree(t *testing.T) {
+	t.Parallel()
+	errFailed := errors.New("1 of 3 documents could not be drawn")
+	f := &clitest.Fake{RenderFolders: []string{"/Notes"}, RenderedTree: treeReport(), TreeErr: errFailed}
+	r := run(t, f, clitest.Options{}, "render", "/Notes", "-o", "out", "--incremental", "-j", "3", "-a",
+		"--mode", "preserving", "--paper", "letter", "--no-template", "--json")
+	want := "RenderTree /Notes out format=pdf page=0 mode=preserving paper=letter scale=0 quality=0 no-template all incremental jobs=3"
+	if r.Code != cliutil.CodeError || len(f.Calls()) != 1 || f.Calls()[0] != want {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+	// The answer is written, and then the command fails.
+	if r.Error.Error() != "render: 1 of 3 documents could not be drawn" {
+		t.Fatal(r.Error)
+	}
+	clitest.Golden(t, "render-tree-json", r.Out)
+	for _, note := range []string{"/Notes/A: 2 blocks of the pages", "/Notes/A: 1 links of the original PDF"} {
+		if !strings.Contains(r.Err, note) {
+			t.Fatalf("%q lacks %q", r.Err, note)
+		}
+	}
+	// A table for people: a row per document, then the totals.
+	tree := treeReport()
+	tree.Dir = "remarkable"
+	f = &clitest.Fake{RenderedTree: tree}
+	r = run(t, f, clitest.Options{}, "render", "/")
+	if r.Code != 0 || f.Calls()[0] != "RenderTree /  format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0   jobs=0" {
+		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+	clitest.Golden(t, "render-tree-plain", r.Out)
+	// An empty folder says so.
+	f = &clitest.Fake{RenderFolders: []string{"/Empty"}}
+	if r = run(t, f, clitest.Options{}, "render", "/Empty"); r.Code != 0 || !strings.Contains(r.Err, "no document to draw below /Empty") {
+		t.Fatalf("%d %v %q", r.Code, r.Error, r.Err)
+	}
+	// A failure before any document is the command's error alone.
+	f = &clitest.Fake{RenderFolders: []string{"/Notes"}, TreeErr: domain.ErrRenderUnsupported}
+	if r = run(t, f, clitest.Options{}, "render", "/Notes"); r.Code != cliutil.CodeError || r.Out != "" || !errors.Is(r.Error, cliutil.ErrNoRender) {
+		t.Fatalf("%d %v %q", r.Code, r.Error, r.Out)
+	}
+}
+
+func TestRenderTreeUsage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	local := filepath.Join(dir, "backup.rmdoc")
+	if err := os.WriteFile(local, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"/Notes", "--page", "1"}, "leave --page out"},
+		{[]string{"/Notes", "--page", "1", "--format", "svg"}, "leave --page out"},
+		{[]string{"/Notes", "--format", "png"}, "is one page"},
+		{[]string{"/Notes", "--scale", "2"}, "--scale is for a page"},
+		{[]string{"/Notes", "--quality", "80"}, "--quality is for a page"},
+		{[]string{"/Notes", "-o", "notes.pdf"}, "-o names the directory"},
+		{[]string{"/Notes", "-o", "notes.png"}, "is one page"},
+		{[]string{"/Notes/Meeting", "--all"}, "--all is for a folder; a document is drawn on its own"},
+		{[]string{"/Notes/Meeting", "--incremental"}, "--incremental is for a folder"},
+		{[]string{"/Notes/Meeting", "-j", "2"}, "--jobs is for a folder"},
+		{[]string{local, "--incremental"}, "--incremental is for a folder; a local archive is drawn on its own"},
+	} {
+		f := &clitest.Fake{RenderFolders: []string{"/Notes"}}
+		r := run(t, f, clitest.Options{}, append([]string{"render"}, c.args...)...)
+		if r.Code != cliutil.CodeUsage || len(f.Calls()) != 0 || !strings.Contains(r.Error.Error(), c.want) {
+			t.Fatalf("%v: %d %v %v", c.args, r.Code, r.Error, f.Calls())
+		}
+	}
+}

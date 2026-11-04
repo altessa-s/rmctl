@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/clouddouble"
 )
@@ -77,5 +78,58 @@ func TestE2E_Render(t *testing.T) {
 	offline := filepath.Join(dir, "offline.pdf")
 	if out := e.ok("render", archive, "--offline", "-o", offline, "--json"); !strings.Contains(out, `"pages": 2`) {
 		t.Fatalf("render of the archive: %q", out)
+	}
+}
+
+// A folder drawn through the whole tool: its tree mirrored as PDFs that
+// take the documents' modification times, then drawn again incrementally,
+// and the whole library with the trash.
+func TestE2E_RenderFolder(t *testing.T) {
+	e := newE2E(t)
+	e.register()
+	modified := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	page := tabletPage(t, "Bold_Heading_Bullet_Normal.rm")
+	e.cloud.Seed(t,
+		clouddouble.Item{ID: "f0000000-0000-4000-8000-0000000000f1", Name: "Clients", Kind: clouddouble.Folder},
+		clouddouble.Item{ID: "f0000000-0000-4000-8000-0000000000f2", Name: "Harbor", Kind: clouddouble.Folder, Parent: "f0000000-0000-4000-8000-0000000000f1"},
+		clouddouble.Item{
+			ID: "r0000000-0000-4000-8000-0000000000a1", Name: "Kickoff", Kind: clouddouble.Notebook,
+			Parent: "f0000000-0000-4000-8000-0000000000f1", PageBodies: [][]byte{page}, Modified: modified,
+		},
+		clouddouble.Item{
+			ID: "r0000000-0000-4000-8000-0000000000a2", Name: "Contract/Draft", Kind: clouddouble.Notebook,
+			Parent: "f0000000-0000-4000-8000-0000000000f2", PageBodies: [][]byte{page, page}, Modified: modified,
+		},
+		clouddouble.Item{ID: "r0000000-0000-4000-8000-0000000000a3", Name: "Old", Kind: clouddouble.Notebook, PageBodies: [][]byte{page}, Trashed: true},
+	)
+	dir := filepath.Join(t.TempDir(), "out")
+	out := e.ok("render", "/Clients", "-o", dir, "--jobs", "2", "--json")
+	if !strings.Contains(out, `"rendered": 2`) || !strings.Contains(out, `"pages": 2`) {
+		t.Fatalf("render: %q", out)
+	}
+	for _, name := range []string{"Kickoff.pdf", "Harbor/Contract-Draft.pdf"} {
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil || !bytes.HasPrefix(data, []byte("%PDF-")) {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(modified) {
+			t.Fatalf("%s: %v %v", path, info.ModTime(), err)
+		}
+	}
+	if out = e.ok("render", "/Clients", "-o", dir, "--incremental", "--json"); !strings.Contains(out, `"unchanged": 2`) {
+		t.Fatalf("incremental: %q", out)
+	}
+	// The whole library, the trash too, into its own directory.
+	all := t.TempDir()
+	t.Chdir(all)
+	if out = e.ok("render", "/", "--all", "--json"); !strings.Contains(out, `"rendered": 3`) {
+		t.Fatalf("render /: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(all, "remarkable", "Old.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.rmctl("render", "/Clients", "--page", "1"); code != 2 || !strings.Contains(stderr, "leave --page out") {
+		t.Fatalf("--page with a folder: %d %q", code, stderr)
 	}
 }

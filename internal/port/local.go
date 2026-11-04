@@ -20,6 +20,11 @@ type LocalFiles interface {
 	Produce(ctx context.Context, path string, write func(w io.Writer) error) error
 	// Stat reports a local file's size, or exists false.
 	Stat(path string) (size int64, isDir, exists bool, err error)
+	// ModTime is the modification time of the regular file at path, or
+	// exists false when there is none: no file, or a directory.
+	ModTime(path string) (mtime time.Time, exists bool, err error)
+	// SetModTime sets the modification time of the file at path.
+	SetModTime(path string, mtime time.Time) error
 	// Open opens the regular file at path for reading.
 	Open(path string) (io.ReadCloser, error)
 	// ReadHead reads at most n bytes from the start of path, and ReadTail at

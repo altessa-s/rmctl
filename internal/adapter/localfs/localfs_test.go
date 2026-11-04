@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
 )
@@ -276,5 +277,31 @@ func TestRename(t *testing.T) {
 	}
 	if err := fs.Rename(from, to); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestModTime(t *testing.T) {
+	t.Parallel()
+	fs := localfs.New()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.pdf")
+	if _, exists, err := fs.ModTime(path); exists || err != nil {
+		t.Fatalf("missing: %v %v", exists, err)
+	}
+	if _, exists, err := fs.ModTime(dir); exists || err != nil {
+		t.Fatalf("directory: %v %v", exists, err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if err := fs.SetModTime(path, when); err != nil {
+		t.Fatal(err)
+	}
+	if mtime, exists, err := fs.ModTime(path); !exists || err != nil || !mtime.Equal(when) {
+		t.Fatalf("%v %v %v", mtime, exists, err)
+	}
+	if err := fs.SetModTime(filepath.Join(dir, "none"), when); err == nil {
+		t.Fatal("set the time of a missing file")
 	}
 }

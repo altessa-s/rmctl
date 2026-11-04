@@ -1,0 +1,39 @@
+{
+  "dir": "out",
+  "documents": [
+    {
+      "path": "out/A.pdf",
+      "document": "/Notes/A",
+      "id": "d1",
+      "status": "rendered",
+      "pages": 4,
+      "skipped_blocks": 2,
+      "refused_pages": 0,
+      "links_dropped": 1
+    },
+    {
+      "path": "out/B.pdf",
+      "document": "/Notes/B",
+      "id": "d2",
+      "status": "unchanged",
+      "pages": 0,
+      "skipped_blocks": 0,
+      "refused_pages": 0,
+      "links_dropped": 0
+    },
+    {
+      "path": "out/Sub/C.pdf",
+      "document": "/Notes/Sub/C",
+      "id": "d3",
+      "status": "failed",
+      "pages": 0,
+      "skipped_blocks": 0,
+      "refused_pages": 0,
+      "links_dropped": 0,
+      "error": "C: refused: pages moved"
+    }
+  ],
+  "rendered": 1,
+  "unchanged": 1,
+  "failed": 1
+}

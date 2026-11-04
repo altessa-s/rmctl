@@ -30,12 +30,15 @@ var ErrNoFile = errors.New("porttest: no such file")
 var ErrIsDir = errors.New("porttest: path is a directory")
 
 // MemFiles is a file system in memory. Paths are cleaned with filepath.
-// Fail makes the named method (Produce, Stat, Open, ReadHead, ReadTail,
-// MkdirAll, Walk, Remove, Rename, Stage) fail; "Unstage" makes the removal
-// Stage returns fail, after it removed everything.
+// Fail makes the named method (Produce, Stat, ModTime, SetModTime, Open,
+// ReadHead, ReadTail, MkdirAll, Walk, Remove, Rename, Stage) fail;
+// "Unstage" makes the removal Stage returns fail, after it removed
+// everything. A file written has the zero modification time until
+// SetModTime sets one.
 type MemFiles struct {
 	mu     sync.Mutex
 	files  map[string][]byte
+	mtimes map[string]time.Time
 	dirs   map[string]bool
 	stages int
 	Fail   map[string]error
@@ -43,16 +46,17 @@ type MemFiles struct {
 
 // NewMemFiles returns an empty file system.
 func NewMemFiles() *MemFiles {
-	return &MemFiles{files: map[string][]byte{}, dirs: map[string]bool{}, Fail: map[string]error{}}
+	return &MemFiles{files: map[string][]byte{}, mtimes: map[string]time.Time{}, dirs: map[string]bool{}, Fail: map[string]error{}}
 }
 
 var _ port.LocalFiles = (*MemFiles)(nil)
 
-// Write stores a file, for test setup.
+// Write stores a file, for test setup; its modification time is zero.
 func (m *MemFiles) Write(path string, data []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.files[filepath.Clean(path)] = slices.Clone(data)
+	delete(m.mtimes, filepath.Clean(path))
 }
 
 // File returns a stored file.
@@ -109,6 +113,35 @@ func (m *MemFiles) Stat(path string) (size int64, isDir, exists bool, err error)
 	}
 	b, ok := m.files[path]
 	return int64(len(b)), false, ok, nil
+}
+
+// ModTime implements port.LocalFiles.
+func (m *MemFiles) ModTime(path string) (time.Time, bool, error) {
+	if err := m.fail("ModTime"); err != nil {
+		return time.Time{}, false, err
+	}
+	path = filepath.Clean(path)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.files[path]; !ok {
+		return time.Time{}, false, nil
+	}
+	return m.mtimes[path], true, nil
+}
+
+// SetModTime implements port.LocalFiles.
+func (m *MemFiles) SetModTime(path string, mtime time.Time) error {
+	if err := m.fail("SetModTime"); err != nil {
+		return err
+	}
+	path = filepath.Clean(path)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.files[path]; !ok {
+		return ErrNoFile
+	}
+	m.mtimes[path] = mtime
+	return nil
 }
 
 // Open implements port.LocalFiles: the file as it is when opened.
@@ -191,6 +224,7 @@ func (m *MemFiles) Remove(path string) error {
 		return ErrNoFile
 	}
 	delete(m.files, path)
+	delete(m.mtimes, path)
 	return nil
 }
 
@@ -208,6 +242,12 @@ func (m *MemFiles) Rename(from, to string) error {
 	}
 	delete(m.files, from)
 	m.files[to] = b
+	if t, ok := m.mtimes[from]; ok {
+		m.mtimes[to] = t
+		delete(m.mtimes, from)
+	} else {
+		delete(m.mtimes, to)
+	}
 	return nil
 }
 

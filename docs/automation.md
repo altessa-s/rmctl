@@ -591,6 +591,14 @@ WantedBy=default.target
 
 `render` draws a document the way the tablet shows it: the whole document as a PDF, or one page as a PNG, JPEG or SVG. The script publishes a folder: per document a PDF, a small JPEG of the first page as a thumbnail, an SVG of every page without its template, and an `index.html` linking them. Each document is downloaded once with `export` and drawn from the local archive, and a document whose record hash has not changed since the last run is not drawn again.
 
+When the PDFs are all a site needs, `render` does it alone: a folder draws every document below it into a directory with the same tree, and `--incremental` draws only the documents changed since the last run, by their modification time:
+
+```console
+$ rmctl render /Strategy -o ~/Sites/notes/pdf --incremental --jobs 8
+```
+
+The script below adds the thumbnails, the page SVGs and the index, and flat names a URL can carry.
+
 `~/bin/rm-site.sh`:
 
 ```bash

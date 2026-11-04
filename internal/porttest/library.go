@@ -46,6 +46,8 @@ type Doc struct {
 	// formatVersion 2 .content, a PDF a formatVersion 1 one. PageBytes
 	// builds a body the Pages double reads.
 	Pages [][]byte
+	// Modified is the lastModified of the metadata; zero is Epoch.
+	Modified time.Time
 }
 
 // PageID is the identifier the builders give the i-th page (from 0).
@@ -96,10 +98,14 @@ func metadataOf(d Doc) []byte {
 		return []byte("{not json")
 	}
 	var meta domain.Metadata
+	modified := Epoch
+	if !d.Modified.IsZero() {
+		modified = d.Modified
+	}
 	if d.Folder {
-		meta = domain.NewFolderMetadata(d.Name, d.Parent, Epoch)
+		meta = domain.NewFolderMetadata(d.Name, d.Parent, modified)
 	} else {
-		meta = domain.NewDocumentMetadata(d.Name, d.Parent, Epoch)
+		meta = domain.NewDocumentMetadata(d.Name, d.Parent, modified)
 	}
 	if d.Trashed {
 		meta = meta.MovedToTrash(Epoch)

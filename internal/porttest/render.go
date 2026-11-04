@@ -21,12 +21,14 @@ import (
 // newline and the archive it was drawn from, so a test sees both what was
 // asked and what was drawn. Pages is how many pages every document has (0
 // is 3); Report is what a PDF reports beyond its pages. Unavailable makes
-// it a build without the renderer; Fail fails Render.
+// it a build without the renderer; Fail fails Render, and FailIDs fails it
+// for the documents it names alone.
 type Renderer struct {
 	Pages       int
 	Report      port.RenderReport
 	Unavailable bool
 	Fail        error
+	FailIDs     map[domain.ItemID]error
 
 	mu    sync.Mutex
 	calls []string
@@ -59,6 +61,9 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 	}
 	if r.Fail != nil {
 		return nil, port.RenderReport{}, r.Fail
+	}
+	if err := r.FailIDs[id]; err != nil {
+		return nil, port.RenderReport{}, err
 	}
 	pages := r.Pages
 	if pages == 0 {

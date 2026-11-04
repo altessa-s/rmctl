@@ -5,6 +5,7 @@
 package render
 
 import (
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -49,6 +50,7 @@ type flags struct {
 	page, quality                 int
 	noTemplate                    bool
 	scale                         float64
+	tree                          port.RenderTreeOptions
 }
 
 // New returns the render command. It changes nothing; a local archive needs
@@ -56,9 +58,9 @@ type flags struct {
 func New(env *cliutil.Env) *cobra.Command {
 	var f flags
 	cmd := &cobra.Command{
-		Use:     "render <path|id|file.rmdoc> [-o file]",
+		Use:     "render <path|id|file.rmdoc> [-o file|dir]",
 		GroupID: cliutil.GroupRead,
-		Short:   "Draw a document with its annotations as a PDF, or a page as an image",
+		Short:   "Draw a document or a folder's documents with their annotations as PDFs, or a page as an image",
 		Long: heredoc.Doc(`
 			Draws a document the way the tablet shows it: handwriting with its pen
 			textures, typed text, highlights, images and page templates, over the
@@ -89,6 +91,21 @@ func New(env *cliutil.Env) *cobra.Command {
 			for a page; a directory takes that name inside it. The file appears
 			only once it is whole. The path written is the answer.
 
+			A folder, or "/" for the whole library, draws every document below it as
+			a PDF into a directory, keeping the folder tree: -o names the directory,
+			created when missing; without it, a directory named after the folder,
+			or remarkable for "/", in the working directory. Each document becomes
+			<folder path>/<name>.pdf; two names that collide in one directory get
+			the first 8 characters of the later one's id in brackets. --mode,
+			--paper and --no-template apply to every document; --page, --scale,
+			--quality and image formats do not. Documents in the trash are left out
+			unless --all. --incremental skips a document whose PDF is there with
+			the document's modification time, which each PDF written takes.
+			--jobs is how many documents are drawn at a time. A document that
+			fails is reported and the others go on; the answer is a row per
+			document (rendered, unchanged or failed) and the totals, and the
+			command then fails if any did.
+
 			An argument ending with .rmdoc that is a local file is read from that
 			archive, offline, as "rmctl export" and "rmctl backup" write one; "./"
 			in front, or the identifier, names a cloud document whose name ends with
@@ -106,6 +123,8 @@ func New(env *cliutil.Env) *cobra.Command {
 			rmctl render /Notes/Meeting --page 1 -o page1.svg --no-template
 			rmctl render backup.rmdoc -o meeting.pdf
 			rmctl render ~/rm-backup/3f2a.rmdoc --page 1
+			rmctl render /Clients -o ~/clients-pdf
+			rmctl render / -o ~/remarkable-pdf --incremental --jobs 8
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
 		ValidArgsFunction: cliutil.CompleteRemote(env, false),
@@ -119,33 +138,35 @@ func New(env *cliutil.Env) *cobra.Command {
 			if opts.Document != "" && !local {
 				return cliutil.Usagef("render: --id picks a document of a local .rmdoc archive; name a cloud document by its path or id")
 			}
+			if local {
+				if err = f.onlyFolder(cmd, "a local archive"); err != nil {
+					return err
+				}
+			}
 			r, err := cliutil.Need(cmd, env, func(s cliutil.Services) port.Rendering { return s.Rendering })
 			if err != nil {
 				return err
 			}
-			var report port.RenderReport
 			if local {
-				report, err = r.RenderFile(cmd.Context(), args[0], f.dest, opts)
-			} else {
-				report, err = r.Render(cmd.Context(), args[0], f.dest, opts)
+				report, rerr := r.RenderFile(cmd.Context(), args[0], f.dest, opts)
+				return f.answer(cmd, env, report, rerr)
 			}
+			folder, err := r.Folder(cmd.Context(), args[0])
 			if err != nil {
 				return cliutil.PagesErr("render", err)
 			}
-			notes(cmd, report)
-			return env.Emit(cmd, output.Fields(renderView{
-				Path: report.Path, Pages: report.Pages, SkippedBlocks: report.SkippedBlocks,
-				RefusedPages: report.RefusedPages, LinksDropped: report.LinksDropped,
-			},
-				output.Field{Key: "path", Value: output.Path(report.Path)},
-				output.Field{Key: "pages", Value: output.Count(report.Pages)},
-				output.Field{Key: "skipped_blocks", Value: output.Count(report.SkippedBlocks)},
-				output.Field{Key: "refused_pages", Value: output.Count(report.RefusedPages)},
-				output.Field{Key: "links_dropped", Value: output.Count(report.LinksDropped)}))
+			if folder {
+				return f.renderTree(cmd, env, r, args[0], opts)
+			}
+			if err = f.onlyFolder(cmd, "a document"); err != nil {
+				return err
+			}
+			report, err := r.Render(cmd.Context(), args[0], f.dest, opts)
+			return f.answer(cmd, env, report, err)
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVarP(&f.dest, "output", "o", "", "file to write (default: <name>-rendered.pdf or <name>-p<N>.<format> here)")
+	fl.StringVarP(&f.dest, "output", "o", "", "file to write, or a folder's directory (default: <name>-rendered.pdf, <name>-p<N>.<format> or <folder> here)")
 	fl.StringVar(&f.format, "format", "", "pdf, png, jpg or svg (default: from -o's extension, else png with --page and pdf without)")
 	fl.StringVar(&f.mode, "mode", string(port.PDFFresh), "PDF mode: fresh, preserving or recomposed")
 	fl.StringVar(&f.paper, "paper", string(port.PaperA4), "paper of a notebook page: a4, letter or tablet")
@@ -154,7 +175,132 @@ func New(env *cliutil.Env) *cobra.Command {
 	fl.IntVar(&f.quality, "quality", 0, "quality of a JPEG, 1 to 100 (default: 0, the renderer's, 75)")
 	fl.BoolVar(&f.noTemplate, "no-template", false, "draw the pages without their templates")
 	fl.StringVar(&f.id, "id", "", "the document of a local archive that holds several: an id or a unique prefix")
+	fl.BoolVarP(&f.tree.All, "all", "a", false, "with a folder: draw the documents in the trash too")
+	fl.BoolVar(&f.tree.Incremental, "incremental", false, "with a folder: skip a document whose PDF is there with its modification time")
+	fl.IntVarP(&f.tree.Jobs, "jobs", "j", 0, "with a folder: documents at a time (0: the default)")
 	return cmd
+}
+
+// answer prints what one document drawn wrote, with what the drawing could
+// not keep on standard error.
+func (f *flags) answer(cmd *cobra.Command, env *cliutil.Env, report port.RenderReport, err error) error {
+	if err != nil {
+		return cliutil.PagesErr("render", err)
+	}
+	notes(cmd.ErrOrStderr(), "", report)
+	return env.Emit(cmd, output.Fields(renderView{
+		Path: report.Path, Pages: report.Pages, SkippedBlocks: report.SkippedBlocks,
+		RefusedPages: report.RefusedPages, LinksDropped: report.LinksDropped,
+	},
+		output.Field{Key: "path", Value: output.Path(report.Path)},
+		output.Field{Key: "pages", Value: output.Count(report.Pages)},
+		output.Field{Key: "skipped_blocks", Value: output.Count(report.SkippedBlocks)},
+		output.Field{Key: "refused_pages", Value: output.Count(report.RefusedPages)},
+		output.Field{Key: "links_dropped", Value: output.Count(report.LinksDropped)}))
+}
+
+// treeFlags are the flags for a folder alone.
+var treeFlags = []string{"all", "incremental", "jobs"} //nolint:gochecknoglobals // a fixed list
+
+// onlyFolder refuses the flags for a folder alone when what is drawn is
+// one document.
+func (f *flags) onlyFolder(cmd *cobra.Command, what string) error {
+	for _, name := range treeFlags {
+		if cmd.Flags().Changed(name) {
+			return cliutil.Usagef("render: --%s is for a folder; %s is drawn on its own", name, what)
+		}
+	}
+	return nil
+}
+
+// renderTree draws every document below the folder query names. The
+// answer is written also when some documents failed; the command then
+// fails after it.
+func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Rendering, query string, opts port.RenderOptions) error {
+	changed := cmd.Flags().Changed
+	switch {
+	case changed("page"):
+		return cliutil.Usagef("render: %s is a folder: its documents are drawn whole as PDFs; leave --page out", query)
+	case f.dest != "" && formats[strings.ToLower(strings.TrimPrefix(filepath.Ext(f.dest), "."))] != "":
+		return cliutil.Usagef("render: %s is a folder: -o names the directory its PDFs go into, not a file such as %s", query, f.dest)
+	}
+	report, err := r.RenderTree(cmd.Context(), query, f.dest, opts, f.tree)
+	if err != nil && (len(report.Documents) == 0 || cmd.Context().Err() != nil) {
+		return cliutil.PagesErr("render", err)
+	}
+	w := cmd.ErrOrStderr()
+	for _, d := range report.Documents {
+		notes(w, d.LibraryPath+": ", d.Report)
+	}
+	if len(report.Documents) == 0 && !env.JSON(cmd) {
+		cliutil.Notef(w, "no document to draw below %s", query)
+	}
+	if eerr := env.Emit(cmd, treeResult(report)); eerr != nil {
+		return eerr
+	}
+	return cliutil.PagesErr("render", err)
+}
+
+// treeView is what drawing a folder did, for --json.
+type treeView struct {
+	Dir       string         `json:"dir"`
+	Documents []treeDocument `json:"documents"`
+	Rendered  int            `json:"rendered"`
+	Unchanged int            `json:"unchanged"`
+	Failed    int            `json:"failed"`
+}
+
+// treeDocument is one document of a folder drawn.
+type treeDocument struct {
+	Path          string `json:"path"`
+	Document      string `json:"document"`
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	Pages         int    `json:"pages"`
+	SkippedBlocks int    `json:"skipped_blocks"`
+	RefusedPages  int    `json:"refused_pages"`
+	LinksDropped  int    `json:"links_dropped"`
+	Error         string `json:"error,omitempty"`
+}
+
+// treeResult is one row per document, then the totals.
+func treeResult(r port.RenderTreeReport) output.Result {
+	v := treeView{
+		Dir: r.Dir, Documents: make([]treeDocument, 0, len(r.Documents)),
+		Rendered: r.Count(port.RenderRendered), Unchanged: r.Count(port.RenderUnchanged), Failed: r.Count(port.RenderFailed),
+	}
+	t := output.Table{Columns: []output.Column{
+		{Title: "status", Role: output.RoleKind},
+		{Title: "path", Role: output.RolePath},
+		{Title: "document", Role: output.RolePath},
+		{Title: "pages", Role: output.RoleCount},
+		{Title: "error", Role: output.RoleText},
+	}}
+	for _, d := range r.Documents {
+		dv := treeDocument{
+			Path: d.Report.Path, Document: d.LibraryPath, ID: string(d.Document.ID), Status: string(d.Status), Pages: d.Report.Pages,
+			SkippedBlocks: d.Report.SkippedBlocks, RefusedPages: d.Report.RefusedPages, LinksDropped: d.Report.LinksDropped,
+		}
+		pages := output.Count(d.Report.Pages)
+		if d.Status != port.RenderRendered {
+			pages = output.Text("")
+		}
+		if d.Err != nil {
+			dv.Error = d.Err.Error()
+		}
+		v.Documents = append(v.Documents, dv)
+		t.Rows = append(t.Rows, []output.Cell{
+			output.Text(dv.Status), output.Path(dv.Path), output.Path(dv.Document), pages, output.Text(dv.Error),
+		})
+	}
+	total := output.Record{Fields: []output.Field{
+		{Key: "dir", Value: output.Path(r.Dir)},
+		{Key: "documents", Value: output.Count(len(r.Documents))},
+		{Key: "rendered", Value: output.Count(v.Rendered)},
+		{Key: "unchanged", Value: output.Count(v.Unchanged)},
+		{Key: "failed", Value: output.Count(v.Failed)},
+	}}
+	return output.Result{JSON: v, Doc: output.Doc{t, total}}
 }
 
 // options are the flags as render options, or a usage error for a
@@ -226,16 +372,16 @@ func (f *flags) chosenFormat(changed func(string) bool) (port.Format, error) {
 	return port.FormatPDF, nil
 }
 
-// notes says on standard error what the drawing could not keep.
-func notes(cmd *cobra.Command, r port.RenderReport) {
-	w := cmd.ErrOrStderr()
+// notes says on w what the drawing could not keep, each line after
+// prefix.
+func notes(w io.Writer, prefix string, r port.RenderReport) {
 	if r.SkippedBlocks > 0 {
-		cliutil.Notef(w, "%d blocks of the pages did not parse and were left out", r.SkippedBlocks)
+		cliutil.Notef(w, "%s%d blocks of the pages did not parse and were left out", prefix, r.SkippedBlocks)
 	}
 	if r.RefusedPages > 0 {
-		cliutil.Notef(w, "%d pages name a page the original PDF does not have; they are drawn without it", r.RefusedPages)
+		cliutil.Notef(w, "%s%d pages name a page the original PDF does not have; they are drawn without it", prefix, r.RefusedPages)
 	}
 	if r.LinksDropped > 0 {
-		cliutil.Notef(w, "%d links of the original PDF could not be carried over; --mode preserving or recomposed keeps them", r.LinksDropped)
+		cliutil.Notef(w, "%s%d links of the original PDF could not be carried over; --mode preserving or recomposed keeps them", prefix, r.LinksDropped)
 	}
 }
