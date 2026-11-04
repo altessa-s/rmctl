@@ -105,8 +105,18 @@ func TestProduceRefuses(t *testing.T) {
 	if err := localfs.New().Produce(t.Context(), dir, write); !errors.Is(err, localfs.ErrIsDirectory) || called {
 		t.Fatalf("a directory: %v, called %v", err, called)
 	}
-	if err := localfs.New().Produce(t.Context(), filepath.Join(dir, "missing", "f"), write); err == nil || called {
+	missing := filepath.Join(dir, "missing")
+	err := localfs.New().Produce(t.Context(), filepath.Join(missing, "f"), write)
+	if err == nil || called || !strings.Contains(err.Error(), "no directory "+missing) || strings.Contains(err.Error(), ".part") {
 		t.Fatalf("a missing parent: %v, called %v", err, called)
+	}
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = localfs.New().Produce(t.Context(), filepath.Join(file, "f"), write)
+	if err == nil || called || !strings.Contains(err.Error(), file+" is not a directory") {
+		t.Fatalf("a file for a parent: %v, called %v", err, called)
 	}
 }
 

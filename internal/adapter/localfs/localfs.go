@@ -42,6 +42,13 @@ func (FS) Produce(ctx context.Context, path string, write func(w io.Writer) erro
 		return fmt.Errorf("%s: %w", path, ErrIsDirectory)
 	}
 	dir := filepath.Dir(path)
+	// Name the missing directory rather than the staging file inside it.
+	switch info, statErr := os.Stat(dir); {
+	case errors.Is(statErr, fs.ErrNotExist):
+		return fmt.Errorf("create %s: no directory %s", path, dir)
+	case statErr == nil && !info.IsDir():
+		return fmt.Errorf("create %s: %s is not a directory", path, dir)
+	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.part")
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
