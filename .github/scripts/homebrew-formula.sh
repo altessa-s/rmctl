@@ -19,7 +19,7 @@ checksums=${2:?checksums file}
 base="https://github.com/altessa-s/rmctl/releases/download/v${version}"
 
 sum() {
-    local file="rmctl_${version}_$1.tar.gz"
+    local file="rmctl_${version}_$1"
     local value
     value=$(awk -v f="$file" '$2 == f || $2 == "*" f { print $1 }' "$checksums")
     [[ "$value" =~ ^[0-9a-f]{64}$ ]] || { printf 'no checksum for %s\n' "$file" >&2; exit 1; }
@@ -36,12 +36,12 @@ class Rmctl < Formula
 
   on_macos do
     on_arm do
-      url "${base}/rmctl_${version}_darwin_arm64.tar.gz"
-      sha256 "$(sum darwin_arm64)"
+      url "${base}/rmctl_${version}_darwin_arm64.zip"
+      sha256 "$(sum darwin_arm64.zip)"
     end
     on_intel do
-      url "${base}/rmctl_${version}_darwin_amd64.tar.gz"
-      sha256 "$(sum darwin_amd64)"
+      url "${base}/rmctl_${version}_darwin_amd64.zip"
+      sha256 "$(sum darwin_amd64.zip)"
     end
   end
 
@@ -54,11 +54,11 @@ class Rmctl < Formula
 
     on_arm do
       url "${base}/rmctl_${version}_linux_arm64.tar.gz"
-      sha256 "$(sum linux_arm64)"
+      sha256 "$(sum linux_arm64.tar.gz)"
     end
     on_intel do
       url "${base}/rmctl_${version}_linux_amd64.tar.gz"
-      sha256 "$(sum linux_amd64)"
+      sha256 "$(sum linux_amd64.tar.gz)"
     end
   end
 

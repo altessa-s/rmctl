@@ -306,6 +306,11 @@ release: ## Semantic versioning - create and push a new release tag
 	@git push origin $(VERSION)
 	@echo "Release $(VERSION) created and pushed"
 
+.PHONY: release-macos
+release-macos: ## Build, sign and notarize the macOS archives of a published release and upload them (TAG=v1.2.3)
+	@if [ -z "$(TAG)" ]; then echo "Usage: make release-macos TAG=v1.2.3"; exit 1; fi
+	@.github/scripts/release-macos.sh $(TAG)
+
 .PHONY: gosec
 gosec: ## Run gosec static security scanner (see GOSEC_EXCLUDED_RULES)
 	@cd devtools && go install github.com/securego/gosec/v2/cmd/gosec

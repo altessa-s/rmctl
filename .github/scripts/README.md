@@ -69,3 +69,15 @@ and the Cairo stack's development packages, fetches the PDFium build rmrender-li
 (checksum-verified), and writes `CC`, `CGO_CFLAGS`, `CGO_LDFLAGS` and `PDFIUM_DIR` to `$GITHUB_ENV`. `RPATH` is the run path
 the binary finds `libpdfium.so` on: PDFium's own directory by default, for tests run in place; the release passes `'$ORIGIN'` and puts the
 library beside the binary in its archive. Every Linux job that compiles the module with cgo runs it after setting up Go.
+
+## macOS release
+
+The release workflow builds and publishes the Linux and Windows archives. The macOS archives are built on a Mac, so they carry the Developer ID signature of Altessa Solutions Inc without the certificate leaving its keychain: once the release is published, `release-macos.sh TAG` checks the tag out into a temporary worktree, builds `darwin/arm64` and `darwin/amd64` with cgo, signs each binary with the hardened runtime and a secure timestamp, notarizes both in one submission, renders a sample with the binary of the Mac's own architecture, packs `rmctl_<version>_darwin_<arch>.zip` with `ditto`, uploads them to the release, puts their lines into `checksums.txt` and starts [`homebrew.yml`](../workflows/homebrew.yml), which writes the formula from the release's macOS and Linux archives. A bare binary cannot be stapled, so Gatekeeper looks its ticket up online. `UPLOAD=0` stops after packing and leaves the archives in `dist/`.
+
+It needs the certificate in the login keychain, Go, Apple's clang, `gh` signed in with write access to the repository, `jq`, and a notarytool profile, `rmctl-notary` unless `NOTARY_PROFILE` names another, stored once:
+
+```sh
+xcrun notarytool store-credentials rmctl-notary --apple-id <apple-id> --team-id SZA4GU6AL2
+```
+
+`make release-macos TAG=v1.2.0` runs it.
