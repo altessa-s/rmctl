@@ -144,7 +144,7 @@ jobs:
               readelf -d "$bin" | grep -E 'R(UN)?PATH' | grep -qF '[$ORIGIN]' || { echo "::error::no \$ORIGIN run path"; exit 1; }
             fi
             "$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf"
-            "$bin" render "$sample" --page 1 --png -o "$RUNNER_TEMP/smoke.png"
+            "$bin" render "$sample" --page 1 -o "$RUNNER_TEMP/smoke.png"
           fi
 
       - name: Upload the archive

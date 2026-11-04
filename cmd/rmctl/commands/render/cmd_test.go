@@ -33,12 +33,12 @@ func TestRenderPDF(t *testing.T) {
 	f := &clitest.Fake{Rendered: port.RenderReport{Path: "Notes-rendered.pdf", Pages: 3}}
 	r := run(t, f, clitest.Options{}, "render", "/Notes")
 	want := "path\tNotes-rendered.pdf\npages\t3\nskipped_blocks\t0\nrefused_pages\t0\nlinks_dropped\t0\n"
-	if r.Code != 0 || r.Out != want || r.Err != "" || f.Calls()[0] != "Render /Notes  page=0 mode=fresh paper=a4 scale=0" {
+	if r.Code != 0 || r.Out != want || r.Err != "" || f.Calls()[0] != "Render /Notes  format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0" {
 		t.Fatalf("%d %q %q %v", r.Code, r.Out, r.Err, f.Calls())
 	}
 	f = &clitest.Fake{Rendered: port.RenderReport{Pages: 12, SkippedBlocks: 2, RefusedPages: 1, LinksDropped: 3}}
 	r = run(t, f, clitest.Options{}, "render", "d-paper", "-o", "out.pdf", "--mode", "Recomposed", "--paper", "letter", "--json")
-	if r.Code != 0 || f.Calls()[0] != "Render d-paper out.pdf page=0 mode=recomposed paper=letter scale=0" {
+	if r.Code != 0 || f.Calls()[0] != "Render d-paper out.pdf format=pdf page=0 mode=recomposed paper=letter scale=0 quality=0" {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
 	}
 	clitest.Golden(t, "render-json", r.Out)
@@ -53,14 +53,43 @@ func TestRenderPDF(t *testing.T) {
 func TestRenderPNG(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{}
-	r := run(t, f, clitest.Options{}, "render", "/Notes", "--page", "3", "--png", "-o", "p.png")
-	if r.Code != 0 || f.Calls()[0] != "Render /Notes p.png page=3 mode= paper=a4 scale=1" {
+	r := run(t, f, clitest.Options{}, "render", "/Notes", "--page", "3", "-o", "p.png")
+	if r.Code != 0 || f.Calls()[0] != "Render /Notes p.png format=png page=3 mode= paper=a4 scale=1 quality=0" {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
 	}
 	f = &clitest.Fake{}
-	r = run(t, f, clitest.Options{}, "render", "/Notes", "--page", "1", "--png", "--scale", "2.5", "--paper", "tablet")
-	if r.Code != 0 || f.Calls()[0] != "Render /Notes  page=1 mode= paper=tablet scale=2.5" {
+	r = run(t, f, clitest.Options{}, "render", "/Notes", "--page", "1", "--format", "PNG", "--scale", "2.5", "--paper", "tablet")
+	if r.Code != 0 || f.Calls()[0] != "Render /Notes  format=png page=1 mode= paper=tablet scale=2.5 quality=0" {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
+	}
+}
+
+func TestRenderFormats(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--page", "2", "--format", "jpg"}, "Render /Notes  format=jpg page=2 mode= paper=a4 scale=1 quality=0"},
+		{[]string{"--page", "2", "--format", "JPEG", "--quality", "90", "--scale", "2"}, "Render /Notes  format=jpg page=2 mode= paper=a4 scale=2 quality=90"},
+		{[]string{"--page", "2", "--format", "svg"}, "Render /Notes  format=svg page=2 mode= paper=a4 scale=0 quality=0"},
+		{[]string{"--format", "pdf", "--no-template"}, "Render /Notes  format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0 no-template"},
+		{[]string{"--page", "1", "--no-template"}, "Render /Notes  format=png page=1 mode= paper=a4 scale=1 quality=0 no-template"},
+		// Without --format, the extension of -o decides.
+		{[]string{"--page", "4", "-o", "out/p.JPEG"}, "Render /Notes out/p.JPEG format=jpg page=4 mode= paper=a4 scale=1 quality=0"},
+		{[]string{"--page", "4", "-o", "p.jpg", "--quality", "50"}, "Render /Notes p.jpg format=jpg page=4 mode= paper=a4 scale=1 quality=50"},
+		{[]string{"--page", "4", "-o", "p.Svg"}, "Render /Notes p.Svg format=svg page=4 mode= paper=a4 scale=0 quality=0"},
+		{[]string{"-o", "doc.PDF"}, "Render /Notes doc.PDF format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0"},
+		{[]string{"--page", "4", "-o", "out"}, "Render /Notes out format=png page=4 mode= paper=a4 scale=1 quality=0"},
+		{[]string{"-o", "out.txt"}, "Render /Notes out.txt format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0"},
+		// An explicit --format is used whatever -o ends with.
+		{[]string{"--page", "4", "--format", "svg", "-o", "p.png"}, "Render /Notes p.png format=svg page=4 mode= paper=a4 scale=0 quality=0"},
+	} {
+		f := &clitest.Fake{}
+		r := run(t, f, clitest.Options{}, append([]string{"render", "/Notes"}, c.args...)...)
+		if r.Code != 0 || f.Calls()[0] != c.want {
+			t.Fatalf("%v: %d %v %v", c.args, r.Code, r.Error, f.Calls())
+		}
 	}
 }
 
@@ -73,7 +102,7 @@ func TestRenderLocalArchive(t *testing.T) {
 	}
 	f := &clitest.Fake{}
 	r := run(t, f, clitest.Options{}, "render", local, "--id", "3f2a", "-o", "x.pdf")
-	if r.Code != 0 || f.Calls()[0] != "RenderFile "+local+" x.pdf page=0 mode=fresh paper=a4 scale=0 id=3f2a" {
+	if r.Code != 0 || f.Calls()[0] != "RenderFile "+local+" x.pdf format=pdf page=0 mode=fresh paper=a4 scale=0 quality=0 id=3f2a" {
 		t.Fatalf("%d %v %v", r.Code, r.Error, f.Calls())
 	}
 	// A name ending with .rmdoc that is no local file is a cloud document,
@@ -93,11 +122,25 @@ func TestRenderUsage(t *testing.T) {
 		{"render"},
 		{"render", "a", "b"},
 		{"render", "x", "--png"},
-		{"render", "x", "--page", "2"},
+		{"render", "x", "--format", "gif", "--page", "1"},
+		{"render", "x", "--format", "png"},
+		{"render", "x", "--format", "jpg"},
+		{"render", "x", "--format", "svg"},
+		{"render", "x", "-o", "p.png"},
+		{"render", "x", "--page", "2", "--format", "pdf"},
+		{"render", "x", "--page", "2", "-o", "x.pdf"},
 		{"render", "x", "--scale", "2"},
-		{"render", "x", "--page", "1", "--png", "--mode", "fresh"},
-		{"render", "x", "--page", "0", "--png"},
-		{"render", "x", "--page", "1", "--png", "--scale", "0"},
+		{"render", "x", "--page", "1", "--format", "svg", "--scale", "2"},
+		{"render", "x", "--quality", "80"},
+		{"render", "x", "--page", "1", "--quality", "80"},
+		{"render", "x", "--page", "1", "--format", "svg", "--quality", "80"},
+		{"render", "x", "--page", "1", "--format", "jpg", "--quality", "101"},
+		{"render", "x", "--page", "1", "--format", "jpg", "--quality", "-1"},
+		{"render", "x", "--page", "1", "--mode", "fresh"},
+		{"render", "x", "--page", "1", "--format", "svg", "--mode", "fresh"},
+		{"render", "x", "--page", "0"},
+		{"render", "x", "--page", "0", "--format", "svg"},
+		{"render", "x", "--page", "1", "--scale", "0"},
 		{"render", "x", "--mode", "draft"},
 		{"render", "x", "--paper", "a3"},
 		{"render", "x", "--page", "n"},
@@ -115,7 +158,7 @@ func TestRenderErrors(t *testing.T) {
 	if r.Code != cliutil.CodeError || !errors.Is(r.Error, cliutil.ErrNoRender) || !strings.Contains(r.Error.Error(), "not available in this build") {
 		t.Fatalf("%d %v", r.Code, r.Error)
 	}
-	r = run(t, &clitest.Fake{RenderErr: domain.ErrNoSuchPage}, clitest.Options{}, "render", "x", "--page", "9", "--png")
+	r = run(t, &clitest.Fake{RenderErr: domain.ErrNoSuchPage}, clitest.Options{}, "render", "x", "--page", "9")
 	if r.Code != cliutil.CodeError || r.Error.Error() != "render: no such page" {
 		t.Fatalf("%d %v", r.Code, r.Error)
 	}

@@ -9,8 +9,11 @@ package renderer
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
+	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"testing"
 
@@ -64,6 +67,78 @@ func TestRenderPNG(t *testing.T) {
 	}
 }
 
+func TestRenderJPEG(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for _, c := range []struct {
+		scale   float64
+		quality int
+		width   int
+	}{{1, 0, 1404}, {0.5, 90, 702}} {
+		opts := port.RenderOptions{Page: 2, Format: port.FormatJPEG, Scale: c.scale, Quality: c.quality, Paper: port.PaperA4}
+		out, report, err := r.Render(t.Context(), notes(t), "", opts)
+		if err != nil || report.Pages != 1 {
+			t.Fatalf("%+v %v", report, err)
+		}
+		img, err := jpeg.Decode(bytes.NewReader(out))
+		if err != nil || img.Bounds().Dx() != c.width {
+			t.Fatalf("scale %g: %v", c.scale, err)
+		}
+	}
+}
+
+func TestRenderSVG(t *testing.T) {
+	t.Parallel()
+	out, report, err := New().Render(t.Context(), notes(t), "", port.RenderOptions{Page: 3, Format: port.FormatSVG, Paper: port.PaperA4})
+	if err != nil || report.Pages != 1 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	// The page is one well-formed document whose root is <svg>.
+	d := xml.NewDecoder(bytes.NewReader(out))
+	var root string
+	for {
+		tok, terr := d.Token()
+		if errors.Is(terr, io.EOF) {
+			break
+		}
+		if terr != nil {
+			t.Fatalf("%v: %.200s", terr, out)
+		}
+		if start, ok := tok.(xml.StartElement); ok && root == "" {
+			root = start.Name.Local
+		}
+	}
+	if root != "svg" {
+		t.Fatalf("root %q", root)
+	}
+}
+
+// Every page of the notebook has a lined template, which --no-template
+// leaves out of each format.
+func TestRenderNoTemplates(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for _, opts := range []port.RenderOptions{
+		{Paper: port.PaperA4},
+		{Page: 1, Format: port.FormatPNG, Scale: 0.5, Paper: port.PaperA4},
+		{Page: 1, Format: port.FormatJPEG, Scale: 0.5, Paper: port.PaperA4},
+		{Page: 1, Format: port.FormatSVG, Paper: port.PaperA4},
+	} {
+		with, _, err := r.Render(t.Context(), notes(t), "", opts)
+		if err != nil {
+			t.Fatalf("%+v: %v", opts, err)
+		}
+		opts.NoTemplates = true
+		without, _, err := r.Render(t.Context(), notes(t), "", opts)
+		if err != nil {
+			t.Fatalf("%+v: %v", opts, err)
+		}
+		if bytes.Equal(with, without) || len(without) >= len(with) {
+			t.Fatalf("%+v: %d bytes with the template, %d without", opts, len(with), len(without))
+		}
+	}
+}
+
 func TestRenderFails(t *testing.T) {
 	t.Parallel()
 	r := New()
@@ -77,7 +152,9 @@ func TestRenderFails(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cause := errors.New("stop")
 	cancel(cause)
-	for _, opts := range []port.RenderOptions{{}, {Page: 1, Scale: 1}} {
+	for _, opts := range []port.RenderOptions{
+		{}, {Page: 1, Scale: 1}, {Page: 1, Format: port.FormatJPEG, Scale: 1}, {Page: 1, Format: port.FormatSVG},
+	} {
 		if _, _, err := r.Render(ctx, notes(t), "", opts); !errors.Is(err, cause) {
 			t.Fatalf("%+v: %v", opts, err)
 		}

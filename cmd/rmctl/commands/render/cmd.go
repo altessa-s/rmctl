@@ -5,6 +5,7 @@
 package render
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -22,6 +23,17 @@ var (
 	papers = []port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}        //nolint:gochecknoglobals // a fixed list
 )
 
+// formats are the values --format takes and the extensions of -o that
+// stand for one, and names what each draws in a message.
+var (
+	formats = map[string]port.Format{ //nolint:gochecknoglobals // a fixed table
+		"pdf": port.FormatPDF, "png": port.FormatPNG, "jpg": port.FormatJPEG, "jpeg": port.FormatJPEG, "svg": port.FormatSVG,
+	}
+	formatNames = map[port.Format]string{ //nolint:gochecknoglobals // a fixed table
+		port.FormatPDF: "a PDF", port.FormatPNG: "a PNG", port.FormatJPEG: "a JPEG", port.FormatSVG: "an SVG",
+	}
+)
+
 // renderView is what render wrote, for --json.
 type renderView struct {
 	Path          string `json:"path"`
@@ -33,10 +45,10 @@ type renderView struct {
 
 // flags are what render is asked.
 type flags struct {
-	dest, mode, paper, id string
-	page                  int
-	png                   bool
-	scale                 float64
+	dest, format, mode, paper, id string
+	page, quality                 int
+	noTemplate                    bool
+	scale                         float64
 }
 
 // New returns the render command. It changes nothing; a local archive needs
@@ -46,12 +58,19 @@ func New(env *cliutil.Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "render <path|id|file.rmdoc> [-o file]",
 		GroupID: cliutil.GroupRead,
-		Short:   "Draw a document with its annotations as a PDF, or a page as a PNG",
+		Short:   "Draw a document with its annotations as a PDF, or a page as an image",
 		Long: heredoc.Doc(`
 			Draws a document the way the tablet shows it: handwriting with its pen
 			textures, typed text, highlights, images and page templates, over the
 			pages of the PDF or EPUB it was made from. The whole document becomes a
-			PDF; --page N --png draws its page N, from 1, as a PNG instead.
+			PDF; --page N draws its page N, from 1, as an image instead.
+
+			--format is what is drawn: pdf, the whole document, or png, jpg (or
+			jpeg) or svg, the page --page names. Without it the extension of -o
+			decides, when it is one of these; otherwise a page is a PNG and the
+			whole document a PDF. A PNG or a JPEG is drawn on white; an SVG has no
+			background. --no-template draws the pages without their templates, in
+			any format.
 
 			--mode says what becomes of a document made from a PDF (a notebook comes
 			out the same in each): fresh, the default, draws a new PDF, keeping links
@@ -60,14 +79,15 @@ func New(env *cliutil.Env) *cobra.Command {
 			document whose pages were moved, added or hidden; recomposed writes a
 			new PDF from the original's objects, keeping forms and annotations, and
 			breaks signatures. --paper is the sheet a notebook page is laid out on;
-			a page of a PDF keeps its own size. --scale is a PNG's pixels per tablet
-			unit: at 1, the default, a page is 1404 pixels wide, as on the tablet's
-			screen.
+			a page of a PDF keeps its own size. --scale is a PNG's or a JPEG's
+			pixels per tablet unit: at 1, the default, a page is 1404 pixels wide,
+			as on the tablet's screen. --quality is a JPEG's, from 1 to 100; 0, the
+			default, is the renderer's own, 75.
 
 			Without -o the file is written in the working directory under the
-			document's name: <name>-rendered.pdf, or <name>-p<N>.png for a page; a
-			directory takes that name inside it. The file appears only once it is
-			whole. The path written is the answer.
+			document's name: <name>-rendered.pdf, or <name>-p<N>.png, .jpg or .svg
+			for a page; a directory takes that name inside it. The file appears
+			only once it is whole. The path written is the answer.
 
 			An argument ending with .rmdoc that is a local file is read from that
 			archive, offline, as "rmctl export" and "rmctl backup" write one; "./"
@@ -81,9 +101,11 @@ func New(env *cliutil.Env) *cobra.Command {
 			rmctl render /Books/Paper -o paper.pdf
 			rmctl render /Notes/Meeting --paper letter
 			rmctl render /Books/Paper --mode preserving
-			rmctl render 3f2a --page 3 --png --scale 2 -o page3.png
+			rmctl render 3f2a --page 3 --scale 2 -o page3.png
+			rmctl render 3f2a --page 3 --format jpg --quality 90
+			rmctl render /Notes/Meeting --page 1 -o page1.svg --no-template
 			rmctl render backup.rmdoc -o meeting.pdf
-			rmctl render ~/rm-backup/3f2a.rmdoc --page 1 --png
+			rmctl render ~/rm-backup/3f2a.rmdoc --page 1
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
 		ValidArgsFunction: cliutil.CompleteRemote(env, false),
@@ -123,12 +145,14 @@ func New(env *cliutil.Env) *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVarP(&f.dest, "output", "o", "", "file to write (default: <name>-rendered.pdf or <name>-p<N>.png here)")
+	fl.StringVarP(&f.dest, "output", "o", "", "file to write (default: <name>-rendered.pdf or <name>-p<N>.<format> here)")
+	fl.StringVar(&f.format, "format", "", "pdf, png, jpg or svg (default: from -o's extension, else png with --page and pdf without)")
 	fl.StringVar(&f.mode, "mode", string(port.PDFFresh), "PDF mode: fresh, preserving or recomposed")
 	fl.StringVar(&f.paper, "paper", string(port.PaperA4), "paper of a notebook page: a4, letter or tablet")
-	fl.IntVar(&f.page, "page", 0, "the page to draw as a PNG, from 1 (with --png)")
-	fl.BoolVar(&f.png, "png", false, "draw the page --page names as a PNG")
-	fl.Float64Var(&f.scale, "scale", 1, "pixels per tablet unit of a PNG: 1 is 1404 pixels across")
+	fl.IntVar(&f.page, "page", 0, "the page to draw as an image, from 1")
+	fl.Float64Var(&f.scale, "scale", 1, "pixels per tablet unit of a PNG or a JPEG: 1 is 1404 pixels across")
+	fl.IntVar(&f.quality, "quality", 0, "quality of a JPEG, 1 to 100 (default: 0, the renderer's, 75)")
+	fl.BoolVar(&f.noTemplate, "no-template", false, "draw the pages without their templates")
 	fl.StringVar(&f.id, "id", "", "the document of a local archive that holds several: an id or a unique prefix")
 	return cmd
 }
@@ -137,21 +161,29 @@ func New(env *cliutil.Env) *cobra.Command {
 // combination that cannot be drawn.
 func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 	changed := cmd.Flags().Changed
-	opts := port.RenderOptions{Paper: port.Paper(strings.ToLower(f.paper)), Document: f.id}
+	opts := port.RenderOptions{Paper: port.Paper(strings.ToLower(f.paper)), Document: f.id, NoTemplates: f.noTemplate}
 	if !slices.Contains(papers, opts.Paper) {
 		return opts, cliutil.Usagef("render: unknown --paper %q: use a4, letter or tablet", f.paper)
 	}
+	format, err := f.chosenFormat(changed)
+	if err != nil {
+		return opts, err
+	}
+	opts.Format = format
+	image := format == port.FormatPNG || format == port.FormatJPEG
 	switch {
-	case f.png && !changed("page"):
-		return opts, cliutil.Usagef("render: --png draws one page: name it with --page N")
-	case changed("page") && !f.png:
-		return opts, cliutil.Usagef("render: --page draws one page as a PNG: add --png, or leave --page out for the whole document as a PDF")
-	case !f.png && changed("scale"):
-		return opts, cliutil.Usagef("render: --scale is for a page drawn with --png")
-	case f.png && changed("mode"):
+	case format == port.FormatPDF && changed("page"):
+		return opts, cliutil.Usagef("render: a PDF is the whole document: leave --page out, or draw the page with --format png, jpg or svg")
+	case format != port.FormatPDF && !changed("page"):
+		return opts, cliutil.Usagef("render: %s is one page: name it with --page N, or draw the whole document with --format pdf", formatNames[format])
+	case changed("scale") && !image:
+		return opts, cliutil.Usagef("render: --scale is for a page drawn as a PNG or a JPEG")
+	case changed("quality") && format != port.FormatJPEG:
+		return opts, cliutil.Usagef("render: --quality is for a page drawn as a JPEG")
+	case changed("mode") && format != port.FormatPDF:
 		return opts, cliutil.Usagef("render: --mode is for a whole document drawn as a PDF")
 	}
-	if !f.png {
+	if format == port.FormatPDF {
 		opts.Mode = port.PDFMode(strings.ToLower(f.mode))
 		if !slices.Contains(modes, opts.Mode) {
 			return opts, cliutil.Usagef("render: unknown --mode %q: use fresh, preserving or recomposed", f.mode)
@@ -161,11 +193,37 @@ func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 	if f.page < 1 {
 		return opts, cliutil.Usagef("render: --page %d: pages count from 1", f.page)
 	}
+	opts.Page = f.page
+	if !image {
+		return opts, nil
+	}
 	if f.scale <= 0 {
 		return opts, cliutil.Usagef("render: --scale %g: it must be above 0", f.scale)
 	}
-	opts.Page, opts.Scale = f.page, f.scale
+	if f.quality < 0 || f.quality > 100 {
+		return opts, cliutil.Usagef("render: --quality %d: use 1 to 100, or 0 for the default", f.quality)
+	}
+	opts.Scale, opts.Quality = f.scale, f.quality
 	return opts, nil
+}
+
+// chosenFormat is the format --format names; without it, the one the
+// extension of -o stands for, or else a PNG with --page and a PDF without.
+func (f *flags) chosenFormat(changed func(string) bool) (port.Format, error) {
+	if changed("format") {
+		format, ok := formats[strings.ToLower(f.format)]
+		if !ok {
+			return "", cliutil.Usagef("render: unknown --format %q: use pdf, png, jpg or svg", f.format)
+		}
+		return format, nil
+	}
+	if format, ok := formats[strings.ToLower(strings.TrimPrefix(filepath.Ext(f.dest), "."))]; ok {
+		return format, nil
+	}
+	if changed("page") {
+		return port.FormatPNG, nil
+	}
+	return port.FormatPDF, nil
 }
 
 // notes says on standard error what the drawing could not keep.

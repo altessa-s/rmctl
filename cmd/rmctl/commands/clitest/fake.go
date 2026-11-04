@@ -339,8 +339,11 @@ func (f *Fake) RenderFile(_ context.Context, path, dest string, o port.RenderOpt
 }
 
 func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
-	args := []string{from, dest, "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode), "paper=" + string(o.Paper),
-		"scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64)}
+	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
+		"paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
+	if o.NoTemplates {
+		args = append(args, "no-template")
+	}
 	if o.Document != "" {
 		args = append(args, "id="+o.Document)
 	}

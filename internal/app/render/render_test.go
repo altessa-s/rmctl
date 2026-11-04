@@ -116,6 +116,29 @@ func TestRenderPNG(t *testing.T) {
 	}
 }
 
+func TestRenderImages(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		opts       port.RenderOptions
+		path, head string
+	}{
+		{port.RenderOptions{Page: 2, Format: port.FormatJPEG}, "Paper-p2.jpg", "JPG d1aaaaaa p2 x1 q0 a4"},
+		{port.RenderOptions{Page: 1, Format: port.FormatJPEG, Scale: 2, Quality: 90}, "Paper-p1.jpg", "JPG d1aaaaaa p1 x2 q90 a4"},
+		{port.RenderOptions{Page: 3, Format: port.FormatSVG, Paper: port.PaperTablet}, "Paper-p3.svg", "SVG d1aaaaaa p3 tablet"},
+		{port.RenderOptions{Page: 1, NoTemplates: true}, "Paper-p1.png", "PNG d1aaaaaa p1 x1 a4 no-template"},
+		{port.RenderOptions{NoTemplates: true}, "Paper-rendered.pdf", "PDF d1aaaaaa fresh a4 no-template"},
+	} {
+		f := setup(t)
+		report, err := f.s.Render(t.Context(), "d1", "", c.opts)
+		if err != nil || report.Path != c.path {
+			t.Fatalf("%+v: %+v %v", c.opts, report, err)
+		}
+		if head, _ := f.written(t, c.path); head != c.head {
+			t.Fatalf("%+v: %q", c.opts, head)
+		}
+	}
+}
+
 func TestRenderRefuses(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -285,10 +308,25 @@ func TestNormalized(t *testing.T) {
 	for _, c := range []struct {
 		in, want port.RenderOptions
 	}{
-		{port.RenderOptions{}, port.RenderOptions{Mode: port.PDFFresh, Paper: port.PaperA4}},
-		{port.RenderOptions{Mode: port.PDFPreserving, Paper: port.PaperLetter}, port.RenderOptions{Mode: port.PDFPreserving, Paper: port.PaperLetter}},
-		{port.RenderOptions{Page: 3}, port.RenderOptions{Page: 3, Paper: port.PaperA4, Scale: render.DefaultScale}},
-		{port.RenderOptions{Page: 1, Scale: render.MaxScale}, port.RenderOptions{Page: 1, Paper: port.PaperA4, Scale: render.MaxScale}},
+		{port.RenderOptions{}, port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFFresh, Paper: port.PaperA4}},
+		{
+			port.RenderOptions{Mode: port.PDFPreserving, Paper: port.PaperLetter, NoTemplates: true},
+			port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFPreserving, Paper: port.PaperLetter, NoTemplates: true},
+		},
+		{port.RenderOptions{Page: 3}, port.RenderOptions{Page: 3, Format: port.FormatPNG, Paper: port.PaperA4, Scale: render.DefaultScale}},
+		{
+			port.RenderOptions{Page: 1, Scale: render.MaxScale},
+			port.RenderOptions{Page: 1, Format: port.FormatPNG, Paper: port.PaperA4, Scale: render.MaxScale},
+		},
+		{
+			port.RenderOptions{Page: 2, Format: port.FormatJPEG},
+			port.RenderOptions{Page: 2, Format: port.FormatJPEG, Paper: port.PaperA4, Scale: render.DefaultScale},
+		},
+		{
+			port.RenderOptions{Page: 2, Format: port.FormatJPEG, Quality: render.MaxQuality},
+			port.RenderOptions{Page: 2, Format: port.FormatJPEG, Paper: port.PaperA4, Scale: render.DefaultScale, Quality: render.MaxQuality},
+		},
+		{port.RenderOptions{Page: 2, Format: port.FormatSVG}, port.RenderOptions{Page: 2, Format: port.FormatSVG, Paper: port.PaperA4}},
 	} {
 		if got, err := render.Normalized(c.in); err != nil || got != c.want {
 			t.Errorf("%+v: %+v %v", c.in, got, err)
@@ -302,6 +340,18 @@ func TestNormalized(t *testing.T) {
 		{Page: 1, Mode: port.PDFFresh},
 		{Page: 1, Scale: -1},
 		{Page: 1, Scale: render.MaxScale + 1},
+		{Format: "gif", Page: 1},
+		{Format: port.FormatPDF, Page: 1},
+		{Format: port.FormatPNG},
+		{Format: port.FormatJPEG},
+		{Format: port.FormatSVG},
+		{Page: 1, Format: port.FormatSVG, Scale: 2},
+		{Page: 1, Format: port.FormatSVG, Mode: port.PDFFresh},
+		{Page: 1, Quality: 50},
+		{Page: 1, Format: port.FormatSVG, Quality: 50},
+		{Quality: 50},
+		{Page: 1, Format: port.FormatJPEG, Quality: -1},
+		{Page: 1, Format: port.FormatJPEG, Quality: render.MaxQuality + 1},
 	} {
 		if _, err := render.Normalized(bad); !errors.Is(err, render.ErrBadOptions) {
 			t.Errorf("%+v: %v", bad, err)
@@ -312,6 +362,7 @@ func TestNormalized(t *testing.T) {
 func TestFileName(t *testing.T) {
 	t.Parallel()
 	pdf, png := port.RenderOptions{}, port.RenderOptions{Page: 12}
+	jpg, svg := port.RenderOptions{Page: 2, Format: port.FormatJPEG}, port.RenderOptions{Page: 3, Format: port.FormatSVG}
 	for _, c := range []struct {
 		name string
 		opts port.RenderOptions
@@ -323,6 +374,9 @@ func TestFileName(t *testing.T) {
 		{".pdf", pdf, ".pdf-rendered.pdf"},
 		{"a/b", png, "a-b-p12.png"},
 		{"pdf", pdf, "pdf-rendered.pdf"},
+		{"Notes", jpg, "Notes-p2.jpg"},
+		{"Paper.pdf", svg, "Paper-p3.svg"},
+		{"Notes", port.RenderOptions{Format: port.FormatPDF}, "Notes-rendered.pdf"},
 	} {
 		if got := render.FileName(c.name, c.opts); got != c.want {
 			t.Errorf("%q: %q, want %q", c.name, got, c.want)

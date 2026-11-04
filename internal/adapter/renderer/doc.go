@@ -4,7 +4,7 @@
 
 // Package renderer draws .rmdoc documents through rmrender-go: it
 // implements port.Renderer, a whole document to a PDF or one page to a PNG,
-// with the fonts and page templates rmrender-go bundles.
+// a JPEG or an SVG, with the fonts and page templates rmrender-go bundles.
 //
 // rmrender-go draws natively, with CoreGraphics on macOS and with Cairo,
 // Pango and PDFium on Linux, through cgo, and does not build anywhere else.

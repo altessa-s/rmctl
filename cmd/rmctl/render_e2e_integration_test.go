@@ -8,6 +8,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/xml"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -18,7 +20,8 @@ import (
 )
 
 // A notebook the tablet wrote, drawn through the whole tool: from the cloud
-// as a PDF and a page as a PNG, then from its exported archive offline.
+// as a PDF and a page as a PNG, a JPEG and an SVG, then from its exported
+// archive offline.
 func TestE2E_Render(t *testing.T) {
 	e := newE2E(t)
 	e.register()
@@ -37,7 +40,7 @@ func TestE2E_Render(t *testing.T) {
 	}
 
 	page := filepath.Join(dir, "page.png")
-	e.ok("render", "/Notes", "--page", "2", "--png", "--scale", "0.5", "-o", page)
+	e.ok("render", "/Notes", "--page", "2", "--scale", "0.5", "-o", page)
 	data, err := os.ReadFile(page)
 	if err != nil {
 		t.Fatal(err)
@@ -45,8 +48,28 @@ func TestE2E_Render(t *testing.T) {
 	if config, err := png.DecodeConfig(bytes.NewReader(data)); err != nil || config.Width != 702 {
 		t.Fatalf("%+v %v", config, err)
 	}
-	if code, _, stderr := e.rmctl("render", "/Notes", "--page", "3", "--png", "-o", page); code != 1 || !strings.Contains(stderr, "no such page") {
+	if code, _, stderr := e.rmctl("render", "/Notes", "--page", "3", "-o", page); code != 1 || !strings.Contains(stderr, "no such page") {
 		t.Fatalf("page 3 of 2: %d %q", code, stderr)
+	}
+
+	photo := filepath.Join(dir, "page.jpeg")
+	e.ok("render", "/Notes", "--page", "1", "--scale", "0.5", "--quality", "60", "--no-template", "-o", photo)
+	if data, err = os.ReadFile(photo); err != nil {
+		t.Fatal(err)
+	}
+	if config, err := jpeg.DecodeConfig(bytes.NewReader(data)); err != nil || config.Width != 702 {
+		t.Fatalf("%+v %v", config, err)
+	}
+	vector := filepath.Join(dir, "page.out")
+	e.ok("render", "/Notes", "--page", "2", "--format", "svg", "-o", vector)
+	if data, err = os.ReadFile(vector); err != nil {
+		t.Fatal(err)
+	}
+	var svg struct {
+		XMLName xml.Name
+	}
+	if err = xml.Unmarshal(data, &svg); err != nil || svg.XMLName.Local != "svg" {
+		t.Fatalf("%s: %v", svg.XMLName.Local, err)
 	}
 
 	archive := filepath.Join(dir, "notes.rmdoc")

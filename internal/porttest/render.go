@@ -14,12 +14,14 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// Renderer is the renderer double. A PDF is "PDF <id> <mode> <paper>" and a
-// PNG "PNG <id> p<page> x<scale> <paper>", each followed by a newline and
-// the archive it was drawn from, so a test sees both what was asked and
-// what was drawn. Pages is how many pages every document has (0 is 3);
-// Report is what a PDF reports beyond its pages. Unavailable makes it a
-// build without the renderer; Fail fails Render.
+// Renderer is the renderer double. A PDF is "PDF <id> <mode> <paper>", a
+// PNG "PNG <id> p<page> x<scale> <paper>", a JPEG "JPG <id> p<page>
+// x<scale> q<quality> <paper>" and an SVG "SVG <id> p<page> <paper>", with
+// " no-template" after when the templates are left out, each followed by a
+// newline and the archive it was drawn from, so a test sees both what was
+// asked and what was drawn. Pages is how many pages every document has (0
+// is 3); Report is what a PDF reports beyond its pages. Unavailable makes
+// it a build without the renderer; Fail fails Render.
 type Renderer struct {
 	Pages       int
 	Report      port.RenderReport
@@ -68,10 +70,20 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		if opts.Page > pages {
 			return nil, port.RenderReport{}, fmt.Errorf("page %d of %d: %w", opts.Page, pages, domain.ErrNoSuchPage)
 		}
-		head = fmt.Sprintf("PNG %s p%d x%g %s", id, opts.Page, opts.Scale, opts.Paper)
+		switch opts.Format {
+		case port.FormatJPEG:
+			head = fmt.Sprintf("JPG %s p%d x%g q%d %s", id, opts.Page, opts.Scale, opts.Quality, opts.Paper)
+		case port.FormatSVG:
+			head = fmt.Sprintf("SVG %s p%d %s", id, opts.Page, opts.Paper)
+		default:
+			head = fmt.Sprintf("PNG %s p%d x%g %s", id, opts.Page, opts.Scale, opts.Paper)
+		}
 		report = port.RenderReport{Pages: 1}
 	} else {
 		report.Pages = pages
+	}
+	if opts.NoTemplates {
+		head += " no-template"
 	}
 	r.mu.Lock()
 	r.calls = append(r.calls, head)

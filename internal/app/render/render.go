@@ -18,12 +18,16 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// DefaultScale is a PNG's pixels per .rm unit when none is asked for: a
-// page as wide as the tablet's screen, 1404 pixels.
+// DefaultScale is a PNG's or a JPEG's pixels per .rm unit when none is
+// asked for: a page as wide as the tablet's screen, 1404 pixels.
 const DefaultScale = 1.0
 
 // MaxScale bounds the scale: a page sixteen times the tablet's screen.
 const MaxScale = 16.0
+
+// MaxQuality is the best a JPEG can be asked for; 0 is the renderer's
+// default.
+const MaxQuality = 100
 
 // The failures of the options and of the document asked for.
 var (
@@ -71,8 +75,10 @@ func New(
 }
 
 // Normalized is opts with the defaults filled in, or ErrBadOptions: a
-// page below 0, a mode or paper not known, a scale out of (0, MaxScale] or
-// asked of a PDF, or a mode asked of a PNG.
+// page below 0, a format, mode or paper not known, a PDF of one page or an
+// image of the whole document, a scale out of (0, MaxScale] or asked of
+// anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or asked
+// of anything but a JPEG, or a mode asked of an image.
 func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	if opts.Page < 0 {
 		return opts, fmt.Errorf("%w: page %d: pages count from 1", ErrBadOptions, opts.Page)
@@ -83,9 +89,22 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	if !slices.Contains([]port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}, opts.Paper) {
 		return opts, fmt.Errorf("%w: unknown paper %q", ErrBadOptions, opts.Paper)
 	}
-	if opts.Page == 0 {
+	opts.Format = format(opts)
+	if !slices.Contains([]port.Format{port.FormatPDF, port.FormatPNG, port.FormatJPEG, port.FormatSVG}, opts.Format) {
+		return opts, fmt.Errorf("%w: unknown format %q", ErrBadOptions, opts.Format)
+	}
+	if opts.Quality != 0 && opts.Format != port.FormatJPEG {
+		return opts, fmt.Errorf("%w: a quality is for a page drawn as a JPEG", ErrBadOptions)
+	}
+	if opts.Quality < 0 || opts.Quality > MaxQuality {
+		return opts, fmt.Errorf("%w: quality %d is outside [1, %d]", ErrBadOptions, opts.Quality, MaxQuality)
+	}
+	if opts.Format == port.FormatPDF {
+		if opts.Page != 0 {
+			return opts, fmt.Errorf("%w: a page is drawn as an image: png, jpg or svg", ErrBadOptions)
+		}
 		if opts.Scale != 0 {
-			return opts, fmt.Errorf("%w: a scale is for a page drawn as a PNG", ErrBadOptions)
+			return opts, fmt.Errorf("%w: a scale is for a page drawn as a PNG or a JPEG", ErrBadOptions)
 		}
 		if opts.Mode == "" {
 			opts.Mode = port.PDFFresh
@@ -95,8 +114,17 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 		}
 		return opts, nil
 	}
+	if opts.Page == 0 {
+		return opts, fmt.Errorf("%w: a %s is of one page: name it", ErrBadOptions, opts.Format)
+	}
 	if opts.Mode != "" {
 		return opts, fmt.Errorf("%w: a PDF mode is for a whole document drawn as a PDF", ErrBadOptions)
+	}
+	if opts.Format == port.FormatSVG {
+		if opts.Scale != 0 {
+			return opts, fmt.Errorf("%w: a scale is for a page drawn as a PNG or a JPEG", ErrBadOptions)
+		}
+		return opts, nil
 	}
 	if opts.Scale == 0 {
 		opts.Scale = DefaultScale
@@ -107,10 +135,23 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	return opts, nil
 }
 
+// format is the format opts asks for: a PNG for a page and a PDF for the
+// whole document when it names none.
+func format(opts port.RenderOptions) port.Format {
+	switch {
+	case opts.Format != "":
+		return opts.Format
+	case opts.Page > 0:
+		return port.FormatPNG
+	default:
+		return port.FormatPDF
+	}
+}
+
 // FileName is the name a drawing of the document name takes without -o:
 // "<name>-rendered.pdf" for a PDF, so it never takes the place of the
-// document's own PDF, and "<name>-p<N>.png" for a page. A .pdf or .epub
-// the name ends with is dropped first.
+// document's own PDF, and "<name>-p<N>.png", ".jpg" or ".svg" for a page.
+// A .pdf or .epub the name ends with is dropped first.
 func FileName(name string, opts port.RenderOptions) string {
 	base := fetch.SafeName(name)
 	for _, ext := range []string{".pdf", ".epub"} {
@@ -119,8 +160,8 @@ func FileName(name string, opts port.RenderOptions) string {
 			break
 		}
 	}
-	if opts.Page > 0 {
-		return fmt.Sprintf("%s-p%d.png", base, opts.Page)
+	if f := format(opts); f != port.FormatPDF {
+		return fmt.Sprintf("%s-p%d.%s", base, opts.Page, f)
 	}
 	return base + "-rendered.pdf"
 }

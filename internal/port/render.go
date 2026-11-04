@@ -28,6 +28,21 @@ const (
 	PDFRecomposed PDFMode = "recomposed"
 )
 
+// Format is what a rendering is drawn as: the whole document as a PDF, or
+// one page as an image.
+type Format string
+
+// The formats.
+const (
+	FormatPDF Format = "pdf"
+	// FormatPNG and FormatJPEG are a page as pixels, on white.
+	FormatPNG  Format = "png"
+	FormatJPEG Format = "jpg"
+	// FormatSVG is a page as a standalone SVG document, without a
+	// background.
+	FormatSVG Format = "svg"
+)
+
 // Paper is the sheet a notebook page is laid out on; a page over an
 // imported PDF keeps its PDF page's size.
 type Paper string
@@ -42,16 +57,24 @@ const (
 
 // RenderOptions shape a rendering.
 type RenderOptions struct {
-	// Page is the page drawn as a PNG, from 1; 0 draws the whole document
-	// as a PDF.
+	// Page is the page drawn as an image, from 1; 0 draws the whole
+	// document as a PDF.
 	Page int
+	// Format is what is drawn: FormatPDF for the whole document, an image
+	// format for a page. Empty is FormatPDF without a page, FormatPNG with
+	// one.
+	Format Format
 	// Mode is the PDF mode; empty is PDFFresh.
 	Mode PDFMode
 	// Paper is the sheet; empty is PaperA4.
 	Paper Paper
-	// Scale is a PNG's pixels per .rm unit; 0 is the default, at which a
-	// page is as wide as the tablet's screen.
+	// Scale is a PNG's or a JPEG's pixels per .rm unit; 0 is the default,
+	// at which a page is as wide as the tablet's screen.
 	Scale float64
+	// Quality is a JPEG's, from 1 to 100; 0 is the renderer's default.
+	Quality int
+	// NoTemplates draws the pages without their templates.
+	NoTemplates bool
 	// Document names the document of a local archive that holds several:
 	// an identifier or a unique prefix of one.
 	Document string
@@ -76,9 +99,10 @@ type Renderer interface {
 	// nothing, so a caller fails before downloading anything.
 	Available() error
 	// Render draws the document id of the archive (the first one when id
-	// is empty), which the caller has found in it: the page opts.Page as a
-	// PNG, or the whole document as a PDF. Mode, Paper and Scale are set. A
-	// page beyond the document's is domain.ErrNoSuchPage.
+	// is empty), which the caller has found in it: the page opts.Page as
+	// the image opts.Format names, or the whole document as a PDF. Format,
+	// Mode, Paper and Scale are set. A page beyond the document's is
+	// domain.ErrNoSuchPage.
 	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions) ([]byte, RenderReport, error)
 }
 

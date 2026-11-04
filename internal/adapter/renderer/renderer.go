@@ -38,8 +38,9 @@ func New() *Renderer {
 // Available implements port.Renderer: this build draws.
 func (*Renderer) Available() error { return nil }
 
-// Render implements port.Renderer. A PNG is drawn on white, so a page reads
-// the same in any viewer; the page templates are the bundled ones.
+// Render implements port.Renderer. A PNG or a JPEG is drawn on white, so a
+// page reads the same in any viewer; an SVG has no background. The page
+// templates are the bundled ones, or none with opts.NoTemplates.
 func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID, opts port.RenderOptions) ([]byte, port.RenderReport, error) {
 	f, err := r.fonts()
 	if err != nil {
@@ -51,16 +52,18 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 	}
 	defer func() { _ = doc.Close() }()
 	o := &rmrender.Options{Fonts: f, Paper: paper(opts.Paper)}
+	if opts.NoTemplates {
+		o.Templates = rmrender.NoTemplates()
+	}
 	if opts.Page > 0 {
 		if opts.Page > doc.Len() {
 			return nil, port.RenderReport{}, fmt.Errorf("page %d of %d: %w", opts.Page, doc.Len(), domain.ErrNoSuchPage)
 		}
-		o.Background = color.White
-		png, perr := doc.PagePNG(ctx, opts.Page-1, opts.Scale, o)
+		out, perr := page(ctx, doc, opts, o)
 		if perr != nil {
 			return nil, port.RenderReport{}, fmt.Errorf("draw page %d: %w", opts.Page, perr)
 		}
-		return png, port.RenderReport{Pages: 1}, nil
+		return out, port.RenderReport{Pages: 1}, nil
 	}
 	pdf, report, err := doc.PDF(ctx, mode(opts.Mode), o)
 	if err != nil {
@@ -70,6 +73,22 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		Pages: report.RenderedPages, SkippedBlocks: report.SkippedBlocks,
 		RefusedPages: report.RefusedSources, LinksDropped: report.LinksDropped,
 	}, nil
+}
+
+// page draws the page opts.Page of doc as opts.Format names: an SVG, a
+// JPEG on white or, for any other format, a PNG on white.
+func page(ctx context.Context, doc *rmrender.Document, opts port.RenderOptions, o *rmrender.Options) ([]byte, error) {
+	i := opts.Page - 1
+	switch opts.Format {
+	case port.FormatSVG:
+		return doc.PageSVG(ctx, i, o)
+	case port.FormatJPEG:
+		o.Background = color.White
+		return doc.PageJPEG(ctx, i, opts.Scale, opts.Quality, o)
+	default:
+		o.Background = color.White
+		return doc.PagePNG(ctx, i, opts.Scale, o)
+	}
 }
 
 // paper is rmrender's paper; anything unknown is A4.
