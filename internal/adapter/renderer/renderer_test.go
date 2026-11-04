@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -133,8 +134,23 @@ func TestRenderNoTemplates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%+v: %v", opts, err)
 		}
-		if bytes.Equal(with, without) || len(without) >= len(with) {
-			t.Fatalf("%+v: %d bytes with the template, %d without", opts, len(with), len(without))
+		if bytes.Equal(with, without) {
+			t.Fatalf("%+v: the same bytes without the template", opts)
+		}
+		// The template's lines are marks on the page, so the page without
+		// it carries less: less ink, fewer SVG paths. A PDF only
+		// has to differ; its size depends on the backend's compression.
+		var a, b int
+		switch opts.Format {
+		case port.FormatPNG, port.FormatJPEG:
+			a, b = inked(t, with), inked(t, without)
+		case port.FormatSVG:
+			a, b = bytes.Count(with, []byte("<path")), bytes.Count(without, []byte("<path"))
+		default:
+			continue
+		}
+		if b >= a {
+			t.Fatalf("%+v: %d ink with the template, %d without", opts, a, b)
 		}
 	}
 }
@@ -169,4 +185,23 @@ func TestOptionMapping(t *testing.T) {
 	if mode(port.PDFPreserving) != rmrender.PDFPreserving || mode(port.PDFRecomposed) != rmrender.PDFRecomposed || mode("") != rmrender.PDFFresh {
 		t.Fatal("mode")
 	}
+}
+
+// inked is how much darker than white a PNG or JPEG page is, summed over
+// its pixels: faint template lines count as much as their shade.
+func inked(t *testing.T, data []byte) int {
+	t.Helper()
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			n += int(3*0xffff-r-g-bl) >> 8
+		}
+	}
+	return n
 }
