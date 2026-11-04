@@ -1,0 +1,13 @@
+# Backups
+
+Back to the [README](../README.md).
+
+`rmctl backup <dir> [path]` keeps a local copy of the documents below a path (the whole library by default) that the library itself can take back:
+
+- **One archive per document.** Each document is written as `<dir>/<id>.rmdoc`, packed as `export` packs one — pages, annotations, tags and all. Documents in the trash stay out unless `--all`. `--jobs N` packs N documents at a time.
+- **A manifest.** `<dir>/manifest.json` records the format version, the profile, the time and the path backed up, and per document its id, name, path, kind, record hash, archive and size.
+- **Incremental.** A document whose record hash the manifest already holds, with its archive there at the recorded size, is skipped without a download; a changed one is written again, and each archive appears only when whole. The manifest is written last.
+- **Documents gone.** The archive of a document deleted from the library, or put in the trash (unless `--all`), is moved into `<dir>/removed/`, or deleted with `--prune`. The archive of a document still in the library but moved out of the path is always moved into `removed/`, never deleted, `--prune` or not. The answer counts the documents, and the archives written, skipped, moved and pruned, and `outside`: those moved for lying outside the path. The manifest no longer lists what is in `removed/`; an archive there still imports with `rmctl put <file.rmdoc>`.
+- **One directory, one profile, one path.** A directory is bound to the profile and the path of its first backup. A directory holding another profile's backup is refused unless `--force`; one holding the backup of another path — a renamed folder included — is refused unless `--rescope`, which binds it to the new path and moves every archive outside it into `removed/`. A re-scope deletes nothing, whatever `--prune` says. The two overrides are separate, so neither lets the other's mistake through.
+
+`rmctl backup restore <dir> [--to folder] [--id id]... [--dry-run]` puts a backup back, in one commit: every archive (or those `--id` names, by id or unique prefix) is imported into the folder path its manifest records, below `--to` when given, and missing folders are created. A document whose id the library still holds comes back as a copy under a new id, as `put` imports an archive; the library's own document is not touched. The archives are read before anything is uploaded; it asks first unless `--yes`, and `--dry-run` shows the folders and documents it would create. `restore` is the subcommand, so a backup directory that is itself named `restore` is written `./restore`.
