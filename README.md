@@ -1,8 +1,10 @@
 # rmctl
 
-`rmctl` works with a reMarkable cloud library from the shell: list, find, download, upload, move, trash and restore documents and folders, read the typed text and highlights of pages, draw documents with their annotations as PDF or PNG, pack and unpack `.rmdoc` archives, follow live notifications, and look at what the cloud holds when something is wrong.
+`rmctl` works with a reMarkable cloud library from the shell: list, find, download, upload, move, trash and restore documents and folders, read the typed text and highlights of pages, draw documents with their annotations as PDF, PNG, JPEG or SVG, pack and unpack `.rmdoc` archives, follow live notifications, and look at what the cloud holds when something is wrong.
 
-It is built on **[rmcloud-go](https://github.com/altessa-s/rmcloud-go)** for the cloud, **[rmlines-go](https://github.com/altessa-s/rmlines-go)** for the `.rm` page format, **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** for the `.rmdoc` container and **[rmrender-go](https://github.com/altessa-s/rmrender-go)** for drawing. Part of **[Slate Drive](https://slatedrive.app)** ([repository](https://github.com/altessa-s/slatedrive)), the macOS app that shows a reMarkable library in Finder.
+It is built on **[rmcloud-go](https://github.com/altessa-s/rmcloud-go)** for the cloud, **[rmlines-go](https://github.com/altessa-s/rmlines-go)** for the `.rm` page format, **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** for the `.rmdoc` container and **[rmrender-go](https://github.com/altessa-s/rmrender-go)** for drawing.
+
+Part of **[Slate Drive](https://slatedrive.app)** ([repository](https://github.com/altessa-s/slatedrive)), the macOS app that shows a reMarkable library in Finder.
 
 ```sh
 rmctl register abcd1234        # one-time code from https://my.remarkable.com/device/desktop/connect
@@ -493,19 +495,16 @@ The domain, the ports, the use cases and the command packages under `cmd/rmctl/c
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). `make ci` runs lint, vet, the coverage gates, the integration tests (`-tags integration`, the whole tool against the emulated cloud), the security scanners and the duplicate-code check; `make bench` runs the benchmarks.
 
+## Built on
+
+- **[rmcloud-go](https://github.com/altessa-s/rmcloud-go)** — the reMarkable cloud sync protocol for Go: tokens, blobs, indexes, the root and notifications.
+- **[rmlines-go](https://github.com/altessa-s/rmlines-go)** — the `.rm` v6 page format for Go: pages, strokes, typed text and highlights, read and written.
+- **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** — the `.rmdoc` container for Go: the archive a document and its pages travel in.
+- **[rmrender-go](https://github.com/altessa-s/rmrender-go)** — reMarkable pages and documents drawn to PDF, PNG, JPEG or SVG for Go, the renderer `render` uses.
+
 ## See also
 
-- **[rmcloud-go](https://github.com/altessa-s/rmcloud-go)** — the reMarkable cloud sync protocol for Go, the transport this tool stands on.
-- **[rmlines-go](https://github.com/altessa-s/rmlines-go)** — the `.rm` v6 page format for Go.
-- **[rmdoc-go](https://github.com/altessa-s/rmdoc-go)** — the `.rmdoc` container a document is exported and imported as, for Go.
-- **[rmlines-lib](https://github.com/altessa-s/rmlines-lib)** — the `.rm` v6 page format as a C23 library.
-- **[rmlines-swift](https://github.com/altessa-s/rmlines-swift)** — the same page format as a Swift package.
-- **[rmdoc-swift](https://github.com/altessa-s/rmdoc-swift)** — the `.rmdoc` container as a Swift package.
-- **[rmdoc-lib](https://github.com/altessa-s/rmdoc-lib)** — the `.rmdoc` container as a portable C23 library.
-- **[rmmarks-lib](https://github.com/altessa-s/rmmarks-lib)**, **[rmmarks-go](https://github.com/altessa-s/rmmarks-go)** and **[rmmarks-swift](https://github.com/altessa-s/rmmarks-swift)** — geometry for marked text: where a highlight lies on a page and which words it covers.
-- **[rmrender-go](https://github.com/altessa-s/rmrender-go)** — drawing reMarkable pages and documents to PDF, PNG, JPEG or SVG for Go, the renderer `render` uses.
-- **[rmrender-swift](https://github.com/altessa-s/rmrender-swift)** — drawing reMarkable notebooks into PDF or images, from Swift.
-- **[Slate Drive](https://slatedrive.app)** ([repository](https://github.com/altessa-s/slatedrive)) — the app these packages are part of.
+- **[rmmarks-go](https://github.com/altessa-s/rmmarks-go)** — marked text for Go: which words a highlight covers, and how OCR from cropped strips returns to the page.
 
 ## Acknowledgements
 
@@ -513,6 +512,6 @@ reMarkable does not publish its cloud protocol or file formats. This tool is bui
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The fonts embedded for rendering carry the SIL Open Font License, and the Linux archives' `libpdfium.so` its own licences; both are under `licenses/` in the release archives.
 
 reMarkable is a trademark of reMarkable AS. This project is not affiliated with, endorsed by or sponsored by reMarkable AS.
