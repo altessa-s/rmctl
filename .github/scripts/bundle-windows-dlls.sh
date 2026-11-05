@@ -62,26 +62,50 @@ else
     search="$(cygpath -u "$PDFIUM_DIR/bin"):$PATH"
 fi
 
-# ntldd writes "name => path (0xADDRESS)" or "name => not found", with CRLF.
+# ntldd writes "name => path (0xADDRESS)" or "name => not found", with CRLF,
+# each DLL indented one step below the module that imports it. A DLL that a
+# Windows DLL imports and the machine lacks is Windows' own business (system
+# DLLs name optional components, loaded late if at all); only a DLL that
+# rmctl.exe or a DLL it ships with imports has to be found.
 listing=$(PATH="$search" "$ntldd" -R "$exe")
-found_re='^[[:space:]]*([^[:space:]]+) => (.+) \(0x[0-9a-fA-F]+\)[[:space:]]*$'
-missing_re='^[[:space:]]*([^[:space:]]+) => not found'
+found_re='^([[:space:]]*)([^[:space:]]+) => (.+) \(0x[0-9a-fA-F]+\)[[:space:]]*$'
+missing_re='^([[:space:]]*)([^[:space:]]+) => not found'
 declare -A packages=()
 loaded=()
 failed=0
+# The indentation of each open module and whether it is a Windows DLL.
+depths=()
+system_parent=()
+# parent_is_system INDENT: whether the module that imports a DLL indented
+# INDENT deep is a Windows DLL; closes the modules indented as deep or deeper.
+parent_is_system() {
+    while ((${#depths[@]} > 0)) && ((depths[-1] >= $1)); do
+        unset 'depths[-1]' 'system_parent[-1]'
+    done
+    ((${#depths[@]} > 0)) && ((system_parent[-1]))
+}
 while IFS= read -r line; do
     if [[ "$line" =~ $missing_re ]]; then
-        name=${BASH_REMATCH[1]}
+        indent=${#BASH_REMATCH[1]}
+        name=${BASH_REMATCH[2]}
         [[ "$name" =~ ^(api|ext)-ms- ]] && continue
+        parent_is_system "$indent" && continue
         printf '::error::%s needs %s, which is not found\n' "$exe" "$name" >&2
         failed=1
         continue
     fi
     [[ "$line" =~ $found_re ]] || continue
-    name=${BASH_REMATCH[1]}
-    path=${BASH_REMATCH[2]}
+    indent=${#BASH_REMATCH[1]}
+    name=${BASH_REMATCH[2]}
+    path=${BASH_REMATCH[3]}
     where=$(printf '%s' "$path" | lower)
-    [[ "$where" == "$windows"* ]] && continue
+    parent_is_system "$indent" || true
+    depths+=("$indent")
+    if [[ "$where" == "$windows"* ]]; then
+        system_parent+=(1)
+        continue
+    fi
+    system_parent+=(0)
     ok=0
     for dir in "${allowed[@]}"; do
         [[ "$where" == "$dir"* ]] && ok=1
