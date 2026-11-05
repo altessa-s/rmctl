@@ -116,5 +116,11 @@ grep -v "_darwin_" "$work/checksums.txt" >"$work/checksums.new" || true
 (cd "$dist" && shasum -a 256 rmctl_"${version}"_darwin_*.zip) >>"$work/checksums.new"
 mv "$work/checksums.new" "$work/checksums.txt"
 gh release upload "$tag" --repo "$repo" --clobber "${archives[@]}" "$work/checksums.txt"
+# A pre-release leaves the formula alone, and GitHub only dispatches a
+# workflow the default branch has, which it has once a release reached main.
+if [[ "$version" == *-* ]]; then
+    printf 'uploaded the macOS archives of %s; a pre-release leaves the Homebrew formula alone\n' "$tag"
+    exit 0
+fi
 gh workflow run homebrew.yml --repo "$repo" --ref "$tag" -f tag="$tag"
 printf 'uploaded the macOS archives of %s and started the Homebrew workflow\n' "$tag"
