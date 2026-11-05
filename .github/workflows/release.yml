@@ -197,8 +197,15 @@ jobs:
           sample=$(cygpath -w "$PWD/internal/adapter/renderer/testdata/Notes.rmdoc")
           cd "$app/.."
           PATH="$system/System32:$system" "$app/rmctl.exe" version --full
-          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" -o smoke.pdf
-          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" --page 1 -o smoke.png
+          # A rendering writes nothing to standard error: no library of the
+          # zip may complain about a file only a development machine has.
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" -o smoke.pdf 2>stderr.txt
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" --page 1 -o smoke.png 2>>stderr.txt
+          if [[ -s stderr.txt ]]; then
+            cat stderr.txt
+            echo "::error::rendering wrote to standard error"
+            exit 1
+          fi
           head -c 5 smoke.pdf | grep -q '%PDF-' || { echo "::error::smoke.pdf is not a PDF"; exit 1; }
           head -c 8 smoke.png | grep -q 'PNG' || { echo "::error::smoke.png is not a PNG"; exit 1; }
 
