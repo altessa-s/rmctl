@@ -18,7 +18,7 @@
 # The 64bit architecture is the windows_amd64 zip, which must be in
 # CHECKSUMS. The arm64 architecture is the windows_arm64 zip, written only
 # when CHECKSUMS has its line, as it must for rmctl-lite; the full build has
-# no arm64 zip yet.
+# one from rmctl 1.2.0 on, and a release without it gets 64bit alone.
 # checkver and autoupdate let Scoop's own tooling follow later releases,
 # should the bucket's workflow ever fall behind.
 set -euo pipefail

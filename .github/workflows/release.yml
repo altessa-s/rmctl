@@ -108,19 +108,27 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
-  # rmctl.exe is built with MSYS2 CLANG64's clang against its Cairo stack and
-  # the PDFium SDK, as rmrender-go's Windows CI builds it. Those are DLLs, so
-  # the binary cannot be static: the zip carries every DLL it loads (ntldd -R,
-  # all from CLANG64 or PDFium; Windows' own stay out) beside rmctl.exe, where
-  # Windows looks first, with their licences under licenses/. The smoke test
-  # runs the unpacked zip with PATH reduced to the Windows directory.
+  # rmctl.exe is built with MSYS2's clang against its Cairo stack and the
+  # PDFium SDK, as rmrender-go's Windows CI builds it: CLANG64 and PDFium
+  # win-x64 on x64, CLANGARM64 and PDFium win-arm64 on the ARM64 runner.
+  # Those are DLLs, so the binary cannot be static: the zip carries every DLL
+  # it loads (ntldd -R, all from the toolchain or PDFium; Windows' own stay
+  # out) beside rmctl.exe, where Windows looks first, with their licences
+  # under licenses/. The smoke test runs the unpacked zip with PATH reduced to
+  # the Windows directory.
   build-windows:
-    name: Build (windows/amd64)
+    name: Build (windows/${{ matrix.goarch }})
     needs: checks
-    runs-on: windows-2022
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: windows-2022, goarch: amd64, msystem: CLANG64, prefix: mingw-w64-clang-x86_64 }
+          - { runner: windows-11-arm, goarch: arm64, msystem: CLANGARM64, prefix: mingw-w64-clang-aarch64 }
     defaults:
       run:
         shell: msys2 {0}
@@ -137,28 +145,32 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
-      - name: Set up MSYS2 CLANG64
+      - name: Set up MSYS2 ${{ matrix.msystem }}
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
-          msystem: CLANG64
+          msystem: ${{ matrix.msystem }}
           update: false
-          # The Go that setup-go installed, after CLANG64's clang and
-          # pkg-config. The same packages as CI's Windows job.
+          # The Go that setup-go installed, after the toolchain's clang and
+          # pkg-config. The same packages as CI's Windows job, and zip and
+          # unzip for the archive.
           path-type: inherit
           install: >-
-            mingw-w64-clang-x86_64-clang
-            mingw-w64-clang-x86_64-pkgconf
-            mingw-w64-clang-x86_64-python
-            mingw-w64-clang-x86_64-cairo
-            mingw-w64-clang-x86_64-pango
-            mingw-w64-clang-x86_64-fontconfig
-            mingw-w64-clang-x86_64-harfbuzz
-            mingw-w64-clang-x86_64-gdk-pixbuf2
-            mingw-w64-clang-x86_64-zlib
-            mingw-w64-clang-x86_64-ntldd
+            ${{ matrix.prefix }}-clang
+            ${{ matrix.prefix }}-pkgconf
+            ${{ matrix.prefix }}-python
+            ${{ matrix.prefix }}-cairo
+            ${{ matrix.prefix }}-pango
+            ${{ matrix.prefix }}-fontconfig
+            ${{ matrix.prefix }}-harfbuzz
+            ${{ matrix.prefix }}-gdk-pixbuf2
+            ${{ matrix.prefix }}-zlib
+            ${{ matrix.prefix }}-ntldd
+            zip
+            unzip
 
       - name: Set up the renderer's Windows build
-        # Fetches PDFium (checksum-verified) and points cgo at clang and PDFium.
+        # Fetches the PDFium SDK of the MSYS2 environment (checksum-verified)
+        # and points cgo at clang and PDFium.
         run: bash .github/scripts/setup-render-windows.sh
 
       - name: Build
@@ -182,18 +194,21 @@ jobs:
       - name: Pack
         # A zip, which Explorer opens.
         env:
+          GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          (cd out && 7z a -tzip "../artifacts/rmctl_${VERSION#v}_windows_amd64.zip" . >/dev/null)
+          (cd out && zip -q -r "../artifacts/rmctl_${VERSION#v}_windows_${GOARCH}.zip" .)
 
       - name: Smoke test
         # From the zip alone: unpacked into an empty directory and run with
         # PATH reduced to the Windows directory, rmctl.exe finds only the
         # DLLs beside it and Windows' own.
+        env:
+          GOARCH: ${{ matrix.goarch }}
         run: |
           app="$(cygpath -u "$RUNNER_TEMP")/smoke/app"
           mkdir -p "$app"
-          7z x -o"$(cygpath -w "$app")" artifacts/rmctl_*_windows_amd64.zip >/dev/null
+          unzip -q artifacts/rmctl_*_windows_"${GOARCH}".zip -d "$app"
           bash .github/scripts/bundle-windows-dlls.sh --verify "$app/rmctl.exe"
           system=$(cygpath -u "${SYSTEMROOT:-C:/Windows}")
           sample=$(cygpath -w "$PWD/internal/adapter/renderer/testdata/Notes.rmdoc")
@@ -214,7 +229,7 @@ jobs:
       - name: Upload the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rmctl-windows-amd64
+          name: rmctl-windows-${{ matrix.goarch }}
           path: artifacts/*
           retention-days: 7
 
@@ -304,8 +319,7 @@ jobs:
   # -extldflags=-static), CLANG64 on x64 and CLANGARM64 on the ARM64 runner.
   # check-windows-static.sh holds the imports to Windows' own DLLs, and the
   # smoke test runs the unpacked zip with PATH reduced to the Windows
-  # directory. The full build has no arm64 Windows archive yet: rmrender-go
-  # does not build there.
+  # directory.
   build-windows-lite:
     name: Build lite (windows/${{ matrix.goarch }})
     needs: checks
@@ -519,14 +533,15 @@ jobs:
           fi
 
       - name: Open the pull request
-        # The full build: x64 alone until there is an arm64 Windows archive.
-        # The regex holds on an asset's name or its URL, and leaves out the
-        # rmctl-lite zips, whose names end the same way.
+        # The full build, x64 and ARM64. The regex holds on an asset's name
+        # or its URL, and leaves out the rmctl-lite zips, whose names end the
+        # same way. The package's manifest sets ArchiveBinariesDependOnPath
+        # (see .github/scripts/README.md); winget-releaser keeps it.
         if: steps.token.outputs.set == 'true'
         uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
         with:
           identifier: Altessa.rmctl
-          installers-regex: '(^|/)rmctl_[^/]*_windows_amd64\.zip$'
+          installers-regex: '(^|/)rmctl_[^/]*_windows_(amd64|arm64)\.zip$'
           release-tag: ${{ inputs.tag || github.ref_name }}
           token: ${{ secrets.WINGET_TOKEN }}
 

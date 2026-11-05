@@ -32,7 +32,7 @@ rmctl find 'go|rust' --tag reading --json
 - **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within each profile's own budget set in config.toml (`0` for no limit).
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
-- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three, and [rmctl-lite](#install), the build without it, also on Windows ARM64.
+- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three, on x64 and ARM64; [rmctl-lite](#install) is the build without it.
 - **Automation:** scheduled backups, hot folders, exports to Markdown and more in [docs/automation.md](docs/automation.md).
 
 ## Install
@@ -45,7 +45,7 @@ rmctl comes in two builds. Both install a binary named `rmctl` with the same com
 | Every other command, `text` and `highlights` included | yes | yes |
 | macOS binary (arm64) | about 47 MB | about 17 MB |
 | Linux needs | Cairo, Pango and their libraries; `libpdfium.so` ships beside the binary | only the C library |
-| Windows archive | `rmctl.exe` with the DLLs it draws with, x64 | one static `rmctl.exe`, x64 and ARM64 |
+| Windows archive | `rmctl.exe` with the DLLs it draws with, x64 and ARM64 | one static `rmctl.exe`, x64 and ARM64 |
 | `rmctl version --full` | `render yes` | `render no` |
 
 With [Homebrew](https://brew.sh) on macOS or Linux (the two formulas conflict, as both install `rmctl`):
@@ -66,7 +66,7 @@ winget install Altessa.rmctl         # or: winget install Altessa.rmctl.Lite
 
 Install one of the two. Scoop has no way to mark them as conflicting: with both installed, they shim the same `rmctl` command and the one installed last answers it.
 
-Every release also attaches archives of both builds, `rmctl_<version>_<os>_<arch>` and `rmctl-lite_<version>_<os>_<arch>`: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, rmctl's with the DLLs `rmctl.exe` draws with beside it, rmctl-lite's with `rmctl.exe` alone. rmctl-lite is also built for Windows on ARM64. `checksums.txt` lists the SHA-256 of every archive.
+Every release also attaches archives of both builds, `rmctl_<version>_<os>_<arch>` and `rmctl-lite_<version>_<os>_<arch>`: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, rmctl's with the DLLs `rmctl.exe` draws with beside it, rmctl-lite's with `rmctl.exe` alone; both are built for x64 (`amd64`) and ARM64 (`arm64`). `checksums.txt` lists the SHA-256 of every archive.
 
 From source, with Go 1.27 or newer and a C23 compiler for the page and archive commands (see [Pages and archives](docs/pages-and-archives.md#pages)):
 
