@@ -1,0 +1,30 @@
+{
+  "groups": [
+    {
+      "hash": "h-pdf-d-paper",
+      "size": 2048,
+      "wasted": 4096,
+      "documents": [
+        {
+          "id": "d-paper",
+          "name": "Paper",
+          "path": "/Books/Paper",
+          "kind": "pdf"
+        },
+        {
+          "id": "d-copy",
+          "name": "Paper copy",
+          "path": "/Books/Paper copy",
+          "kind": "pdf"
+        },
+        {
+          "id": "d-top",
+          "name": "Paper at the top",
+          "path": "/Paper at the top",
+          "kind": "pdf"
+        }
+      ]
+    }
+  ],
+  "wasted": 4096
+}

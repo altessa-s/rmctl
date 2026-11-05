@@ -31,6 +31,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Compare benchmarks against the base branch
         env:
           BASE_REF: ${{ github.base_ref }}

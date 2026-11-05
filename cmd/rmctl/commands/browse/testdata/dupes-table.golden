@@ -1,0 +1,8 @@
+HASH              SIZE  PATH               KIND  ID
+─────────────  ───────  ─────────────────  ────  ───────
+h-pdf-d-paper  2.0 KiB  /Books/Paper       pdf   d-paper
+h-pdf-d-paper  2.0 KiB  /Books/Paper copy  pdf   d-copy
+h-pdf-d-paper  2.0 KiB  /Paper at the top  pdf   d-top
+
+groups  1
+wasted  4.0 KiB

@@ -1,0 +1,31 @@
+{
+  "profile": "work",
+  "current": false,
+  "exists": true,
+  "config_dir": "/cfg/rmctl/work",
+  "config_dir_exists": true,
+  "secrets": "file",
+  "secrets_source": "config",
+  "token_location": "/cfg/rmctl/work/token.json",
+  "tokens": [
+    "deviceToken",
+    "userToken"
+  ],
+  "registered": true,
+  "account": "asked",
+  "level": "connect",
+  "sync_scope": "sync:fox",
+  "cache_dir": "/cache/rmctl/work",
+  "cache_bytes": 4096,
+  "cache_budget": 536870912,
+  "cache_budget_source": "profile",
+  "cache_entries": {
+    "blobs": 2,
+    "indexes": 3
+  },
+  "confirmed": "2026-11-01T12:00:00Z",
+  "config_file": "/cfg/rmctl/config.toml",
+  "config_table": true,
+  "cache_ttl_seconds": 300,
+  "offline": false
+}

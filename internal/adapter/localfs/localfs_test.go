@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
 )
@@ -105,8 +106,18 @@ func TestProduceRefuses(t *testing.T) {
 	if err := localfs.New().Produce(t.Context(), dir, write); !errors.Is(err, localfs.ErrIsDirectory) || called {
 		t.Fatalf("a directory: %v, called %v", err, called)
 	}
-	if err := localfs.New().Produce(t.Context(), filepath.Join(dir, "missing", "f"), write); err == nil || called {
+	missing := filepath.Join(dir, "missing")
+	err := localfs.New().Produce(t.Context(), filepath.Join(missing, "f"), write)
+	if err == nil || called || !strings.Contains(err.Error(), "no directory "+missing) || strings.Contains(err.Error(), ".part") {
 		t.Fatalf("a missing parent: %v, called %v", err, called)
+	}
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = localfs.New().Produce(t.Context(), filepath.Join(file, "f"), write)
+	if err == nil || called || !strings.Contains(err.Error(), file+" is not a directory") {
+		t.Fatalf("a file for a parent: %v, called %v", err, called)
 	}
 }
 
@@ -244,5 +255,53 @@ func TestStatThroughALockedDirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	if _, _, _, err := localfs.New().Stat(filepath.Join(dir, "f")); err == nil {
 		t.Fatal("stat through a locked directory succeeded")
+	}
+}
+
+func TestRename(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	if err := os.WriteFile(from, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fs := localfs.New()
+	if err := fs.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(to); string(got) != "x" || slices.Contains(entries(t, dir), "a") {
+		t.Fatalf("%q %v", got, entries(t, dir))
+	}
+	if err := fs.Rename(from, to); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestModTime(t *testing.T) {
+	t.Parallel()
+	fs := localfs.New()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.pdf")
+	if _, exists, err := fs.ModTime(path); exists || err != nil {
+		t.Fatalf("missing: %v %v", exists, err)
+	}
+	if _, exists, err := fs.ModTime(dir); exists || err != nil {
+		t.Fatalf("directory: %v %v", exists, err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if err := fs.SetModTime(path, when); err != nil {
+		t.Fatal(err)
+	}
+	if mtime, exists, err := fs.ModTime(path); !exists || err != nil || !mtime.Equal(when) {
+		t.Fatalf("%v %v %v", mtime, exists, err)
+	}
+	if err := fs.SetModTime(filepath.Join(dir, "none"), when); err == nil {
+		t.Fatal("set the time of a missing file")
 	}
 }

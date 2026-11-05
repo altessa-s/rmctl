@@ -336,8 +336,12 @@ func TestEnv(t *testing.T) {
 	if err := cmd.ParseFlags([]string{"--profile", "home"}); err != nil {
 		t.Fatal(err)
 	}
-	if Profile(cmd) != "home" {
+	if Profile(cmd) != "home" || ProfileName(cmd) != "home" {
 		t.Fatal("--profile does not win over the environment")
+	}
+	t.Setenv(ProfileEnv, "")
+	if bare := (&cobra.Command{}); ProfileName(bare) != DefaultProfile {
+		t.Fatal("no profile is not the default one")
 	}
 	if NewEnv(Streams{}, nil).Close() != nil {
 		t.Fatal("closing unbuilt services failed")

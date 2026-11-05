@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/altessa-s/go-atlas-core/io/files"
 
@@ -42,6 +43,13 @@ func (FS) Produce(ctx context.Context, path string, write func(w io.Writer) erro
 		return fmt.Errorf("%s: %w", path, ErrIsDirectory)
 	}
 	dir := filepath.Dir(path)
+	// Name the missing directory rather than the staging file inside it.
+	switch info, statErr := os.Stat(dir); {
+	case errors.Is(statErr, fs.ErrNotExist):
+		return fmt.Errorf("create %s: no directory %s", path, dir)
+	case statErr == nil && !info.IsDir():
+		return fmt.Errorf("create %s: %s is not a directory", path, dir)
+	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.part")
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
@@ -80,6 +88,27 @@ func (FS) Stat(path string) (size int64, isDir, exists bool, err error) {
 		return 0, false, false, err
 	}
 	return info.Size(), info.IsDir(), true, nil
+}
+
+// ModTime reports the modification time of the regular file at path.
+func (FS) ModTime(path string) (mtime time.Time, exists bool, err error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return time.Time{}, false, nil
+	}
+	return info.ModTime(), true, nil
+}
+
+// SetModTime sets the modification time of path, and its access time to
+// the same.
+func (FS) SetModTime(path string, mtime time.Time) error {
+	return os.Chtimes(path, mtime, mtime)
 }
 
 // Open opens the regular file at path for reading.
@@ -148,6 +177,9 @@ func (FS) Walk(dir string) ([]string, error) {
 
 // Remove deletes the file at path.
 func (FS) Remove(path string) error { return os.Remove(path) }
+
+// Rename moves the file at from to to, replacing a file there.
+func (FS) Rename(from, to string) error { return os.Rename(from, to) }
 
 // Stage makes a directory of mode 0700 in the system's temporary
 // directory. remove deletes it with everything in it.

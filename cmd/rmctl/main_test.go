@@ -48,11 +48,12 @@ func TestRun(t *testing.T) {
 
 func TestBuild(t *testing.T) {
 	isolate(t)
-	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Verbose: true}, &bytes.Buffer{})
+	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Verbose: true}, &bytes.Buffer{}, seams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if svc.Account == nil || svc.Browser == nil || svc.Fetcher == nil || svc.Writer == nil || svc.Watcher == nil || svc.Inspector == nil {
+	if svc.Account == nil || svc.Browser == nil || svc.Fetcher == nil || svc.Writer == nil || svc.Watcher == nil || svc.Inspector == nil ||
+		svc.Profiles == nil {
 		t.Fatalf("%+v", svc)
 	}
 	if err := closeFn(); err != nil {
@@ -62,10 +63,10 @@ func TestBuild(t *testing.T) {
 	if err != nil || info.Registered {
 		t.Fatalf("a fresh profile is registered: %+v %v", info, err)
 	}
-	if _, _, err := build(context.Background(), commands.Request{}, nil); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{}, nil, seams{}); err == nil {
 		t.Fatal("a nil log writer was accepted")
 	}
-	if _, _, err := build(context.Background(), commands.Request{Profile: "../escape"}, &bytes.Buffer{}); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{Profile: "../escape"}, &bytes.Buffer{}, seams{}); err == nil {
 		t.Fatal("an unsafe profile name was accepted")
 	}
 }

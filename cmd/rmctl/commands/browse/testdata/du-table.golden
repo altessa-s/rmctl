@@ -1,0 +1,14 @@
+path       /
+bytes      8.5 KiB
+documents  4
+folders    1
+
+PATH        SIZE  DOCUMENTS  FOLDERS
+───────  ───────  ─────────  ───────
+/Books/  6.2 KiB          2        0
+
+KIND      DOCUMENTS     SIZE
+────────  ─────────  ───────
+pdf               2  4.2 KiB
+epub              1  4.1 KiB
+notebook          1    172 B

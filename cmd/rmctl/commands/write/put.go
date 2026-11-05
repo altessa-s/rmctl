@@ -363,7 +363,7 @@ func putFile(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putF
 func putColumns() []output.Column {
 	return []output.Column{
 		{Title: "action", Role: output.RoleKind},
-		{Title: "name", Role: output.RoleName},
+		{Title: columnName, Role: output.RoleName},
 		{Title: "kind", Role: output.RoleKind},
 		{Title: "id", Role: output.RoleID},
 		{Title: "renamed_from", Role: output.RoleID},

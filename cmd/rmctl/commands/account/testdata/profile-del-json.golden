@@ -1,0 +1,17 @@
+{
+  "profile": "work",
+  "revoked": false,
+  "file_tokens": [
+    "deviceToken",
+    "userToken"
+  ],
+  "keychain_tokens": [
+    "deviceID"
+  ],
+  "dir": "/cfg/rmctl/work",
+  "dir_removed": true,
+  "cache_dir": "/cache/rmctl/work",
+  "cache_removed": false,
+  "config_file": "/cfg/rmctl/config.toml",
+  "table_removed": true
+}

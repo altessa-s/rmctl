@@ -87,6 +87,9 @@ linters:
             - github.com/altessa-s/rmlines-go
             # The .rmdoc container, through cgo. Only internal/adapter/rmdocs.
             - github.com/altessa-s/rmdoc-go
+            # The renderer and its bundled fonts, through cgo, on macOS, Linux
+            # and Windows. Only internal/adapter/renderer.
+            - github.com/altessa-s/rmrender-go
             # The macOS Keychain, through cgo. Only
             # internal/adapter/keychain/system.
             - github.com/keybase/go-keychain
@@ -135,6 +138,15 @@ linters:
           deny:
             - pkg: github.com/altessa-s/rmdoc-go
               desc: only internal/adapter/rmdocs imports the archive format
+        # The renderer is one adapter's business: render reaches it through
+        # port.Renderer.
+        renderer-only-in-renderer:
+          files:
+            - $all
+            - "!**/internal/adapter/renderer/*.go"
+          deny:
+            - pkg: github.com/altessa-s/rmrender-go
+              desc: only internal/adapter/renderer imports the renderer
         # The Keychain binding is behind the keychain adapter's system calls.
         keychain-only-in-system:
           files:
@@ -172,6 +184,8 @@ linters:
               desc: the page format is the rmpages adapter's business
             - pkg: github.com/altessa-s/rmdoc-go
               desc: the archive format is the rmdocs adapter's business
+            - pkg: github.com/altessa-s/rmrender-go
+              desc: the renderer is the renderer adapter's business
         # port declares contracts and imports nothing but domain.
         port-is-contracts:
           files:
@@ -206,6 +220,8 @@ linters:
               desc: the page format is the rmpages adapter's business
             - pkg: github.com/altessa-s/rmdoc-go
               desc: the archive format is the rmdocs adapter's business
+            - pkg: github.com/altessa-s/rmrender-go
+              desc: the renderer is the renderer adapter's business
         # Adapters implement ports and know nothing of the use cases.
         adapters-know-no-use-case:
           files:

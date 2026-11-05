@@ -1,0 +1,42 @@
+{
+  "profile": "work",
+  "created": "2026-11-02T09:30:00Z",
+  "folders": [
+    "/Work"
+  ],
+  "documents": [
+    {
+      "item": {
+        "id": "b-notes",
+        "name": "Notes",
+        "kind": "notebook",
+        "parent": "",
+        "path": "",
+        "trashed": false,
+        "pinned": false,
+        "size": 172,
+        "tags": [],
+        "hash": "h-b-notes"
+      },
+      "folder": "/Work",
+      "file": "b-notes.rmdoc"
+    },
+    {
+      "item": {
+        "id": "n-paper",
+        "name": "Paper",
+        "kind": "pdf",
+        "parent": "",
+        "path": "",
+        "trashed": false,
+        "pinned": false,
+        "size": 2120,
+        "tags": [],
+        "hash": "h-n-paper"
+      },
+      "renamed_from": "d-paper",
+      "folder": "/Books",
+      "file": "d-paper.rmdoc"
+    }
+  ]
+}

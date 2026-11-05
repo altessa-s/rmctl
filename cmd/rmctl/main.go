@@ -28,6 +28,7 @@ import (
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/internal/wiring"
 
 	"golang.org/x/term"
 
@@ -41,6 +42,11 @@ func main() {
 // run is main with its streams and exit injected, so a test can drive it.
 // extra are transport options: a test points the tool at an emulated cloud.
 func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extra ...rmcloud.Option) int {
+	return runWith(args, in, out, errOut, exit, seams{}, extra...)
+}
+
+// runWith is run with the parts of the machine a test replaces.
+func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), s seams, extra ...rmcloud.Option) int {
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt)
 	defer signal.Stop(sigs)
@@ -52,6 +58,7 @@ func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extr
 		Out:        out,
 		Err:        errOut,
 		IsTerminal: isTerminal(in) && isTerminal(errOut),
+		Renders:    wiring.Renders(),
 	}
 	if f, ok := out.(*os.File); ok && isTerminal(f) {
 		streams.OutTerminal = true
@@ -61,7 +68,7 @@ func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extr
 		}
 	}
 	factory := func(ctx context.Context, req commands.Request) (commands.Services, func() error, error) {
-		return build(ctx, req, errOut, extra...)
+		return build(ctx, req, errOut, s, extra...)
 	}
 	err := commands.Run(ctx, args, streams, factory)
 	if err != nil {

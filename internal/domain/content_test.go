@@ -144,3 +144,25 @@ func TestReplacedContent(t *testing.T) {
 		}
 	}
 }
+
+func TestContentWithTags(t *testing.T) {
+	t.Parallel()
+	old := []byte(`{"fileType":"pdf","tags":[{"name":"a","timestamp":1}],"zoomMode":"fitToWidth","future":{"x":[1,2]}}`)
+	out, err := domain.ContentWithTags(old, []domain.Tag{{Name: "b", Timestamp: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"fileType":"pdf","future":{"x":[1,2]},"tags":[{"name":"b","timestamp":2}],"zoomMode":"fitToWidth"}` {
+		t.Fatalf("%s", out)
+	}
+	if out, _ := domain.ContentWithTags([]byte(`{}`), nil); string(out) != `{"tags":[]}` {
+		t.Fatalf("%s", out)
+	}
+	if _, err := domain.ContentWithTags([]byte(`[]`), nil); err == nil {
+		t.Fatal("a list was given tags")
+	}
+	tags := []domain.Tag{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	if got := domain.TagNames(domain.WithoutTags(tags, []string{"b", "x"})); fmt.Sprint(got) != "[a c]" {
+		t.Fatal(got)
+	}
+}

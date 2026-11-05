@@ -5,6 +5,7 @@
 package wiring
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,10 +19,9 @@ import (
 	"github.com/altessa-s/rmctl/internal/adapter/keychain"
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
 	"github.com/altessa-s/rmctl/internal/adapter/pdf"
+	"github.com/altessa-s/rmctl/internal/adapter/renderer"
 	"github.com/altessa-s/rmctl/internal/adapter/rmdocs"
 	"github.com/altessa-s/rmctl/internal/adapter/rmpages"
-	"github.com/altessa-s/rmctl/internal/adapter/secretfile"
-	"github.com/altessa-s/rmctl/internal/adapter/vault"
 	"github.com/altessa-s/rmctl/internal/app/account"
 	"github.com/altessa-s/rmctl/internal/app/archives"
 	"github.com/altessa-s/rmctl/internal/app/browse"
@@ -29,6 +29,9 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/app/pages"
+	"github.com/altessa-s/rmctl/internal/app/prefetch"
+	"github.com/altessa-s/rmctl/internal/app/profile"
+	"github.com/altessa-s/rmctl/internal/app/render"
 	"github.com/altessa-s/rmctl/internal/app/secrets"
 	"github.com/altessa-s/rmctl/internal/app/watch"
 	"github.com/altessa-s/rmctl/internal/app/write"
@@ -37,9 +40,9 @@ import (
 	rmcloud "github.com/altessa-s/rmcloud-go"
 )
 
-// DefaultCacheBytes bounds each profile's cache on disk: its blobs and
-// indexes together.
-const DefaultCacheBytes int64 = 512 << 20
+// DefaultCacheBytes bounds each profile's cache on disk, its blobs and
+// indexes together, unless the configuration sets a budget.
+const DefaultCacheBytes = config.DefaultCacheBudget
 
 // Options are what the command line knows before anything is built.
 type Options struct {
@@ -51,8 +54,9 @@ type Options struct {
 	Dirs config.BaseDirs
 	// Logger receives the diagnostics of every layer. Required.
 	Logger *slog.Logger
-	// CacheBytes bounds each profile's cache; zero is DefaultCacheBytes,
-	// negative turns the cache off.
+	// CacheBytes bounds every profile's cache over the configuration, for
+	// tests; zero leaves each profile its configured budget, and negative
+	// turns the cache off.
 	CacheBytes int64
 	// Offline is --offline when it was given; nil defers to the profile's
 	// configuration. NoCache is --no-cache: no cache on disk is read or
@@ -67,7 +71,14 @@ type Options struct {
 	Client []rmcloud.Option
 	// ReadConfig reads the configuration file; nil reads the machine's.
 	ReadConfig config.ReadFunc
+	// Keychain is the Keychain the tokens of a profile may be kept in; nil
+	// is the login Keychain. A test keeps the user's Keychain out of reach
+	// with it.
+	Keychain KeychainItems
 }
+
+// KeychainItems are the Keychain as the keychain adapter needs it.
+type KeychainItems = keychain.Items
 
 // Services are the input ports, built and connected.
 type Services struct {
@@ -79,7 +90,10 @@ type Services struct {
 	Inspector port.Inspector
 	Pages     port.Pages
 	Archives  port.Archives
+	Rendering port.Rendering
+	Syncer    port.Syncer
 	Secrets   port.Secrets
+	Profiles  port.Profiles
 	// Cache reports and clears the caches on disk.
 	Cache port.Cache
 	// Offline says this run never reaches the cloud.
@@ -96,6 +110,10 @@ var ErrNoLogger = errors.New("wiring: a logger is required")
 // ErrOfflineNoCache means --offline was asked for with the cache turned off.
 var ErrOfflineNoCache = errors.New("--offline reads the cache, and --no-cache turns it off")
 
+// Renders reports whether this build draws documents: false in rmctl-lite
+// (the norender build tag) and in a build rmrender-go cannot reach.
+func Renders() bool { return renderer.New().Available() == nil }
+
 // Build resolves the configuration and connects the adapters to the use
 // cases. Nothing touches the network here: the transport dials on first use.
 func Build(opts Options) (Services, error) {
@@ -110,26 +128,15 @@ func Build(opts Options) (Services, error) {
 	if err != nil {
 		return Services{}, err
 	}
-	service := cfg.KeychainService
-	if service == "" {
-		service = keychain.DefaultService
-	}
-	fileStore := secretfile.New(cfg.TokenPath)
-	keyStore := keychain.New(service, cfg.Profile)
-	fileVault := vault.New(fileStore, port.SecretsFile, fileStore.Path())
-	keyVault := vault.New(keyStore, port.SecretsKeychain, keyStore.Location())
-	var store rmcloud.SecretStore = fileStore
+	tokens := secretsOf(cfg, opts.Keychain)
+	fileVault, keyVault := tokens.vaults()
 	current := fileVault
 	if cfg.Secrets == config.BackendKeychain {
-		store, current = keyStore, keyVault
+		current = keyVault
 	}
-	clientOpts := append([]rmcloud.Option{
-		rmcloud.WithEndpoints(cfg.Endpoints),
-		rmcloud.WithLogger(opts.Logger),
-	}, opts.Client...)
-	client, err := rmcloud.New(store, clientOpts...)
+	client, err := newClient(tokens.inUse(cfg), cfg, opts)
 	if err != nil {
-		return Services{}, fmt.Errorf("start the transport: %w", err)
+		return Services{}, err
 	}
 
 	remote := cloud.New(client)
@@ -152,14 +159,18 @@ func Build(opts Options) (Services, error) {
 	return Services{
 		Account:   account.New(indexcache.NewRegistry(remote, st.profile)),
 		Browser:   browse.New(lib, reader),
-		Fetcher:   fetch.New(lib, st.blobs, files, docs),
+		Fetcher:   fetch.New(lib, st.blobs, files, docs, clk),
 		Writer:    write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk),
 		Watcher:   watch.New(remote),
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
+		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
+		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
+		Profiles: profile.New(newProfileStore(cfg, opts, read), indexcache.NewCaches(profiles{st.root}, opts.Logger),
+			registries{opts: opts, read: read, root: st.root}, cfg.Profile, st.offline),
 		Cache:   st.admin,
 		Offline: st.offline,
 		Config:  cfg,
@@ -176,13 +187,37 @@ type built struct {
 	blobs     port.BlobStore
 	blobCache port.BlobCache
 	profile   *blobcache.Cache
+	root      *blobcache.Root
 	admin     *indexcache.Admin
 	offline   bool
+	// live reads the live root through the cache, and syncs is the
+	// profile's cache as sync fills it; both nil when the cache is off.
+	live  port.RootStore
+	syncs port.SyncCache
+}
+
+// syncer is the sync use case over the cache, or what refuses it: sync
+// fills the cache from the cloud, so it needs both.
+func (b built) syncer(lib *library.Library, remote port.BlobStore, clk port.Clock) port.Syncer {
+	switch {
+	case b.syncs == nil:
+		return refusal{port.ErrNoCacheToSync}
+	case b.offline:
+		return refusal{fmt.Errorf("sync reads the cloud: %w", port.ErrOffline)}
+	default:
+		return prefetch.New(b.live, lib, remote, b.syncs, clk)
+	}
+}
+
+// refusal is a Syncer that cannot run in this configuration.
+type refusal struct{ err error }
+
+func (r refusal) Sync(context.Context, string, port.SyncOptions) (port.SyncReport, error) {
+	return port.SyncReport{}, r.err
 }
 
 func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock) (built, error) {
-	bytes := cacheBytes(opts.CacheBytes)
-	root := blobcache.NewRoot(cfg.CacheDir, max(bytes, 0), clk, opts.Logger)
+	root := blobcache.NewRoot(cfg.CacheDir, limits(opts.CacheBytes, cfg.CacheBudgets), clk, opts.Logger)
 	profile, err := root.Profile(cfg.Profile)
 	if err != nil {
 		return built{}, err
@@ -191,11 +226,11 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 	if opts.Offline != nil {
 		offline = *opts.Offline
 	}
-	caching := !opts.NoCache && bytes > 0
+	caching := !opts.NoCache && opts.CacheBytes >= 0
 	if offline && !caching {
 		return built{}, ErrOfflineNoCache
 	}
-	b := built{roots: remote, docs: remote, blobs: remote, profile: profile, offline: offline}
+	b := built{roots: remote, docs: remote, blobs: remote, profile: profile, root: root, offline: offline}
 	b.admin = indexcache.NewAdmin(profiles{root}, indexcache.Settings{
 		Profile: cfg.Profile, TTL: cfg.CacheTTL, Offline: offline, Disabled: !caching,
 	}, opts.Logger)
@@ -207,7 +242,6 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 	switch {
 	case offline:
 		mode = indexcache.Offline
-		b.blobs = indexcache.OfflineBlobs{}
 	case opts.ReadOnly && cfg.CacheTTL > 0:
 		mode = indexcache.Fresh
 	}
@@ -215,9 +249,18 @@ func stores(remote *cloud.Cloud, cfg config.Config, opts Options, clk port.Clock
 		Profile: cfg.Profile, Mode: mode, TTL: cfg.CacheTTL, Clock: clk, Log: opts.Logger,
 	})
 	b.roots, b.docs, b.blobCache = ic, ic, profile
-	if !offline {
+	// Every read of a file goes through the cache first: what sync left
+	// there is never downloaded, and is all an offline run has.
+	if offline {
+		b.blobs = indexcache.NewBlobs(indexcache.OfflineBlobs{}, profile)
+	} else {
 		b.blobs = indexcache.NewBlobs(remote, profile)
 	}
+	b.live = ic
+	if mode != indexcache.Live {
+		b.live = indexcache.New(remote, profile, indexcache.Options{Profile: cfg.Profile, Mode: indexcache.Live, Clock: clk, Log: opts.Logger})
+	}
+	b.syncs = indexcache.NewSyncs(profile, opts.Logger)
 	return b, nil
 }
 
@@ -230,9 +273,28 @@ func (p profiles) Open(profile string) (indexcache.ProfileStore, error) {
 	return p.root.Profile(profile)
 }
 
-func cacheBytes(n int64) int64 {
-	if n == 0 {
-		return DefaultCacheBytes
+// newClient is the transport of the profile cfg describes, keeping its
+// tokens in store.
+func newClient(store rmcloud.SecretStore, cfg config.Config, opts Options) (*rmcloud.Client, error) {
+	clientOpts := append([]rmcloud.Option{
+		rmcloud.WithEndpoints(cfg.Endpoints),
+		rmcloud.WithLogger(opts.Logger),
+	}, opts.Client...)
+	client, err := rmcloud.New(store, clientOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("start the transport: %w", err)
 	}
-	return n
+	return client, nil
+}
+
+// limits are the budgets of every profile's cache: n for each when given,
+// else each profile's own as the configuration chooses it.
+func limits(n int64, budgets config.Budgets) blobcache.Limits {
+	if n != 0 {
+		return blobcache.Fixed(max(n, 0))
+	}
+	return func(profile string) blobcache.Limit {
+		b := budgets.Of(profile)
+		return blobcache.Limit{Bytes: b.Bytes, Source: b.Source}
+	}
 }

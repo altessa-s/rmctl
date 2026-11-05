@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -41,7 +42,10 @@ type Services struct {
 	Inspector port.Inspector
 	Pages     port.Pages
 	Archives  port.Archives
+	Rendering port.Rendering
+	Syncer    port.Syncer
 	Secrets   port.Secrets
+	Profiles  port.Profiles
 	Cache     port.Cache
 	// Offline says the services never reach the cloud: --offline, or the
 	// profile's configuration.
@@ -54,7 +58,10 @@ type Services struct {
 // OutTerminal says whether the output stream is one, which makes the answer
 // a table; OutColor whether that terminal shows ANSI color; Width is its
 // width in columns, 0 when unknown. Getenv reads the environment; nil is the
-// process's.
+// process's. Now is the wall clock a progress bar measures its rate by;
+// nil is the machine's. Renders says this build draws documents, which
+// "version --full" reports: false in rmctl-lite and in a build without cgo;
+// the composition root asks the renderer.
 type Streams struct {
 	In          io.Reader
 	Out, Err    io.Writer
@@ -63,6 +70,8 @@ type Streams struct {
 	OutColor    bool
 	Width       int
 	Getenv      func(string) string
+	Now         func() time.Time
+	Renders     bool
 }
 
 // Request is what the command line asks of the services: the profile, the
@@ -147,6 +156,17 @@ func Profile(cmd *cobra.Command) string {
 		return f.Value.String()
 	}
 	return os.Getenv(ProfileEnv)
+}
+
+// DefaultProfile is the profile used when none is named.
+const DefaultProfile = "default"
+
+// ProfileName is [Profile], or DefaultProfile when none is named.
+func ProfileName(cmd *cobra.Command) string {
+	if p := Profile(cmd); p != "" {
+		return p
+	}
+	return DefaultProfile
 }
 
 // Yes reports --yes.

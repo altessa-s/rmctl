@@ -188,6 +188,12 @@ func (l *Library) loadItem(ctx context.Context, rec domain.Record) (loaded, erro
 	return loaded{item: domain.NewItem(rec, files, meta, tags), ok: true}, nil
 }
 
+// Index reads the index of rec as Build does, through the document store,
+// whose cache keeps it.
+func (l *Library) Index(ctx context.Context, rec domain.Record) ([]domain.File, error) {
+	return l.docs.Files(ctx, rec)
+}
+
 // Read reads one file through the cache.
 func (l *Library) Read(ctx context.Context, f domain.File) ([]byte, error) {
 	if l.cache != nil {

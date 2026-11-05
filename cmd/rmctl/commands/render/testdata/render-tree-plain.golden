@@ -1,0 +1,9 @@
+rendered	out/A.pdf	/Notes/A	4	-
+unchanged	out/B.pdf	/Notes/B	-	-
+failed	out/Sub/C.pdf	/Notes/Sub/C	-	C: refused: pages moved
+
+dir	remarkable
+documents	3
+rendered	1
+unchanged	1
+failed	1

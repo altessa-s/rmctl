@@ -21,9 +21,17 @@ var ErrNoPages = errors.New("this build reads no pages: rebuild with cgo and a C
 // writes no .rmdoc archives.
 var ErrNoArchives = errors.New("this build reads and writes no .rmdoc archives: rebuild with cgo and a C23 compiler")
 
+// ErrNoRender is what a render command says when this build draws nothing.
+var ErrNoRender = errors.New("rendering is not available in this build: it is in the macOS, Linux and Windows builds of rmctl")
+
+// ErrNoRenderLite is what a render command says in rmctl-lite, the build
+// without the renderer.
+var ErrNoRenderLite = errors.New("rendering is not in rmctl-lite: install rmctl, the full build, for it")
+
 // PagesErr names err for the command at path: a build without the page
-// format library gets one sentence that says how to get one, anything else
-// keeps its own words.
+// format library, the container library or the renderer gets one sentence
+// that says how to get one, anything else keeps its own words. rmctl-lite
+// names the full build.
 func PagesErr(path string, err error) error {
 	if err == nil {
 		return nil
@@ -33,6 +41,12 @@ func PagesErr(path string, err error) error {
 	}
 	if errors.Is(err, domain.ErrArchivesUnsupported) {
 		return fmt.Errorf("%s: %w", path, ErrNoArchives)
+	}
+	if errors.Is(err, domain.ErrRenderLite) {
+		return fmt.Errorf("%s: %w", path, ErrNoRenderLite)
+	}
+	if errors.Is(err, domain.ErrRenderUnsupported) {
+		return fmt.Errorf("%s: %w", path, ErrNoRender)
 	}
 	return fmt.Errorf("%s: %w", path, err)
 }

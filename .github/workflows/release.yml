@@ -22,8 +22,15 @@ jobs:
     secrets: inherit
 
   # The page and archive commands link rmlines-lib and rmdoc-lib, C23
-  # libraries built through cgo, so every binary is built natively on its own runner;
-  # goreleaser only publishes them and writes the changelog.
+  # libraries built through cgo, and rendering links rmrender-lib, so every
+  # binary is built natively on its own runner; goreleaser only publishes
+  # them and writes the changelog. A Linux archive carries libpdfium.so beside
+  # the binary, which finds it through its $ORIGIN run path; Cairo and Pango
+  # come from the system. The Windows archive is built by build-windows, and
+  # the rmctl-lite archives (no rendering) by build-lite and
+  # build-windows-lite. The macOS archives of both are built, signed and
+  # notarized on a Mac with .github/scripts/release-macos.sh and added to the
+  # release afterwards.
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: checks
@@ -34,14 +41,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: gcc }
-          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: gcc }
-          - { runner: macos-latest, goos: darwin, goarch: arm64, cc: clang }
-          # Apple's clang builds the other architecture with -arch.
-          - { runner: macos-latest, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
-          # cgo on Windows links through a MinGW-w64 toolchain; MSYS2's
-          # UCRT64 GCC is current enough for C23.
-          - { runner: windows-latest, goos: windows, goarch: amd64, cc: gcc }
+          # rmrender-lib's C23 needs clang 19; setup-render-linux.sh installs it.
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: clang-19 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: clang-19 }
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,25 +57,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
-      - name: Set up MinGW-w64
-        if: matrix.goos == 'windows'
-        id: msys2
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
-        with:
-          msystem: UCRT64
-          update: false
-          install: mingw-w64-ucrt-x86_64-gcc
-
-      - name: Put MinGW-w64 first on the path
-        if: matrix.goos == 'windows'
-        shell: bash
-        env:
-          MSYS2: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          printf '%s\\ucrt64\\bin\n' "$MSYS2" >> "$GITHUB_PATH"
+      - name: Set up the renderer's Linux build
+        # The binary looks for libpdfium.so in its own directory.
+        run: bash .github/scripts/setup-render-linux.sh '$ORIGIN'
 
       - name: Build
-        shell: bash
         env:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
@@ -81,37 +69,37 @@ jobs:
           CC: ${{ matrix.cc }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          ext=""; static=""
-          # A Windows binary carries the MinGW runtime instead of needing its DLLs.
-          [[ "$GOOS" == windows ]] && { ext=".exe"; static="-linkmode=external -extldflags=-static"; }
           pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
           mkdir -p out artifacts
-          go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w ${static} \
+          go build -trimpath -o out/rmctl -ldflags "-s -w \
             -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
             -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
           cp LICENSE README.md out/
-          name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"
-          if [[ "$GOOS" == windows ]]; then
-            (cd out && 7z a -tzip "../artifacts/${name}.zip" . >/dev/null)
-          else
-            tar -C out -czf "artifacts/${name}.tar.gz" .
-          fi
+          # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
+          mkdir -p out/licenses/fonts
+          cp "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)"/fonts/*-OFL.txt out/licenses/fonts/
+          cp "$PDFIUM_DIR/lib/libpdfium.so" out/
+          mkdir -p out/licenses/pdfium
+          cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
 
       - name: Smoke test
-        # darwin/amd64 is built on an arm64 runner and is not run here.
-        if: matrix.goos != 'darwin' || matrix.goarch != 'amd64'
-        shell: bash
         run: |
           bin=./out/rmctl
-          if [[ "${{ matrix.goos }}" == windows ]]; then
-            bin=./out/rmctl.exe
-            # Only system DLLs: nothing from the MinGW toolchain.
-            if objdump -p "$bin" | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
-              echo "::error::rmctl.exe depends on MinGW runtime DLLs"
-              exit 1
-            fi
-          fi
           "$bin" version --full
+          # shellcheck disable=SC2016 # $ORIGIN is literal
+          readelf -d "$bin" | grep -E 'R(UN)?PATH' | grep -qF '[$ORIGIN]' || { echo "::error::no \$ORIGIN run path"; exit 1; }
+          sample=internal/adapter/renderer/testdata/Notes.rmdoc
+          "$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf"
+          "$bin" render "$sample" --page 1 -o "$RUNNER_TEMP/smoke.png"
+
+      - name: Pack
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p artifacts
+          tar -C out -czf "artifacts/rmctl_${VERSION#v}_${GOOS}_${GOARCH}.tar.gz" .
 
       - name: Upload the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -120,9 +108,310 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
+  # rmctl.exe is built with MSYS2's clang against its Cairo stack and the
+  # PDFium SDK, as rmrender-go's Windows CI builds it: CLANG64 and PDFium
+  # win-x64 on x64, CLANGARM64 and PDFium win-arm64 on the ARM64 runner.
+  # Those are DLLs, so the binary cannot be static: the zip carries every DLL
+  # it loads (ntldd -R, all from the toolchain or PDFium; Windows' own stay
+  # out) beside rmctl.exe, where Windows looks first, with their licences
+  # under licenses/. The smoke test runs the unpacked zip with PATH reduced to
+  # the Windows directory.
+  build-windows:
+    name: Build (windows/${{ matrix.goarch }})
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: windows-2022, goarch: amd64, msystem: CLANG64, prefix: mingw-w64-clang-x86_64 }
+          - { runner: windows-11-arm, goarch: arm64, msystem: CLANGARM64, prefix: mingw-w64-clang-aarch64 }
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up MSYS2 ${{ matrix.msystem }}
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # The Go that setup-go installed, after the toolchain's clang and
+          # pkg-config. The same packages as CI's Windows job, and zip and
+          # unzip for the archive.
+          path-type: inherit
+          install: >-
+            ${{ matrix.prefix }}-clang
+            ${{ matrix.prefix }}-pkgconf
+            ${{ matrix.prefix }}-python
+            ${{ matrix.prefix }}-cairo
+            ${{ matrix.prefix }}-pango
+            ${{ matrix.prefix }}-fontconfig
+            ${{ matrix.prefix }}-harfbuzz
+            ${{ matrix.prefix }}-gdk-pixbuf2
+            ${{ matrix.prefix }}-zlib
+            ${{ matrix.prefix }}-ntldd
+            zip
+            unzip
+
+      - name: Set up the renderer's Windows build
+        # Fetches the PDFium SDK of the MSYS2 environment (checksum-verified)
+        # and points cgo at clang and PDFium.
+        run: bash .github/scripts/setup-render-windows.sh
+
+      - name: Build
+        env:
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
+          mkdir -p out artifacts
+          go build -trimpath -o out/rmctl.exe -ldflags "-s -w \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+          cp LICENSE README.md out/
+          # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
+          mkdir -p out/licenses/fonts
+          cp "$(cygpath -u "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)")"/fonts/*-OFL.txt out/licenses/fonts/
+          mkdir -p out/licenses/pdfium
+          cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
+          # pdfium.dll and the Cairo stack's DLLs, with the MSYS2 packages' licences.
+          bash .github/scripts/bundle-windows-dlls.sh out/rmctl.exe
+
+      - name: Pack
+        # A zip, which Explorer opens.
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          (cd out && zip -q -r "../artifacts/rmctl_${VERSION#v}_windows_${GOARCH}.zip" .)
+
+      - name: Smoke test
+        # From the zip alone: unpacked into an empty directory and run with
+        # PATH reduced to the Windows directory, rmctl.exe finds only the
+        # DLLs beside it and Windows' own.
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          app="$(cygpath -u "$RUNNER_TEMP")/smoke/app"
+          mkdir -p "$app"
+          unzip -q artifacts/rmctl_*_windows_"${GOARCH}".zip -d "$app"
+          bash .github/scripts/bundle-windows-dlls.sh --verify "$app/rmctl.exe"
+          system=$(cygpath -u "${SYSTEMROOT:-C:/Windows}")
+          sample=$(cygpath -w "$PWD/internal/adapter/renderer/testdata/Notes.rmdoc")
+          cd "$app/.."
+          PATH="$system/System32:$system" "$app/rmctl.exe" version --full
+          # A rendering writes nothing to standard error: no library of the
+          # zip may complain about a file only a development machine has.
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" -o smoke.pdf 2>stderr.txt
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" --page 1 -o smoke.png 2>>stderr.txt
+          if [[ -s stderr.txt ]]; then
+            cat stderr.txt
+            echo "::error::rendering wrote to standard error"
+            exit 1
+          fi
+          head -c 5 smoke.pdf | grep -q '%PDF-' || { echo "::error::smoke.pdf is not a PDF"; exit 1; }
+          head -c 8 smoke.png | grep -q 'PNG' || { echo "::error::smoke.png is not a PNG"; exit 1; }
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rmctl-windows-${{ matrix.goarch }}
+          path: artifacts/*
+          retention-days: 7
+
+  # rmctl-lite is rmctl without the renderer (-tags norender): rmrender-go,
+  # Cairo, Pango and PDFium are not linked, so a Linux binary needs only the
+  # C library and its archive holds the binary, LICENSE and README, with no
+  # libpdfium.so, no run path and no font licences. cgo still compiles
+  # rmlines-lib and rmdoc-lib, which need a C23 compiler: clang 19, alone.
+  build-lite:
+    name: Build lite (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Install clang 19
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends clang-19
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: clang-19
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
+          mkdir -p out
+          go build -trimpath -tags norender -o out/rmctl -ldflags "-s -w \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+          cp LICENSE README.md out/
+
+      - name: Smoke test
+        run: |
+          bin=./out/rmctl
+          readelf -d "$bin" | grep NEEDED
+          if readelf -d "$bin" | grep -E 'R(UN)?PATH'; then
+            echo "::error::rmctl-lite has a run path"
+            exit 1
+          fi
+          if readelf -d "$bin" | grep -iE 'NEEDED.*(pdfium|cairo|pango|harfbuzz|fontconfig|gdk_pixbuf|glib)'; then
+            echo "::error::rmctl-lite links the render stack"
+            exit 1
+          fi
+          bash .github/scripts/smoke-lite.sh "$bin" internal/adapter/renderer/testdata/Notes.rmdoc
+
+      - name: Pack
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p artifacts
+          tar -C out -czf "artifacts/rmctl-lite_${VERSION#v}_${GOOS}_${GOARCH}.tar.gz" .
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rmctl-lite-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifacts/*
+          retention-days: 7
+
+  # rmctl-lite for Windows is a single static rmctl.exe: with no Cairo stack
+  # and no PDFium there is no DLL to ship, so MSYS2's clang links the C
+  # libraries and the MinGW-w64 runtime in (-linkmode=external
+  # -extldflags=-static), CLANG64 on x64 and CLANGARM64 on the ARM64 runner.
+  # check-windows-static.sh holds the imports to Windows' own DLLs, and the
+  # smoke test runs the unpacked zip with PATH reduced to the Windows
+  # directory.
+  build-windows-lite:
+    name: Build lite (windows/${{ matrix.goarch }})
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: windows-2022, goarch: amd64, msystem: CLANG64, prefix: mingw-w64-clang-x86_64 }
+          - { runner: windows-11-arm, goarch: arm64, msystem: CLANGARM64, prefix: mingw-w64-clang-aarch64 }
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up MSYS2 ${{ matrix.msystem }}
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # The Go that setup-go installed, after the toolchain's clang.
+          path-type: inherit
+          install: >-
+            ${{ matrix.prefix }}-clang
+            ${{ matrix.prefix }}-llvm
+            zip
+            unzip
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          CC: clang
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          clang --version | head -1
+          go version
+          pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
+          mkdir -p out
+          go build -trimpath -tags norender -o out/rmctl.exe -ldflags "-s -w -linkmode=external -extldflags=-static \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+          cp LICENSE README.md out/
+
+      - name: Pack
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p artifacts
+          (cd out && zip -q -r "../artifacts/rmctl-lite_${VERSION#v}_windows_${GOARCH}.zip" .)
+
+      - name: Smoke test
+        # From the zip alone, unpacked into an empty directory: rmctl.exe
+        # imports only Windows' DLLs and runs with PATH reduced to the
+        # Windows directory.
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          app="$(cygpath -u "$RUNNER_TEMP")/smoke/app"
+          mkdir -p "$app"
+          unzip -q artifacts/rmctl-lite_*_windows_"${GOARCH}".zip -d "$app"
+          bash .github/scripts/check-windows-static.sh "$app/rmctl.exe"
+          system=$(cygpath -u "${SYSTEMROOT:-C:/Windows}")
+          sample=$(cygpath -w "$PWD/internal/adapter/renderer/testdata/Notes.rmdoc")
+          smoke="$PWD/.github/scripts/smoke-lite.sh"
+          cd "$app/.."
+          SMOKE_PATH="$system/System32:$system" bash "$smoke" "$app/rmctl.exe" "$sample"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rmctl-lite-windows-${{ matrix.goarch }}
+          path: artifacts/*
+          retention-days: 7
+
   release:
     name: Release
-    needs: build
+    needs: [build, build-windows, build-lite, build-windows-lite]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -142,7 +431,8 @@ jobs:
           merge-multiple: true
 
       - name: Checksums
-        run: (cd artifacts && sha256sum rmctl_* > checksums.txt && cat checksums.txt)
+        # Every archive the release publishes: rmctl's and rmctl-lite's.
+        run: (cd artifacts && sha256sum rmctl_* rmctl-lite_* > checksums.txt && cat checksums.txt)
 
       - name: Keep the archives out of git status
         # goreleaser refuses a dirty tree; a released tag's own .gitignore may
@@ -160,57 +450,108 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}
 
-  # The formula in altessa-s/homebrew-tap installs the archives this release
-  # published. GITHUB_TOKEN cannot push to another repository, so the job
-  # needs HOMEBREW_TAP_TOKEN (contents: write on the tap) and is skipped
-  # without it; pre-releases leave the formula alone.
-  homebrew:
-    name: Homebrew formula
+  # The Windows package managers install the archive this release published.
+  # Pre-releases leave them alone; a job whose token is not set says so and
+  # does nothing, so a release never waits on them.
+  scoop:
+    name: Scoop manifest
     needs: release
     if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
-      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
     steps:
+      - name: Require the bucket token
+        id: token
+        run: |
+          if [[ -z "$BUCKET_TOKEN" ]]; then
+            echo "::warning::SCOOP_BUCKET_TOKEN is not set; the Scoop manifest is not updated"
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
-        if: env.TAP_TOKEN != ''
+        if: steps.token.outputs.set == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Download the archives
-        if: env.TAP_TOKEN != ''
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: rmctl-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Write the formula
-        if: env.TAP_TOKEN != ''
+      - name: Write the manifests
+        # rmctl.json and rmctl-lite.json, from the same checksums.txt.
+        if: steps.token.outputs.set == 'true'
         env:
-          VERSION: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          (cd artifacts && sha256sum rmctl_* > checksums.txt)
-          .github/scripts/homebrew-formula.sh "${VERSION#v}" artifacts/checksums.txt > rmctl.rb
-          cat rmctl.rb
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --dir artifacts
+          .github/scripts/scoop-manifest.sh "${TAG#v}" artifacts/checksums.txt > rmctl.json
+          .github/scripts/scoop-manifest.sh --lite "${TAG#v}" artifacts/checksums.txt > rmctl-lite.json
+          cat rmctl.json rmctl-lite.json
 
-      - name: Push it to the tap
-        if: env.TAP_TOKEN != ''
+      - name: Push them to the bucket
+        if: steps.token.outputs.set == 'true'
         env:
-          VERSION: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/altessa-s/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp rmctl.rb tap/Formula/rmctl.rb
-          cd tap
-          git add Formula/rmctl.rb
+          git clone --depth 1 "https://x-access-token:${BUCKET_TOKEN}@github.com/altessa-s/scoop-bucket.git" bucket
+          mkdir -p bucket/bucket
+          cp rmctl.json rmctl-lite.json bucket/bucket/
+          cd bucket
+          git add bucket/rmctl.json bucket/rmctl-lite.json
           if git diff --cached --quiet; then
-            echo "the formula is already current"
+            echo "the manifests are already current"
             exit 0
           fi
-          git -c user.name=DM -c user.email=dm@altessa-s.com commit -m "feat(rmctl): update to ${VERSION#v}"
+          git -c user.name=DM -c user.email=dm@altessa-s.com commit -m "feat(rmctl): update to ${TAG#v}"
           git push origin HEAD
+
+  # winget-releaser opens a pull request to microsoft/winget-pkgs from the
+  # fork under altessa-s, with manifests based on the version already there;
+  # the first version is submitted by hand (see .github/scripts/README.md).
+  winget:
+    name: winget manifest
+    needs: release
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Require the winget token
+        id: token
+        run: |
+          if [[ -z "$WINGET_TOKEN" ]]; then
+            echo "::warning::WINGET_TOKEN is not set; no winget pull request is opened"
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request
+        # The full build, x64 and ARM64. The regex holds on an asset's name
+        # or its URL, and leaves out the rmctl-lite zips, whose names end the
+        # same way. The package's manifest sets ArchiveBinariesDependOnPath
+        # (see .github/scripts/README.md); winget-releaser keeps it.
+        if: steps.token.outputs.set == 'true'
+        uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        with:
+          identifier: Altessa.rmctl
+          installers-regex: '(^|/)rmctl_[^/]*_windows_(amd64|arm64)\.zip$'
+          release-tag: ${{ inputs.tag || github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
+
+      - name: Open the pull request for rmctl-lite
+        # Both architectures. Like Altessa.rmctl, the first version of the
+        # package is submitted by hand (see .github/scripts/README.md).
+        if: steps.token.outputs.set == 'true'
+        uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        with:
+          identifier: Altessa.rmctl.Lite
+          installers-regex: '(^|/)rmctl-lite_[^/]*_windows_(amd64|arm64)\.zip$'
+          release-tag: ${{ inputs.tag || github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}

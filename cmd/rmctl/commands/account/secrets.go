@@ -79,11 +79,11 @@ func newSecretsStatus(env *cliutil.Env) *cobra.Command {
 				v.Present = []string{}
 			}
 			return env.Emit(cmd, output.Result{JSON: v, Doc: output.Doc{output.Record{Fields: []output.Field{
-				{Key: "profile", Value: output.Text(v.Profile)},
+				{Key: keyProfile, Value: output.Text(v.Profile)},
 				{Key: "backend", Value: output.Text(v.Backend)},
 				{Key: "source", Value: output.Text(v.Source)},
 				{Key: "location", Value: output.Path(v.Location)},
-				{Key: "config_file", Value: output.Path(v.ConfigFile)},
+				{Key: keyConfigFile, Value: output.Path(v.ConfigFile)},
 				{Key: "present", Value: output.Text(strings.Join(v.Present, ","))},
 			}}}})
 		},
@@ -160,7 +160,7 @@ func printMigration(cmd *cobra.Command, env *cliutil.Env, m port.SecretsMigratio
 		{Key: "location", Value: output.Path(v.Location)},
 		{Key: "moved", Value: output.Text(strings.Join(v.Moved, ","))},
 		{Key: "default_set", Value: output.Bool(v.DefaultSet)},
-		{Key: "config_file", Value: output.Path(v.ConfigFile)},
+		{Key: keyConfigFile, Value: output.Path(v.ConfigFile)},
 	}}}})
 	if err != nil || v.DefaultSet || env.JSON(cmd) {
 		return err

@@ -18,9 +18,19 @@ import (
 // GroupID is the help group of the account commands.
 const GroupID = "account"
 
-// Commands are register, logout and account.
+// The keys several answers share.
+const (
+	keyProfile    = "profile"
+	keyRegistered = "registered"
+	keySecrets    = "secrets"
+	keyConfigFile = "config_file"
+)
+
+// Commands are register, logout, account, secrets and profile.
 func Commands(env *cliutil.Env) []*cobra.Command {
-	return []*cobra.Command{newRegister(env), newLogout(env), cliutil.WithAccess(newAccount(env), cliutil.AccessRead), newSecrets(env)}
+	return []*cobra.Command{
+		newRegister(env), newLogout(env), cliutil.WithAccess(newAccount(env), cliutil.AccessRead), newSecrets(env), newProfile(env),
+	}
 }
 
 func service(cmd *cobra.Command, env *cliutil.Env) (port.Account, error) {
@@ -144,10 +154,10 @@ func newAccount(env *cliutil.Env) *cobra.Command {
 			}
 			view.Secrets = string(st.Backend)
 			return env.Emit(cmd, output.Result{JSON: view, Doc: output.Doc{output.Record{Fields: []output.Field{
-				{Key: "registered", Value: output.Bool(view.Registered)},
+				{Key: keyRegistered, Value: output.Bool(view.Registered)},
 				{Key: "level", Value: output.Text(view.Level)},
 				{Key: "sync_scope", Value: output.Text(view.SyncScope)},
-				{Key: "secrets", Value: output.Text(view.Secrets)},
+				{Key: keySecrets, Value: output.Text(view.Secrets)},
 			}}}})
 		},
 	}

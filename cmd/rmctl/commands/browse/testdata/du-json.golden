@@ -1,0 +1,35 @@
+{
+  "id": "",
+  "path": "/",
+  "depth": 0,
+  "bytes": 6535,
+  "documents": 3,
+  "folders": 1,
+  "by_kind": [
+    {
+      "kind": "epub",
+      "documents": 1,
+      "bytes": 4205
+    },
+    {
+      "kind": "pdf",
+      "documents": 1,
+      "bytes": 2158
+    },
+    {
+      "kind": "notebook",
+      "documents": 1,
+      "bytes": 172
+    }
+  ],
+  "subfolders": [
+    {
+      "id": "f-books",
+      "path": "/Books",
+      "depth": 1,
+      "bytes": 6363,
+      "documents": 2,
+      "folders": 0
+    }
+  ]
+}

@@ -210,7 +210,7 @@ func TestExportThenImportRoundTrip(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
 	lib := library.New(f.c, f.c, f.c)
-	exporter := fetch.New(lib, f.c, f.files, porttest.NewArchiver(f.files))
+	exporter := fetch.New(lib, f.c, f.files, porttest.NewArchiver(f.files), porttest.NewClock(porttest.Epoch))
 	if _, err := exporter.Export(t.Context(), []string{"d1aaaaaa"}, "paper.rmdoc"); err != nil {
 		t.Fatal(err)
 	}

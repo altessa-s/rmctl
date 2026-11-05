@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/domain"
 )
@@ -50,6 +51,12 @@ type Browser interface {
 	List(ctx context.Context, query string, all bool) (*domain.Tree, []domain.Item, error)
 	Stat(ctx context.Context, query string) (*domain.Tree, domain.Item, error)
 	Find(ctx context.Context, q FindQuery) (*domain.Tree, []domain.Item, error)
+	// Usage is what the folder a query names takes, and each folder below
+	// it down to depth levels; all counts the trash.
+	Usage(ctx context.Context, query string, depth int, all bool) (*domain.Tree, domain.Usage, error)
+	// Duplicates are the documents below the folder a query names that
+	// share their original file; all counts the trash.
+	Duplicates(ctx context.Context, query string, all bool) (*domain.Tree, []domain.DuplicateGroup, error)
 }
 
 // MirrorOptions shape a recursive download.
@@ -77,6 +84,42 @@ type Fetcher interface {
 	Export(ctx context.Context, queries []string, dest string) (ExportReport, error)
 	// Mirror downloads a folder's documents into dir, keeping the tree.
 	Mirror(ctx context.Context, query, dir string, opts MirrorOptions) (MirrorReport, error)
+	// Backup writes every document below the folder query names into dir,
+	// one .rmdoc archive each, with a manifest. A document whose record
+	// hash the manifest already holds is skipped; one the backup no longer
+	// covers has its archive moved to dir/removed, or deleted with Prune.
+	Backup(ctx context.Context, dir, query string, opts BackupOptions) (BackupReport, error)
+}
+
+// BackupOptions shape a backup.
+type BackupOptions struct {
+	// Profile is the profile the backup is of; a directory backing up
+	// another profile is refused unless Force.
+	Profile string
+	// All takes the documents in the trash too.
+	All bool
+	// Prune deletes the archives of documents gone from the library —
+	// deleted, or in the trash unless All — instead of moving them to the
+	// removed directory. The archive of a document that is still there but
+	// outside the path is always moved, never deleted.
+	Prune bool
+	// Force backs up into a directory holding another profile's backup.
+	Force bool
+	// Rescope backs up into a directory holding the backup of another
+	// path: its manifest takes the new path, and the archives outside it
+	// are moved to the removed directory; nothing is deleted.
+	Rescope bool
+	Jobs    int
+}
+
+// BackupReport is what a backup did: Documents is how many the manifest
+// lists, Written and Skipped how many archives were written or found
+// unchanged, Moved and Pruned how many archives the backup no longer
+// covers were moved aside or deleted, and Outside how many of those moved
+// belong to documents still in the library, outside the path.
+type BackupReport struct {
+	Dir                                                 string
+	Documents, Written, Skipped, Moved, Pruned, Outside int
 }
 
 // Cover is which page a document shows as its cover.
@@ -182,6 +225,45 @@ type Writer interface {
 	PlanImport(ctx context.Context, local, dest string) ([]ImportedDocument, error)
 	// Upload sends every PDF and EPUB below dir into the folder dest.
 	Upload(ctx context.Context, dir, dest string, opts UploadOptions) (MirrorReport, error)
+	// RestoreBackup imports the archives of a backup directory, in one
+	// commit, each into its folder from the manifest, below opts.To; missing
+	// folders are created. A document whose identifier the library holds
+	// gets a new one, as Import gives it.
+	RestoreBackup(ctx context.Context, dir string, opts RestoreOptions) (RestoreReport, error)
+}
+
+// RestoreOptions shape a restore from a backup.
+type RestoreOptions struct {
+	// To is the folder the manifest's paths are recreated under; "" or "/"
+	// is the top level, which puts every document back where it was.
+	To string
+	// IDs are the documents to restore, each an identifier or a unique
+	// prefix of one; none is every document of the backup.
+	IDs []string
+	// DryRun works out the restore against the current library and
+	// uploads nothing.
+	DryRun bool
+}
+
+// RestoreReport is what a restore did, or would do.
+type RestoreReport struct {
+	// Profile and Created are the backup's.
+	Profile string
+	Created time.Time
+	// Documents are the documents restored, in manifest order.
+	Documents []RestoredDocument
+	// Folders are the paths of the folders created, parents first.
+	Folders []string
+}
+
+// RestoredDocument is one document a restore imported: the item, the
+// identifier it had in the backup, the archive it came from and the
+// folder path it went into.
+type RestoredDocument struct {
+	Item   domain.Item
+	From   domain.ItemID
+	File   string
+	Folder string
 }
 
 // Edited is an item after an edit, and whether the edit changed it: an

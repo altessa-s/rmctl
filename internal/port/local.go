@@ -20,6 +20,11 @@ type LocalFiles interface {
 	Produce(ctx context.Context, path string, write func(w io.Writer) error) error
 	// Stat reports a local file's size, or exists false.
 	Stat(path string) (size int64, isDir, exists bool, err error)
+	// ModTime is the modification time of the regular file at path, or
+	// exists false when there is none: no file, or a directory.
+	ModTime(path string) (mtime time.Time, exists bool, err error)
+	// SetModTime sets the modification time of the file at path.
+	SetModTime(path string, mtime time.Time) error
 	// Open opens the regular file at path for reading.
 	Open(path string) (io.ReadCloser, error)
 	// ReadHead reads at most n bytes from the start of path, and ReadTail at
@@ -32,6 +37,8 @@ type LocalFiles interface {
 	Walk(dir string) ([]string, error)
 	// Remove deletes a file.
 	Remove(path string) error
+	// Rename moves the file from to the path to, replacing a file there.
+	Rename(from, to string) error
 	// Stage makes a private directory for files a use case keeps on disk
 	// for a while, and returns it with the function that removes it and
 	// everything in it.

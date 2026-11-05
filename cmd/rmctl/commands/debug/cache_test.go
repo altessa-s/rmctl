@@ -24,9 +24,9 @@ func cacheFake() *clitest.Fake {
 	return &clitest.Fake{CacheAt: port.CacheReport{
 		Dir: "/c/rmctl", Profile: "work", TTL: 10 * time.Minute,
 		Profiles: []port.ProfileCache{
-			{Profile: "home", Dir: "/c/rmctl/home", Bytes: 2048, Budget: 512 << 20, Entries: entries(4, 3)},
+			{Profile: "home", Dir: "/c/rmctl/home", Bytes: 2048, BudgetSource: port.BudgetFromProfile, Entries: entries(4, 3)},
 			{
-				Profile: "work", Dir: "/c/rmctl/work", Bytes: 10 << 20, Budget: 512 << 20, Entries: entries(120, 61),
+				Profile: "work", Dir: "/c/rmctl/work", Bytes: 10 << 20, Budget: 512 << 20, BudgetSource: port.BudgetFromConfig, Entries: entries(120, 61),
 				RootHash: strings.Repeat("ab", 32), RootGeneration: 42, Confirmed: confirmed,
 			},
 		},

@@ -36,7 +36,7 @@ func setup(t testing.TB) (*fetch.Service, *porttest.Cloud, *porttest.MemFiles) {
 		porttest.Doc{ID: "d9aaaaaa", Name: "Binned", Parent: "f9aaaaaa", Ext: "pdf", Body: []byte("BIN")},
 	)
 	files := porttest.NewMemFiles()
-	return fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files)), c, files
+	return fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files), porttest.NewClock(porttest.Epoch)), c, files
 }
 
 func TestSafeName(t *testing.T) {
@@ -255,10 +255,11 @@ func TestNewPanics(t *testing.T) {
 	files := porttest.NewMemFiles()
 	arc := porttest.NewArchiver(files)
 	for i, f := range []func(){
-		func() { fetch.New(nil, c, files, arc) },
-		func() { fetch.New(lib, nil, files, arc) },
-		func() { fetch.New(lib, c, nil, arc) },
-		func() { fetch.New(lib, c, files, nil) },
+		func() { fetch.New(nil, c, files, arc, porttest.NewClock(porttest.Epoch)) },
+		func() { fetch.New(lib, nil, files, arc, porttest.NewClock(porttest.Epoch)) },
+		func() { fetch.New(lib, c, nil, arc, porttest.NewClock(porttest.Epoch)) },
+		func() { fetch.New(lib, c, files, nil, porttest.NewClock(porttest.Epoch)) },
+		func() { fetch.New(lib, c, files, arc, nil) },
 	} {
 		func() {
 			defer func() {

@@ -137,6 +137,8 @@ type Options struct {
 	Factory cliutil.Factory
 	// Context is the run's context; nil is a background context.
 	Context context.Context //nolint:containedctx // a test option
+	// Renders makes the run a build that draws documents.
+	Renders bool
 }
 
 // Exec runs args against a root carrying the persistent flags and the
@@ -147,7 +149,7 @@ func Exec(t testing.TB, svc cliutil.Services, opts Options, build func(env *cliu
 	streams := cliutil.Streams{
 		In: strings.NewReader(opts.Stdin), Out: &out, Err: &errOut, IsTerminal: opts.Terminal,
 		OutTerminal: opts.OutTerminal, OutColor: opts.OutTerminal, Width: opts.Width,
-		Getenv: func(key string) string { return opts.Env[key] },
+		Getenv: func(key string) string { return opts.Env[key] }, Renders: opts.Renders,
 	}
 	factory := opts.Factory
 	if factory == nil {

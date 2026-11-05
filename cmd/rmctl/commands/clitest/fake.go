@@ -20,6 +20,8 @@ import (
 // Fake implements every input port over a fixed library. Err, when set, is
 // returned by every call; the call is still recorded.
 type Fake struct {
+	// Unchanged makes Rename, Pin and Tag report every item unchanged.
+	Unchanged bool
 	// ContentPlan is what a put --content-only hears it will do.
 	ContentPlan *port.ContentPlan
 	// CacheAt is what Cache.Status answers, CacheErr fails Status and
@@ -69,6 +71,34 @@ type Fake struct {
 	Inspected  port.ArchiveReport
 	Local      []port.DocumentText
 	ArchiveErr error
+	// Backed is what Backup answers, with the directory filled in, and
+	// Restored what RestoreBackup answers.
+	Backed   port.BackupReport
+	Restored port.RestoreReport
+	// Rendered is what Render and RenderFile answer, with the path filled
+	// in when it has none, and RenderErr fails them alone (such as
+	// domain.ErrRenderUnsupported).
+	Rendered  port.RenderReport
+	RenderErr error
+	// RenderFolders are the queries Folder reports as folders, "/" always;
+	// RenderedTree is what RenderTree answers, with the directory filled in when
+	// it has none, and TreeErr the error it answers with.
+	RenderFolders []string
+	RenderedTree  port.RenderTreeReport
+	TreeErr       error
+	// ProfileList is what Profiles.List answers, ProfileInfo what Info
+	// answers (with the name asked for filled in when it has none), and
+	// ProfilesErr fails List, Info and Add. Removal is what Remove answers,
+	// with RemoveErr: a removal that stopped part way.
+	ProfileList []port.ProfileSummary
+	ProfileInfo port.ProfileInfo
+	ProfilesErr error
+	Removal     port.ProfileRemoval
+	RemoveErr   error
+	// Synced is what Sync answers, after it reports SyncSteps to the
+	// progress it was given.
+	Synced    port.SyncReport
+	SyncSteps []port.SyncProgress
 
 	mu    sync.Mutex
 	calls []string
@@ -78,7 +108,8 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Archives: (*archivesFake)(f), Rendering: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Profiles: (*profilesFake)(f),
 	}
 }
 
@@ -170,6 +201,32 @@ func (f *Fake) Stat(_ context.Context, query string) (*domain.Tree, domain.Item,
 		err = domain.ErrNotFound
 	}
 	return t, it, err
+}
+
+// Usage implements port.Browser over the fake's library: the top level,
+// or the folder whose identifier query is.
+func (f *Fake) Usage(_ context.Context, query string, depth int, all bool) (*domain.Tree, domain.Usage, error) {
+	if err := f.record("Usage", query, strconv.Itoa(depth), opt(all, "all")); err != nil {
+		return nil, domain.Usage{}, err
+	}
+	tree := f.tree()
+	return tree, tree.Usage(f.folder(query), depth, all), nil
+}
+
+// Duplicates implements port.Browser over the fake's library.
+func (f *Fake) Duplicates(_ context.Context, query string, all bool) (*domain.Tree, []domain.DuplicateGroup, error) {
+	if err := f.record("Duplicates", query, opt(all, "all")); err != nil {
+		return nil, nil, err
+	}
+	tree := f.tree()
+	return tree, tree.Duplicates(f.folder(query), all), nil
+}
+
+func (f *Fake) folder(query string) domain.ItemID {
+	if query == "" || query == "/" {
+		return domain.RootID
+	}
+	return domain.ItemID(query)
 }
 
 func (f *Fake) Find(_ context.Context, q port.FindQuery) (*domain.Tree, []domain.Item, error) {
@@ -270,7 +327,88 @@ func (f *Fake) Mirror(_ context.Context, query, dir string, o port.MirrorOptions
 	return f.Report, f.record("Mirror", query, dir, opt(o.Incremental, "incremental"), opt(o.Delete, "delete"))
 }
 
+// Backup implements port.Fetcher.
+func (f *Fake) Backup(_ context.Context, dir, query string, o port.BackupOptions) (port.BackupReport, error) {
+	err := f.record("Backup", dir, query, "profile="+o.Profile, opt(o.All, "all"), opt(o.Prune, "prune"),
+		opt(o.Force, "force"), opt(o.Rescope, "rescope"), "jobs="+strconv.Itoa(o.Jobs))
+	r := f.Backed
+	r.Dir = dir
+	return r, err
+}
+
+// Rendering.
+
+// Render implements port.Rendering.
+func (f *Fake) Render(_ context.Context, query, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	return f.rendered("Render", query, dest, o)
+}
+
+// RenderFile implements port.Rendering.
+func (f *Fake) RenderFile(_ context.Context, path, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	return f.rendered("RenderFile", path, dest, o)
+}
+
+// Folder implements port.Rendering; it records no call.
+func (f *Fake) Folder(_ context.Context, query string) (bool, error) {
+	f.mu.Lock()
+	err := f.Err
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return query == "/" || slices.Contains(f.RenderFolders, query), nil
+}
+
+// RenderTree implements port.Rendering.
+func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOptions, t port.RenderTreeOptions) (port.RenderTreeReport, error) {
+	args := append(renderArgs(query, dir, o), opt(t.All, "all"), opt(t.Incremental, "incremental"), "jobs="+strconv.Itoa(t.Jobs))
+	if err := f.record("RenderTree", args...); err != nil {
+		return port.RenderTreeReport{}, err
+	}
+	r := f.RenderedTree
+	if r.Dir == "" {
+		r.Dir = dir
+	}
+	return r, f.TreeErr
+}
+
+// renderArgs are a rendering's arguments as a call records them.
+func renderArgs(from, dest string, o port.RenderOptions) []string {
+	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
+		"paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
+	if o.NoTemplates {
+		args = append(args, "no-template")
+	}
+	if o.Document != "" {
+		args = append(args, "id="+o.Document)
+	}
+	return args
+}
+
+func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	if err := f.record(method, renderArgs(from, dest, o)...); err != nil {
+		return port.RenderReport{}, err
+	}
+	if f.RenderErr != nil {
+		return port.RenderReport{}, f.RenderErr
+	}
+	r := f.Rendered
+	if r.Path == "" {
+		r.Path = dest
+	}
+	return r, nil
+}
+
 // Writer.
+
+// RestoreBackup implements port.Writer.
+func (f *Fake) RestoreBackup(_ context.Context, dir string, o port.RestoreOptions) (port.RestoreReport, error) {
+	args := append([]string{dir, "to=" + o.To}, o.IDs...)
+	if err := f.record("RestoreBackup", append(args, opt(o.DryRun, "dry-run"))...); err != nil {
+		return port.RestoreReport{}, err
+	}
+	return f.Restored, f.ArchiveErr
+}
 
 func (f *Fake) Mkdir(_ context.Context, p string, parents bool) (domain.Item, error) {
 	return Item(Spec{ID: "f-new", Name: p[strings.LastIndex(p, "/")+1:], Kind: domain.KindFolder}),
@@ -327,6 +465,36 @@ func (f *Fake) items(queries []string) []domain.Item {
 		}
 	}
 	return out
+}
+
+// edited reports the items queries name as edited, or unchanged.
+func (f *Fake) edited(queries []string) []port.Edited {
+	items := f.items(queries)
+	out := make([]port.Edited, 0, len(items))
+	for _, it := range items {
+		out = append(out, port.Edited{Item: it, Changed: !f.Unchanged})
+	}
+	return out
+}
+
+func (f *Fake) Rename(_ context.Context, query, name string) (port.Edited, error) {
+	if err := f.record("Rename", query, name); err != nil {
+		return port.Edited{}, err
+	}
+	out := f.edited([]string{query})
+	if len(out) == 0 {
+		return port.Edited{}, domain.ErrNotFound
+	}
+	out[0].Item.Name = name
+	return out[0], nil
+}
+
+func (f *Fake) Pin(_ context.Context, queries []string, on bool) ([]port.Edited, error) {
+	return f.edited(queries), f.record("Pin", append([]string{strconv.FormatBool(on)}, queries...)...)
+}
+
+func (f *Fake) Tag(_ context.Context, queries []string, add, remove []string) ([]port.Edited, error) {
+	return f.edited(queries), f.record("Tag", append([]string{"+" + strings.Join(add, ","), "-" + strings.Join(remove, ",")}, queries...)...)
 }
 
 func (f *Fake) Upload(_ context.Context, dir, dest string, o port.UploadOptions) (port.MirrorReport, error) {
@@ -495,4 +663,49 @@ func (c *cacheFake) Clear(ctx context.Context, all bool) ([]string, error) {
 		names = append(names, p.Profile)
 	}
 	return names, nil
+}
+
+// profilesFake is the Fake's port.Profiles.
+type profilesFake Fake
+
+var _ port.Profiles = (*profilesFake)(nil)
+
+// List implements port.Profiles.
+func (p *profilesFake) List(context.Context) ([]port.ProfileSummary, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileList"); err != nil {
+		return nil, err
+	}
+	return f.ProfileList, f.ProfilesErr
+}
+
+// Info implements port.Profiles.
+func (p *profilesFake) Info(_ context.Context, name string, account bool) (port.ProfileInfo, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileInfo", name, opt(account, "account")); err != nil {
+		return port.ProfileInfo{}, err
+	}
+	info := f.ProfileInfo
+	if info.Name == "" {
+		info.Name = name
+	}
+	return info, f.ProfilesErr
+}
+
+// Add implements port.Profiles.
+func (p *profilesFake) Add(_ context.Context, name, code string) error {
+	f := (*Fake)(p)
+	if err := f.record("ProfileAdd", name, code); err != nil {
+		return err
+	}
+	return f.ProfilesErr
+}
+
+// Remove implements port.Profiles.
+func (p *profilesFake) Remove(_ context.Context, name string, o port.RemoveProfileOptions) (port.ProfileRemoval, error) {
+	f := (*Fake)(p)
+	if err := f.record("ProfileRemove", name, opt(o.Revoke, "revoke")); err != nil {
+		return port.ProfileRemoval{}, err
+	}
+	return f.Removal, f.RemoveErr
 }

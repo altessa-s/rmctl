@@ -41,6 +41,11 @@ jobs:
           # overlapping paths would race to save it.
           cache: false
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       # The corpus Go generates lives in the build cache, not in the repo.
       # Without restoring it every night restarts from the seeds and re-derives
       # the same shallow inputs; with it, coverage compounds across runs. The

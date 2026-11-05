@@ -37,7 +37,7 @@ func BenchmarkMirrorIncremental(b *testing.B) {
 	c := porttest.NewCloud()
 	c.AddLarge(10, 100)
 	files := porttest.NewMemFiles()
-	s := fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files))
+	s := fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files), porttest.NewClock(porttest.Epoch))
 	if _, err := s.Mirror(b.Context(), "", "out", port.MirrorOptions{}); err != nil {
 		b.Fatal(err)
 	}

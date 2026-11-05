@@ -1,0 +1,11 @@
+current	false
+path	/Books
+documents	2
+fetched	3
+cached	2
+bytes_fetched	3145728
+bytes_needed	4194304
+cache_bytes	5242880
+budget	536870912
+budget_source	default
+generation	42

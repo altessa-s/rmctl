@@ -20,12 +20,12 @@ import (
 // GroupID is the help group of the reading commands.
 const GroupID = cliutil.GroupRead
 
-// Commands are ls, tree, stat, find, text and highlights.
+// Commands are ls, tree, stat, find, text, highlights, du and dupes.
 func Commands(env *cliutil.Env) []*cobra.Command {
 	// They change nothing and can run from the cache alone; text and
 	// highlights need the pages, which only a local archive or a page the
 	// cache happens to hold give them offline.
-	cmds := []*cobra.Command{newLs(env), newTree(env), newStat(env), newFind(env), newText(env), newHighlights(env)}
+	cmds := []*cobra.Command{newLs(env), newTree(env), newStat(env), newFind(env), newText(env), newHighlights(env), newDu(env), newDupes(env)}
 	for _, c := range cmds {
 		cliutil.WithAccess(c, cliutil.AccessOffline)
 	}
@@ -194,17 +194,17 @@ func statResult(it domain.Item, v statView) output.Result {
 		{Key: "id", Value: output.ID(v.ID)},
 		{Key: "name", Value: name},
 		{Key: "path", Value: output.Path(v.Path)},
-		{Key: "kind", Value: output.Text(v.Kind)},
+		{Key: keyKind, Value: output.Text(v.Kind)},
 		{Key: "size", Value: output.Size(v.Size)},
 		{Key: "modified", Value: output.Time(it.Modified)},
 		{Key: "created", Value: output.Time(it.Created)},
 		{Key: "trashed", Value: output.Bool(v.Trashed)},
 		{Key: "pinned", Value: output.Bool(v.Pinned)},
 		{Key: "tags", Value: tags},
-		{Key: "hash", Value: output.ID(v.Hash)},
+		{Key: keyHash, Value: output.ID(v.Hash)},
 	}}
 	files := output.Table{Columns: []output.Column{
-		{Title: "file", Role: output.RoleName}, {Title: "size", Role: output.RoleSize}, {Title: "hash", Role: output.RoleHash},
+		{Title: "file", Role: output.RoleName}, {Title: "size", Role: output.RoleSize}, {Title: keyHash, Role: output.RoleHash},
 	}}
 	for _, f := range v.Files {
 		files.Rows = append(files.Rows, []output.Cell{output.Text(f.Name), output.Size(f.Size), output.ID(f.Hash)})
@@ -264,7 +264,7 @@ func newFind(env *cliutil.Env) *cobra.Command {
 func findResult(tree *domain.Tree, items []domain.Item) output.Result {
 	t := output.Table{Columns: []output.Column{
 		{Title: "path", Role: output.RolePath},
-		{Title: "kind", Role: output.RoleKind},
+		{Title: keyKind, Role: output.RoleKind},
 		{Title: "id", Role: output.RoleID},
 		{Title: "pinned", Detail: true},
 		{Title: "trashed", Detail: true},

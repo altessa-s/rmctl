@@ -5,9 +5,11 @@
 package blobcache_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -195,8 +197,9 @@ func TestSpacesShareTheBudget(t *testing.T) {
 	if _, ok := c.Entry(blobcache.SpaceState, "root"); !ok {
 		t.Fatal("the state was evicted")
 	}
+	// The state is the root and the removal generation the eviction bumped.
 	bytes, entries := c.Usage()
-	if bytes != int64(len(blob)) || entries["blobs"] != 1 || entries["indexes"] != 0 || entries["state"] != 1 {
+	if bytes != int64(len(blob)) || entries["blobs"] != 1 || entries["indexes"] != 0 || entries["state"] != 2 {
 		t.Fatalf("%d %v", bytes, entries)
 	}
 	for _, bad := range [][2]string{{"blobs", "x"}, {"state", "../x"}, {"state", ".hidden"}, {"other", "root"}} {
@@ -224,7 +227,7 @@ func TestSpacesShareTheBudget(t *testing.T) {
 func TestRootKeepsProfilesApart(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	root := blobcache.NewRoot(dir, 1<<20, clock.Real(), nil)
+	root := blobcache.NewRoot(dir, blobcache.Fixed(1<<20), clock.Real(), nil)
 	for _, bad := range []string{"", "..", "../x", "a/b", "A", ".x"} {
 		if _, err := root.Profile(bad); err == nil {
 			t.Fatalf("%q was accepted", bad)
@@ -243,7 +246,7 @@ func TestRootKeepsProfilesApart(t *testing.T) {
 	if got := root.Profiles(); len(got) != 1 || got[0] != "work" || root.Dir() != dir {
 		t.Fatalf("%v", got)
 	}
-	if blobcache.NewRoot(filepath.Join(dir, "missing"), 1, clock.Real(), nil).Profiles() != nil {
+	if blobcache.NewRoot(filepath.Join(dir, "missing"), blobcache.Fixed(1), clock.Real(), nil).Profiles() != nil {
 		t.Fatal("profiles in a missing directory")
 	}
 }
@@ -265,7 +268,7 @@ func TestRemoveLegacy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	root := blobcache.NewRoot(dir, 1<<20, clock.Real(), nil)
+	root := blobcache.NewRoot(dir, blobcache.Fixed(1<<20), clock.Real(), nil)
 	work, _ := root.Profile("work")
 	work.Put(h, []byte("old"))
 	root.RemoveLegacy()
@@ -283,11 +286,74 @@ func TestRemoveLegacy(t *testing.T) {
 	root.RemoveLegacy()
 }
 
+// A budget of 0 is no limit: every entry stays, however many bytes they
+// take together, and a file of any size is kept.
+func TestUnlimitedBudgetNeverEvicts(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "p")
+	c := blobcache.New(dir, 0, clock.Real(), nil)
+	var hashes []string
+	for i := range 20 {
+		data := bytes.Repeat([]byte{byte('a' + i)}, 1000)
+		c.Put(hashOf(data), data)
+		hashes = append(hashes, hashOf(data))
+	}
+	idx := hashOf([]byte("index"))
+	c.PutEntry(blobcache.SpaceIndexes, idx, make([]byte, 5000))
+	big := bytes.Repeat([]byte("x"), 1<<16)
+	if err := c.Fill(hashOf(big), func(w io.Writer) error { _, err := w.Write(big); return err }); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range append(hashes, hashOf(big)) {
+		if _, ok := c.Get(h); !ok {
+			t.Fatalf("%s was evicted under no limit", h)
+		}
+	}
+	used, entries := c.Usage()
+	if used != 20*1000+5000+1<<16 || entries["blobs"] != 21 || entries["indexes"] != 1 || c.Budget() != 0 {
+		t.Fatalf("%d %v %d", used, entries, c.Budget())
+	}
+	if blobcache.New(dir, -1, clock.Real(), nil).Budget() != 0 {
+		t.Fatal("a negative budget is not no limit")
+	}
+}
+
+// Each profile of a root is bounded by its own budget, and reports what
+// set it.
+func TestRootBoundsEachProfileByItsOwnBudget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := blobcache.NewRoot(dir, func(profile string) blobcache.Limit {
+		if profile == "small" {
+			return blobcache.Limit{Bytes: 10, Source: "profile"}
+		}
+		return blobcache.Limit{Source: "config"}
+	}, clock.Real(), nil)
+	small, _ := root.Profile("small")
+	big, _ := root.Profile("big")
+	if small.Budget() != 10 || small.BudgetSource() != "profile" || big.Budget() != 0 || big.BudgetSource() != "config" {
+		t.Fatalf("%d %q %d %q", small.Budget(), small.BudgetSource(), big.Budget(), big.BudgetSource())
+	}
+	data := []byte("more than ten bytes")
+	small.Put(hashOf(data), data)
+	big.Put(hashOf(data), data)
+	if _, ok := small.Get(hashOf(data)); ok {
+		t.Fatal("the small profile kept more than its budget")
+	}
+	if _, ok := big.Get(hashOf(data)); !ok {
+		t.Fatal("the unlimited profile did not keep it")
+	}
+	if blobcache.New(dir, 1, clock.Real(), nil).BudgetSource() != "" {
+		t.Fatal("a cache made by New has a source")
+	}
+}
+
 func TestNewRootNeedsItsDependencies(t *testing.T) {
 	t.Parallel()
 	for name, build := range map[string]func(){
-		"directory": func() { blobcache.NewRoot("", 1, clock.Real(), nil) },
-		"clock":     func() { blobcache.NewRoot(t.TempDir(), 1, nil, nil) },
+		"budgets":   func() { blobcache.NewRoot(t.TempDir(), nil, clock.Real(), nil) },
+		"directory": func() { blobcache.NewRoot("", blobcache.Fixed(1), clock.Real(), nil) },
+		"clock":     func() { blobcache.NewRoot(t.TempDir(), blobcache.Fixed(1), nil, nil) },
 	} {
 		func() {
 			defer func() {
@@ -297,5 +363,105 @@ func TestNewRootNeedsItsDependencies(t *testing.T) {
 			}()
 			build()
 		}()
+	}
+}
+
+// fill puts n distinct blobs of size bytes into c, each used a second
+// after the one before, and returns their hashes, oldest first.
+func fill(t *testing.T, c *blobcache.Cache, n, size int) []string {
+	t.Helper()
+	hashes := make([]string, n)
+	base := time.Now().Add(-time.Hour)
+	for i := range n {
+		data := bytes.Repeat([]byte{byte('a' + i)}, size)
+		hashes[i] = hashOf(data)
+		c.Put(hashes[i], data)
+		at := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(filepath.Join(c.Dir(), blobcache.SpaceBlobs, hashes[i]), at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return hashes
+}
+
+// Whatever leaves the blobs or the indexes, evicted or dropped, takes the
+// record of the last complete sync with it: it never vouches for an entry
+// that is gone. The state is never evicted otherwise.
+func TestEvictionForgetsTheSync(t *testing.T) {
+	t.Parallel()
+	c := blobcache.New(t.TempDir(), 100, clock.Real(), nil)
+	hashes := fill(t, c, 3, 30)
+	c.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+	c.PutEntry(blobcache.SpaceState, "root", []byte("pointer"))
+	// Within the budget: nothing goes, the mark stays.
+	c.PutEntry(blobcache.SpaceIndexes, hashOf([]byte("i")), []byte("i"))
+	if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+		t.Fatal("a write within the budget dropped the mark")
+	}
+	// Past it: the oldest blobs go, and the mark with them.
+	big := bytes.Repeat([]byte("z"), 50)
+	c.Put(hashOf(big), big)
+	if _, ok := c.Get(hashes[0]); ok {
+		t.Fatal("nothing was evicted")
+	}
+	if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+		t.Fatal("an eviction kept the mark")
+	}
+	if _, ok := c.Entry(blobcache.SpaceState, "root"); !ok {
+		t.Fatal("an eviction took other state")
+	}
+	// A blob or an index dropped takes it too; a miss does not.
+	for _, space := range []string{blobcache.SpaceBlobs, blobcache.SpaceIndexes} {
+		data := []byte("dropped " + space)
+		c.PutEntry(space, hashOf(data), data)
+		c.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+		c.Drop(space, hashOf([]byte("never kept")))
+		if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+			t.Fatalf("%s: dropping a miss dropped the mark", space)
+		}
+		c.Drop(space, hashOf(data))
+		if _, ok := c.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+			t.Fatalf("%s: a drop kept the mark", space)
+		}
+	}
+}
+
+// A profile's cache filled under a larger budget is evicted down to the
+// one it is opened with: the report never shows more than the budget. One
+// within its budget, or under no limit, loses nothing, mark included.
+func TestRootReconcilesALoweredBudget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	large, err := blobcache.NewRoot(dir, blobcache.Fixed(1<<20), clock.Real(), nil).Profile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes := fill(t, large, 10, 100)
+	large.PutEntry(blobcache.SpaceState, blobcache.KeyCovered, []byte("mark"))
+	for _, limit := range []int64{0, 1 << 20} {
+		again, _ := blobcache.NewRoot(dir, blobcache.Fixed(limit), clock.Real(), nil).Profile("work")
+		if bytes, _ := again.Usage(); bytes != 1000 {
+			t.Fatalf("budget %d: %d bytes left", limit, bytes)
+		}
+		if _, ok := again.Entry(blobcache.SpaceState, blobcache.KeyCovered); !ok {
+			t.Fatalf("budget %d: the mark went", limit)
+		}
+	}
+	small, err := blobcache.NewRoot(dir, blobcache.Fixed(450), clock.Real(), nil).Profile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, entries := small.Usage()
+	if bytes > small.Budget() || bytes != 400 || entries[blobcache.SpaceBlobs] != 4 {
+		t.Fatalf("%d bytes in %v, budget %d", bytes, entries, small.Budget())
+	}
+	// The least recently used went.
+	for i, h := range hashes {
+		if _, ok := small.Get(h); ok != (i >= 6) {
+			t.Fatalf("blob %d kept %v", i, ok)
+		}
+	}
+	if _, ok := small.Entry(blobcache.SpaceState, blobcache.KeyCovered); ok {
+		t.Fatal("the reconciled cache kept the mark")
 	}
 }

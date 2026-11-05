@@ -1,0 +1,5 @@
+PROFILE  CURRENT  REGISTERED  SECRETS     CACHE     BUDGET
+───────  ───────  ──────────  ────────  ───────  ─────────
+default  yes      yes         file      2.0 KiB  512.0 MiB
+travel   no       unknown     keychain      0 B  unlimited
+work     no       yes         keychain      0 B    4.0 GiB

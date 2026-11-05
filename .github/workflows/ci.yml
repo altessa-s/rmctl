@@ -28,6 +28,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Run golangci-lint
         # make golangci builds the linter from devtools/go.mod (its module
         # graph pins a golang.org/x/tools that reads Go 1.27 export data; the
@@ -37,12 +42,12 @@ jobs:
 
       - name: Run go vet and check go fix modernizers
         # go fix -diff exits non-zero when any modernizer would rewrite code.
-        # The runner's GCC 13 compiles the C23 page library through cgo.
+        # clang 19 compiles the C23 libraries through cgo.
         run: make vet
 
       - name: Build without cgo
         # Where no C23 compiler is found rmctl builds without its page
-        # commands; this keeps that build compiling.
+        # commands and without rendering; this keeps that build compiling.
         run: make build-nocgo
 
       - name: Check duplicate code
@@ -64,6 +69,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
 
       - name: Run tests
         # Runs each directory of the Makefile's MODULES and merges the
@@ -106,6 +116,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
+
       - name: Run integration tests
         run: make test-integration
 
@@ -134,6 +149,142 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -race ./...
 
+  windows:
+    name: Test (Windows ${{ matrix.goarch }}, cgo)
+    # The renderer on Windows, built as rmrender-go builds it there: MSYS2's
+    # clang and Cairo stack (CLANG64 on x64, CLANGARM64 on ARM64) and the
+    # PDFium SDK of the architecture. The renderer's tests and the end-to-end
+    # render tests run against the real libraries, with the race detector on
+    # x64 (Go has none on windows/arm64); vet compiles every package with
+    # cgo. The rest of the suite runs on Linux and macOS.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-2022, goarch: amd64, msystem: CLANG64, prefix: mingw-w64-clang-x86_64, race: "-race" }
+          - { runner: windows-11-arm, goarch: arm64, msystem: CLANGARM64, prefix: mingw-w64-clang-aarch64, race: "" }
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up MSYS2 ${{ matrix.msystem }}
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          # The Go that setup-go installed, after the toolchain's clang and
+          # pkg-config. The same packages as the release's Windows build.
+          path-type: inherit
+          install: >-
+            ${{ matrix.prefix }}-clang
+            ${{ matrix.prefix }}-pkgconf
+            ${{ matrix.prefix }}-python
+            ${{ matrix.prefix }}-cairo
+            ${{ matrix.prefix }}-pango
+            ${{ matrix.prefix }}-fontconfig
+            ${{ matrix.prefix }}-harfbuzz
+            ${{ matrix.prefix }}-gdk-pixbuf2
+            ${{ matrix.prefix }}-zlib
+            ${{ matrix.prefix }}-ntldd
+
+      - name: Set up the renderer's Windows build
+        # Fetches PDFium and points cgo at clang and PDFium.
+        run: bash .github/scripts/setup-render-windows.sh
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: Test the renderer
+        # pdfium.dll is loaded from PATH; the toolchain's bin, with the
+        # Cairo stack's DLLs, is already on it.
+        env:
+          RACE: ${{ matrix.race }}
+        run: |
+          export PATH="$PDFIUM_BIN:$PATH"
+          # shellcheck disable=SC2086 # RACE is empty or one flag
+          go test $RACE -count=1 ./internal/adapter/renderer/...
+          # shellcheck disable=SC2086
+          go test $RACE -count=1 -tags integration -run '^TestE2E_Render' ./cmd/rmctl
+
+      - name: Build rmctl
+        run: |
+          export PATH="$PDFIUM_BIN:$PATH"
+          go build -o rmctl.exe ./cmd/rmctl
+          ./rmctl.exe render internal/adapter/renderer/testdata/Notes.rmdoc -o "$RUNNER_TEMP/notes.pdf"
+          head -c 5 "$RUNNER_TEMP/notes.pdf" | grep -q '%PDF-'
+
+  lite:
+    name: rmctl-lite (-tags norender)
+    # rmctl-lite is rmctl without the renderer. Only clang 19 is installed,
+    # for rmlines-lib and rmdoc-lib: no Cairo stack and no PDFium, so a
+    # package that still reached rmrender-go would fail to build here. The
+    # whole suite runs with the tag, the end-to-end test of rmctl-lite among
+    # it, and the linter checks the stub's files.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Install clang 19
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends clang-19
+          echo "CC=clang-19" >> "$GITHUB_ENV"
+
+      - name: Leave rmrender-go out
+        run: |
+          if go list -deps -tags norender ./cmd/rmctl | grep rmrender; then
+            echo "::error::rmctl-lite links rmrender-go"
+            exit 1
+          fi
+
+      - name: Build and vet
+        run: make build-lite
+
+      - name: Lint
+        run: make golangci-lite
+
+      - name: Test
+        run: make test-lite
+
+      - name: Cross-compile windows/arm64
+        # The release builds this one with cgo on an ARM64 Windows runner;
+        # here, without cgo, every package of the lite build type-checks.
+        env:
+          GOOS: windows
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          go build -tags norender ./...
+          go vet -tags norender ./...
+
   cross-compile:
     name: Cross-compile (${{ matrix.goos }})
     runs-on: ubuntu-latest
@@ -142,8 +293,9 @@ jobs:
     strategy:
       matrix:
         # linux is covered by the main build; guard the platform-gated
-        # code (*_darwin.go / *_other.go) against build-tag rot on the
-        # other supported targets.
+        # code (*_darwin.go / *_other.go, the renderer's stub) against
+        # build-tag rot on the other supported targets. Cross-compiling
+        # turns cgo off.
         goos: [darwin, windows]
     steps:
       - name: Checkout
@@ -178,6 +330,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+
+      - name: Set up the renderer's Linux build
+        # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
+        # needs clang 19: the script installs them and points cgo at them.
+        run: bash .github/scripts/setup-render-linux.sh
 
       - name: Run govulncheck
         run: make govulncheck

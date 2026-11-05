@@ -21,31 +21,56 @@ var ErrProfileName = errors.New("blobcache: a profile name is 1-64 characters of
 // legacyDir is where every profile once shared one blob directory.
 const legacyDir = "blobs"
 
+// Limit is a profile's budget: Bytes of blobs and indexes, 0 for no limit,
+// and Source, what set it, which the cache only repeats in reports.
+type Limit struct {
+	Bytes  int64
+	Source string
+}
+
+// Limits is the budget of each profile, by name.
+type Limits func(profile string) Limit
+
+// Fixed is the same budget for every profile.
+func Fixed(maxBytes int64) Limits {
+	return func(string) Limit { return Limit{Bytes: maxBytes} }
+}
+
 // Root is the cache directory of all profiles: one subdirectory per
 // profile, each a [Cache] with its own budget. Profiles share nothing: not
 // a root, not an index, not a blob, though blobs are addressed by content,
 // because they are different accounts' documents.
 type Root struct {
 	// base is a cache of the root directory itself, never written: it
-	// carries the budget, the clock and the log every profile's gets.
-	base *Cache
+	// carries the clock and the log every profile's gets.
+	base   *Cache
+	limits Limits
 }
 
-// NewRoot returns the cache directory dir, each profile bounded by
-// maxBytes. dir and clock are required.
-func NewRoot(dir string, maxBytes int64, clock port.Clock, log *slog.Logger) *Root {
-	return &Root{base: New(dir, maxBytes, clock, log)}
+// NewRoot returns the cache directory dir, each profile bounded by its
+// budget in limits. dir, limits and clock are required.
+func NewRoot(dir string, limits Limits, clock port.Clock, log *slog.Logger) *Root {
+	if limits == nil {
+		panic("blobcache: the budgets are required")
+	}
+	return &Root{base: New(dir, 0, clock, log), limits: limits}
 }
 
 // Dir is the cache directory.
 func (r *Root) Dir() string { return r.base.dir }
 
-// Profile is the cache of profile, which must be a safe directory name.
+// Profile is the cache of profile, which must be a safe directory name,
+// evicted down to its budget when it takes more: a budget lowered since
+// the cache was filled holds from the first command that opens it.
 func (r *Root) Profile(profile string) (*Cache, error) {
 	if !nameKey.MatchString(profile) {
 		return nil, ErrProfileName
 	}
-	return New(filepath.Join(r.base.dir, profile), r.base.maxBytes, r.base.clock, r.base.log), nil
+	limit := r.limits(profile)
+	c := New(filepath.Join(r.base.dir, profile), limit.Bytes, r.base.clock, r.base.log)
+	c.source = limit.Source
+	c.Reconcile()
+	return c, nil
 }
 
 // Profiles are the profiles that have a cache directory, by name.
