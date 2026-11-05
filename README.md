@@ -32,37 +32,52 @@ rmctl find 'go|rust' --tag reading --json
 - **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within each profile's own budget set in config.toml (`0` for no limit).
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
-- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three.
+- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three, and [rmctl-lite](#install), the build without it, also on Windows ARM64.
 - **Automation:** scheduled backups, hot folders, exports to Markdown and more in [docs/automation.md](docs/automation.md).
 
 ## Install
 
-With [Homebrew](https://brew.sh) on macOS or Linux:
+rmctl comes in two builds. Both install a binary named `rmctl` with the same commands; **rmctl-lite** leaves the renderer out, so it is smaller and needs no graphics libraries, and `render` tells you to install rmctl for it.
+
+| | rmctl | rmctl-lite |
+|---|---|---|
+| `render` (PDF, PNG, JPEG, SVG) | yes | no: it says to install rmctl |
+| Every other command, `text` and `highlights` included | yes | yes |
+| macOS binary (arm64) | about 47 MB | about 17 MB |
+| Linux needs | Cairo, Pango and their libraries; `libpdfium.so` ships beside the binary | only the C library |
+| Windows archive | `rmctl.exe` with the DLLs it draws with, x64 | one static `rmctl.exe`, x64 and ARM64 |
+| `rmctl version --full` | `render yes` | `render no` |
+
+With [Homebrew](https://brew.sh) on macOS or Linux (the two formulas conflict, as both install `rmctl`):
 
 ```sh
 brew install altessa-s/tap/rmctl
+brew install altessa-s/tap/rmctl-lite
 ```
 
 On Windows, with [Scoop](https://scoop.sh) or [winget](https://learn.microsoft.com/windows/package-manager/winget/):
 
 ```powershell
 scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket
-scoop install rmctl
+scoop install rmctl          # or: scoop install rmctl-lite
 
-winget install Altessa.rmctl
+winget install Altessa.rmctl         # or: winget install Altessa.rmctl.Lite
 ```
 
-Every release also attaches archives: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, with the DLLs `rmctl.exe` draws with beside it. `checksums.txt` lists their SHA-256.
+Install one of the two. Scoop has no way to mark them as conflicting: with both installed, they shim the same `rmctl` command and the one installed last answers it.
+
+Every release also attaches archives of both builds, `rmctl_<version>_<os>_<arch>` and `rmctl-lite_<version>_<os>_<arch>`: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, rmctl's with the DLLs `rmctl.exe` draws with beside it, rmctl-lite's with `rmctl.exe` alone. rmctl-lite is also built for Windows on ARM64. `checksums.txt` lists the SHA-256 of every archive.
 
 From source, with Go 1.27 or newer and a C23 compiler for the page and archive commands (see [Pages and archives](docs/pages-and-archives.md#pages)):
 
 ```sh
-go install github.com/altessa-s/rmctl/cmd/rmctl@latest
+go install github.com/altessa-s/rmctl/cmd/rmctl@latest                 # rmctl
+go install -tags norender github.com/altessa-s/rmctl/cmd/rmctl@latest  # rmctl-lite
 ```
 
-`make rmctl` builds `bin/rmctl` from a checkout, with its version.
+`make rmctl` builds `bin/rmctl` from a checkout, with its version, and `make rmctl-lite` builds rmctl-lite there under the same name.
 
-Rendering is in the macOS, Linux and Windows builds; what it needs on each platform and to build from source is in [docs/rendering.md](docs/rendering.md).
+Rendering is in the macOS, Linux and Windows builds of rmctl; what it needs on each platform and to build from source is in [docs/rendering.md](docs/rendering.md).
 
 ## Quick start
 

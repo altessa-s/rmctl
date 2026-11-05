@@ -110,6 +110,10 @@ var ErrNoLogger = errors.New("wiring: a logger is required")
 // ErrOfflineNoCache means --offline was asked for with the cache turned off.
 var ErrOfflineNoCache = errors.New("--offline reads the cache, and --no-cache turns it off")
 
+// Renders reports whether this build draws documents: false in rmctl-lite
+// (the norender build tag) and in a build rmrender-go cannot reach.
+func Renders() bool { return renderer.New().Available() == nil }
+
 // Build resolves the configuration and connects the adapters to the use
 // cases. Nothing touches the network here: the transport dials on first use.
 func Build(opts Options) (Services, error) {

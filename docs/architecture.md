@@ -23,7 +23,7 @@ The domain, the ports, the use cases and the command packages under `cmd/rmctl/c
 - `localfs`, `blobcache`, `pdf` — the local file system, the cache on disk (one directory per profile, one budget each), and a PDF's page count through pdfcpu.
 - `indexcache` — decorators of the root, document, blob and registry ports that keep the library's indexes in the profile's cache, serve every file read from the cache first, serve `--offline` and the TTL, implement `port.SyncCache` with the record of the last complete sync, and report, clear and remove the caches of every profile.
 - `rmpages`, `rmdocs` — `.rm` pages through rmlines-go and `.rmdoc` archives through rmdoc-go; nothing else imports those two.
-- `renderer` — drawing through rmrender-go on macOS, Linux and Windows with cgo, and a stub that says rendering is not available everywhere else; nothing else imports rmrender-go.
+- `renderer` — drawing through rmrender-go on macOS, Linux and Windows with cgo, and a stub that says rendering is not available everywhere else, and in rmctl-lite (the `norender` build tag), where it names the full build; nothing else imports rmrender-go.
 - `config`, `ids`, `clock` — profile resolution from config.toml, the profile directories and the edits of config.toml, random v4 UUIDs, and time over go-atlas-core.
 
 **Composition root and command line**

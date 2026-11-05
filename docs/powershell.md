@@ -33,7 +33,9 @@ scoop install rmctl          # later: scoop update rmctl
 winget install Altessa.rmctl # later: winget upgrade Altessa.rmctl
 ```
 
-By hand: every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, the DLLs it draws documents with (`pdfium.dll` and the Cairo and Pango libraries, see [rendering.md](rendering.md)), `LICENSE`, `README.md` and `licenses/`, and `checksums.txt` with the SHA-256 of every archive. `rmctl.exe` needs no runtime to install: Windows finds the DLLs in its own folder, so keep the zip's files together. It is built for x64; Windows on Arm runs it under emulation.
+rmctl-lite, the build without rendering, is `scoop install rmctl-lite` or `winget install Altessa.rmctl.Lite`: one static `rmctl.exe` with no DLL, for x64 and for Windows on Arm, with every command but `render`, which says to install rmctl for it. Install one of the two; Scoop cannot mark them as conflicting, so with both installed the one installed last answers `rmctl`. `rmctl version --full` says `render yes` or `render no`.
+
+By hand: every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, the DLLs it draws documents with (`pdfium.dll` and the Cairo and Pango libraries, see [rendering.md](rendering.md)), `LICENSE`, `README.md` and `licenses/`, and `checksums.txt` with the SHA-256 of every archive. `rmctl.exe` needs no runtime to install: Windows finds the DLLs in its own folder, so keep the zip's files together. It is built for x64; Windows on Arm runs it under emulation. rmctl-lite's `rmctl-lite_<version>_windows_amd64.zip` and `rmctl-lite_<version>_windows_arm64.zip` hold `rmctl.exe` alone, with `LICENSE` and `README.md`.
 
 Download both files from the [releases page](https://github.com/altessa-s/rmctl/releases), or from PowerShell:
 
@@ -83,7 +85,7 @@ Add-Content -LiteralPath $PROFILE -Value 'rmctl completion powershell | Out-Stri
 
 ## What is different on Windows
 
-- **Rendering needs the DLLs beside `rmctl.exe`.** `rmctl render` draws as on macOS and Linux, with the DLLs the zip carries; Scoop and winget install them with it. A copy of `rmctl.exe` alone, without them, does not start. The first rendering writes the bundled fonts once to `%LocalAppData%\rmrender\fonts`.
+- **Rendering needs the DLLs beside `rmctl.exe`.** `rmctl render` draws as on macOS and Linux, with the DLLs the zip carries; Scoop and winget install them with it. A copy of `rmctl.exe` alone, without them, does not start. rmctl-lite's `rmctl.exe` has no DLLs and no `render`. The first rendering writes the bundled fonts once to `%LocalAppData%\rmrender\fonts`.
 - **Tokens are in a file.** The macOS Keychain backend is macOS-only, so `secrets migrate --to keychain` is not for Windows; the tokens stay in `token.json` in the profile's directory. On macOS and Linux rmctl refuses a token file that other users can read; Windows has no such mode bits, so there the file is exactly as private as the user's profile folder, `%AppData%` included. Treat it as a password: it gives the whole account.
 - **Where things are.** rmctl keeps its files in the user config and cache directories, which on Windows are `%AppData%` (roaming) and `%LocalAppData%`:
 

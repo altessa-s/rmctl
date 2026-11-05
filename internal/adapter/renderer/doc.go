@@ -11,4 +11,9 @@
 // anywhere else.
 // Elsewhere, or without cgo, the package is a stub whose every call answers
 // domain.ErrRenderUnsupported, so the rest of rmctl still builds.
+//
+// The norender build tag makes the stub on every platform, so rmrender-go,
+// its fonts and the libraries under it are not linked at all: that build is
+// rmctl-lite, and its stub answers domain.ErrRenderLite, an
+// ErrRenderUnsupported that names the full build.
 package renderer

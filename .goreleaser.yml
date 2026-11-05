@@ -2,7 +2,8 @@
 version: 2
 
 # The binaries link C libraries through cgo and are built natively by the
-# build matrix of .github/workflows/release.yml; goreleaser publishes them.
+# build matrix of .github/workflows/release.yml; goreleaser publishes them,
+# rmctl's archives and rmctl-lite's.
 builds:
   - skip: true
 
@@ -44,5 +45,6 @@ release:
   prerelease: auto
   extra_files:
     - glob: ./artifacts/rmctl_*
+    - glob: ./artifacts/rmctl-lite_*
     - glob: ./artifacts/checksums.txt
   name_template: "rmctl {{.Version}}"

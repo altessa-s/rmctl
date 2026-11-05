@@ -115,8 +115,10 @@ func New(env *cliutil.Env) *cobra.Command {
 			in front, or the identifier, names a cloud document whose name ends with
 			.rmdoc. --id picks the document of an archive that holds several.
 
-			Rendering is in the macOS, Linux and Windows builds; a build without
-			cgo has the command, which says it is not available.
+			Rendering is in the macOS, Linux and Windows builds of rmctl. rmctl-lite,
+			the build without the renderer, and a build without cgo have the
+			command, which says it is not available; "rmctl version --full" shows
+			render no in them.
 		`),
 		Example: heredoc.Doc(`
 			rmctl render /Books/Paper -o paper.pdf
