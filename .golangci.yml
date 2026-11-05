@@ -87,8 +87,8 @@ linters:
             - github.com/altessa-s/rmlines-go
             # The .rmdoc container, through cgo. Only internal/adapter/rmdocs.
             - github.com/altessa-s/rmdoc-go
-            # The renderer and its bundled fonts, through cgo, on macOS and
-            # Linux. Only internal/adapter/renderer.
+            # The renderer and its bundled fonts, through cgo, on macOS, Linux
+            # and Windows. Only internal/adapter/renderer.
             - github.com/altessa-s/rmrender-go
             # The macOS Keychain, through cgo. Only
             # internal/adapter/keychain/system.

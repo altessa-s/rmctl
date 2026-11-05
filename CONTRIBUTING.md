@@ -160,7 +160,7 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 
 ## CI checks
 
-CI requires at least 93% total statement coverage on Linux, and every protocol package listed in [`.coverage.yml`](.coverage.yml) must stay at or above its threshold (`make coverage-gate`). Raise these floors as coverage improves; do not lower them to accommodate untested changes. Every protocol scenario needs a negative test alongside the positive one. The full suite runs with the race detector and shuffled test order, and the platform-gated code is cross-compiled for darwin and windows.
+CI requires at least 93% total statement coverage on Linux, and every protocol package listed in [`.coverage.yml`](.coverage.yml) must stay at or above its threshold (`make coverage-gate`). Raise these floors as coverage improves; do not lower them to accommodate untested changes. Every protocol scenario needs a negative test alongside the positive one. The full suite runs with the race detector and shuffled test order, and the platform-gated code is cross-compiled for darwin and windows; a Windows job builds the renderer with cgo (MSYS2 CLANG64 and PDFium) and runs its tests.
 
 ## Tests
 

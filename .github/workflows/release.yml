@@ -22,13 +22,13 @@ jobs:
     secrets: inherit
 
   # The page and archive commands link rmlines-lib and rmdoc-lib, C23
-  # libraries built through cgo, and rendering links rmrender-lib on macOS and
-  # Linux, so every binary is built natively on its own runner; goreleaser
-  # only publishes them and writes the changelog. A Linux archive carries
-  # libpdfium.so beside the binary, which finds it through its $ORIGIN run
-  # path; Cairo and Pango come from the system. The macOS archives are built,
-  # signed and notarized on a Mac with .github/scripts/release-macos.sh and
-  # added to the release afterwards.
+  # libraries built through cgo, and rendering links rmrender-lib, so every
+  # binary is built natively on its own runner; goreleaser only publishes
+  # them and writes the changelog. A Linux archive carries libpdfium.so beside
+  # the binary, which finds it through its $ORIGIN run path; Cairo and Pango
+  # come from the system. The Windows archive is built by build-windows. The
+  # macOS archives are built, signed and notarized on a Mac with
+  # .github/scripts/release-macos.sh and added to the release afterwards.
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: checks
@@ -42,9 +42,6 @@ jobs:
           # rmrender-lib's C23 needs clang 19; setup-render-linux.sh installs it.
           - { runner: ubuntu-latest, goos: linux, goarch: amd64, cc: clang-19 }
           - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64, cc: clang-19 }
-          # cgo on Windows links through a MinGW-w64 toolchain; MSYS2's
-          # UCRT64 GCC is current enough for C23.
-          - { runner: windows-latest, goos: windows, goarch: amd64, cc: gcc }
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,28 +57,9 @@ jobs:
 
       - name: Set up the renderer's Linux build
         # The binary looks for libpdfium.so in its own directory.
-        if: matrix.goos == 'linux'
         run: bash .github/scripts/setup-render-linux.sh '$ORIGIN'
 
-      - name: Set up MinGW-w64
-        if: matrix.goos == 'windows'
-        id: msys2
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
-        with:
-          msystem: UCRT64
-          update: false
-          install: mingw-w64-ucrt-x86_64-gcc
-
-      - name: Put MinGW-w64 first on the path
-        if: matrix.goos == 'windows'
-        shell: bash
-        env:
-          MSYS2: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          printf '%s\\ucrt64\\bin\n' "$MSYS2" >> "$GITHUB_PATH"
-
       - name: Build
-        shell: bash
         env:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
@@ -89,70 +67,37 @@ jobs:
           CC: ${{ matrix.cc }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          ext=""; static=""
-          # A Windows binary carries the MinGW runtime instead of needing its DLLs.
-          [[ "$GOOS" == windows ]] && { ext=".exe"; static="-linkmode=external -extldflags=-static"; }
           pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
           mkdir -p out artifacts
-          go build -trimpath -o "out/rmctl${ext}" -ldflags "-s -w ${static} \
+          go build -trimpath -o out/rmctl -ldflags "-s -w \
             -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
             -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
           cp LICENSE README.md out/
-          if [[ "$GOOS" != windows ]]; then
-            # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
-            mkdir -p out/licenses/fonts
-            cp "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)"/fonts/*-OFL.txt out/licenses/fonts/
-          fi
-          if [[ "$GOOS" == linux ]]; then
-            cp "$PDFIUM_DIR/lib/libpdfium.so" out/
-            mkdir -p out/licenses/pdfium
-            cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
-          fi
+          # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
+          mkdir -p out/licenses/fonts
+          cp "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)"/fonts/*-OFL.txt out/licenses/fonts/
+          cp "$PDFIUM_DIR/lib/libpdfium.so" out/
+          mkdir -p out/licenses/pdfium
+          cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
 
       - name: Smoke test
-        shell: bash
         run: |
           bin=./out/rmctl
-          if [[ "${{ matrix.goos }}" == windows ]]; then
-            bin=./out/rmctl.exe
-            # Only system DLLs: nothing from the MinGW toolchain.
-            if objdump -p "$bin" | grep -iE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
-              echo "::error::rmctl.exe depends on MinGW runtime DLLs"
-              exit 1
-            fi
-          fi
           "$bin" version --full
+          # shellcheck disable=SC2016 # $ORIGIN is literal
+          readelf -d "$bin" | grep -E 'R(UN)?PATH' | grep -qF '[$ORIGIN]' || { echo "::error::no \$ORIGIN run path"; exit 1; }
           sample=internal/adapter/renderer/testdata/Notes.rmdoc
-          if [[ "${{ matrix.goos }}" == windows ]]; then
-            # The Windows build has the command and says it cannot draw.
-            if out=$("$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf" 2>&1); then
-              echo "::error::rmctl.exe rendered a document"
-              exit 1
-            fi
-            grep -q "not available in this build" <<<"$out" || { echo "$out"; exit 1; }
-          else
-            if [[ "${{ matrix.goos }}" == linux ]]; then
-              readelf -d "$bin" | grep -E 'R(UN)?PATH' | grep -qF '[$ORIGIN]' || { echo "::error::no \$ORIGIN run path"; exit 1; }
-            fi
-            "$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf"
-            "$bin" render "$sample" --page 1 -o "$RUNNER_TEMP/smoke.png"
-          fi
+          "$bin" render "$sample" -o "$RUNNER_TEMP/smoke.pdf"
+          "$bin" render "$sample" --page 1 -o "$RUNNER_TEMP/smoke.png"
 
       - name: Pack
-        # A zip for Windows, which Explorer opens; a tar.gz for Linux.
-        shell: bash
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           mkdir -p artifacts
-          name="rmctl_${VERSION#v}_${GOOS}_${GOARCH}"
-          if [[ "$GOOS" == windows ]]; then
-            (cd out && 7z a -tzip "../artifacts/${name}.zip" . >/dev/null)
-          else
-            tar -C out -czf "artifacts/${name}.tar.gz" .
-          fi
+          tar -C out -czf "artifacts/rmctl_${VERSION#v}_${GOOS}_${GOARCH}.tar.gz" .
 
       - name: Upload the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -161,9 +106,112 @@ jobs:
           path: artifacts/*
           retention-days: 7
 
+  # rmctl.exe is built with MSYS2 CLANG64's clang against its Cairo stack and
+  # the PDFium SDK, as rmrender-go's Windows CI builds it. Those are DLLs, so
+  # the binary cannot be static: the zip carries every DLL it loads (ntldd -R,
+  # all from CLANG64 or PDFium; Windows' own stay out) beside rmctl.exe, where
+  # Windows looks first, with their licences under licenses/. The smoke test
+  # runs the unpacked zip with PATH reduced to the Windows directory.
+  build-windows:
+    name: Build (windows/amd64)
+    needs: checks
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up MSYS2 CLANG64
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: CLANG64
+          update: false
+          # The Go that setup-go installed, after CLANG64's clang and
+          # pkg-config. The same packages as CI's Windows job.
+          path-type: inherit
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-cairo
+            mingw-w64-clang-x86_64-pango
+            mingw-w64-clang-x86_64-fontconfig
+            mingw-w64-clang-x86_64-harfbuzz
+            mingw-w64-clang-x86_64-gdk-pixbuf2
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-ntldd
+
+      - name: Set up the renderer's Windows build
+        # Fetches PDFium (checksum-verified) and points cgo at clang and PDFium.
+        run: bash .github/scripts/setup-render-windows.sh
+
+      - name: Build
+        env:
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          pkg="github.com/altessa-s/go-atlas-core/runtime/appinfo"
+          mkdir -p out artifacts
+          go build -trimpath -o out/rmctl.exe -ldflags "-s -w \
+            -X ${pkg}.Name=rmctl -X ${pkg}.Project=rmctl -X ${pkg}.Version=${VERSION#v} \
+            -X ${pkg}.Commit=$(git rev-parse --short=7 HEAD) -X ${pkg}.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rmctl
+          cp LICENSE README.md out/
+          # The renderer's fonts are embedded in the binary, under the SIL Open Font License.
+          mkdir -p out/licenses/fonts
+          cp "$(cygpath -u "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)")"/fonts/*-OFL.txt out/licenses/fonts/
+          mkdir -p out/licenses/pdfium
+          cp "$PDFIUM_DIR/LICENSE" "$PDFIUM_DIR"/licenses/* out/licenses/pdfium/
+          # pdfium.dll and the Cairo stack's DLLs, with the MSYS2 packages' licences.
+          bash .github/scripts/bundle-windows-dlls.sh out/rmctl.exe
+
+      - name: Pack
+        # A zip, which Explorer opens.
+        env:
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          (cd out && 7z a -tzip "../artifacts/rmctl_${VERSION#v}_windows_amd64.zip" . >/dev/null)
+
+      - name: Smoke test
+        # From the zip alone: unpacked into an empty directory and run with
+        # PATH reduced to the Windows directory, rmctl.exe finds only the
+        # DLLs beside it and Windows' own.
+        run: |
+          app="$(cygpath -u "$RUNNER_TEMP")/smoke/app"
+          mkdir -p "$app"
+          7z x -o"$(cygpath -w "$app")" artifacts/rmctl_*_windows_amd64.zip >/dev/null
+          bash .github/scripts/bundle-windows-dlls.sh --verify "$app/rmctl.exe"
+          system=$(cygpath -u "${SYSTEMROOT:-C:/Windows}")
+          sample=$(cygpath -w "$PWD/internal/adapter/renderer/testdata/Notes.rmdoc")
+          cd "$app/.."
+          PATH="$system/System32:$system" "$app/rmctl.exe" version --full
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" -o smoke.pdf
+          PATH="$system/System32:$system" "$app/rmctl.exe" render "$sample" --page 1 -o smoke.png
+          head -c 5 smoke.pdf | grep -q '%PDF-' || { echo "::error::smoke.pdf is not a PDF"; exit 1; }
+          head -c 8 smoke.png | grep -q 'PNG' || { echo "::error::smoke.png is not a PNG"; exit 1; }
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rmctl-windows-amd64
+          path: artifacts/*
+          retention-days: 7
+
   release:
     name: Release
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

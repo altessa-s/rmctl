@@ -32,7 +32,7 @@ rmctl find 'go|rust' --tag reading --json
 - **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within each profile's own budget set in config.toml (`0` for no limit).
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
-- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on macOS and Linux.
+- **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three.
 - **Automation:** scheduled backups, hot folders, exports to Markdown and more in [docs/automation.md](docs/automation.md).
 
 ## Install
@@ -52,7 +52,7 @@ scoop install rmctl
 winget install Altessa.rmctl
 ```
 
-Every release also attaches archives: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows. `checksums.txt` lists their SHA-256.
+Every release also attaches archives: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, with the DLLs `rmctl.exe` draws with beside it. `checksums.txt` lists their SHA-256.
 
 From source, with Go 1.27 or newer and a C23 compiler for the page and archive commands (see [Pages and archives](docs/pages-and-archives.md#pages)):
 
@@ -62,7 +62,7 @@ go install github.com/altessa-s/rmctl/cmd/rmctl@latest
 
 `make rmctl` builds `bin/rmctl` from a checkout, with its version.
 
-Rendering is in the macOS and Linux builds; what it needs on each platform and to build from source is in [docs/rendering.md](docs/rendering.md).
+Rendering is in the macOS, Linux and Windows builds; what it needs on each platform and to build from source is in [docs/rendering.md](docs/rendering.md).
 
 ## Quick start
 
@@ -156,6 +156,6 @@ reMarkable does not publish its cloud protocol or file formats. This tool is bui
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The fonts embedded for rendering carry the SIL Open Font License, and the Linux archives' `libpdfium.so` its own licences; both are under `licenses/` in the release archives.
+MIT — see [LICENSE](LICENSE). The fonts embedded for rendering carry the SIL Open Font License, PDFium (the Linux archives' `libpdfium.so`, the Windows archive's `pdfium.dll`) its own licences, and the Windows archive's other DLLs, from MSYS2, theirs; all are under `licenses/` in the release archives.
 
 reMarkable is a trademark of reMarkable AS. This project is not affiliated with, endorsed by or sponsored by reMarkable AS.

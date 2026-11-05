@@ -149,6 +149,76 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -race ./...
 
+  windows:
+    name: Test (Windows, cgo)
+    # The renderer on Windows, built as rmrender-go builds it there: MSYS2
+    # CLANG64's clang and Cairo stack, and the PDFium SDK. The renderer's
+    # tests and the end-to-end render tests run against the real libraries;
+    # vet compiles every package with cgo. The rest of the suite runs on
+    # Linux and macOS.
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up MSYS2 CLANG64
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: CLANG64
+          update: false
+          # The Go that setup-go installed, after CLANG64's clang and
+          # pkg-config. The same packages as the release's Windows build.
+          path-type: inherit
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-cairo
+            mingw-w64-clang-x86_64-pango
+            mingw-w64-clang-x86_64-fontconfig
+            mingw-w64-clang-x86_64-harfbuzz
+            mingw-w64-clang-x86_64-gdk-pixbuf2
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-ntldd
+
+      - name: Set up the renderer's Windows build
+        # Fetches PDFium and points cgo at clang and PDFium.
+        run: bash .github/scripts/setup-render-windows.sh
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: Test the renderer
+        # pdfium.dll is loaded from PATH; CLANG64's bin, with the Cairo
+        # stack's DLLs, is already on it.
+        run: |
+          export PATH="$PDFIUM_BIN:$PATH"
+          go test -race -count=1 ./internal/adapter/renderer/...
+          go test -race -count=1 -tags integration -run '^TestE2E_Render' ./cmd/rmctl
+
+      - name: Build rmctl
+        run: |
+          export PATH="$PDFIUM_BIN:$PATH"
+          go build -o rmctl.exe ./cmd/rmctl
+          ./rmctl.exe render internal/adapter/renderer/testdata/Notes.rmdoc -o "$RUNNER_TEMP/notes.pdf"
+          head -c 5 "$RUNNER_TEMP/notes.pdf" | grep -q '%PDF-'
+
   cross-compile:
     name: Cross-compile (${{ matrix.goos }})
     runs-on: ubuntu-latest

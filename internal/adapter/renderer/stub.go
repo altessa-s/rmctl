@@ -1,4 +1,4 @@
-//go:build !((darwin || linux) && cgo)
+//go:build !((darwin || linux || windows) && cgo)
 
 // Copyright 2026 ALTESSA SOLUTIONS INC.
 // Use of this source code is governed by the MIT license that can be found in
@@ -14,7 +14,8 @@ import (
 )
 
 // Renderer answers every call with domain.ErrRenderUnsupported: rmrender-go
-// draws on macOS and Linux, through cgo, and this build is neither.
+// draws on macOS, Linux and Windows, through cgo, and this build is none of
+// them or has no cgo.
 type Renderer struct{}
 
 var _ port.Renderer = (*Renderer)(nil)

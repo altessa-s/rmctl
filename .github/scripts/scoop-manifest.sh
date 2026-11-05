@@ -8,7 +8,9 @@
 #
 # VERSION is the release version without the leading "v"; CHECKSUMS is the
 # release's checksums.txt. The manifest installs the release's Windows
-# archive, which holds rmctl.exe at its top. checkver and autoupdate let
+# archive, which holds rmctl.exe at its top with the DLLs it loads beside it;
+# Scoop extracts the whole archive into the app directory and its shim runs
+# rmctl.exe there, so Windows finds them. checkver and autoupdate let
 # Scoop's own tooling follow later releases, should the bucket's workflow
 # ever fall behind.
 set -euo pipefail
@@ -27,7 +29,6 @@ cat <<EOF
     "description": "Command-line client for the reMarkable cloud",
     "homepage": "https://github.com/altessa-s/rmctl",
     "license": "MIT",
-    "notes": "Rendering is not available in the Windows build.",
     "architecture": {
         "64bit": {
             "url": "${base}/v${version}/${file}",

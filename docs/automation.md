@@ -681,7 +681,7 @@ page-1.svg  page-2.svg  page-3.svg  page-4.svg
 
 The second run draws nothing: every record hash matches its `.hash` file.
 
-`--scale 0.25` makes the thumbnail a quarter of the tablet's 1404 pixels across; `--quality` is the JPEG's, 1 to 100. For a PDF made from a PDF, `--mode preserving` appends the ink to the original file, its bytes untouched, and `--mode recomposed` keeps its forms and annotations; `--paper letter` lays notebook pages out on US Letter instead of A4. Rendering is in the macOS and Linux builds; on Linux the release archive's `libpdfium.so` must stay beside `rmctl`.
+`--scale 0.25` makes the thumbnail a quarter of the tablet's 1404 pixels across; `--quality` is the JPEG's, 1 to 100. For a PDF made from a PDF, `--mode preserving` appends the ink to the original file, its bytes untouched, and `--mode recomposed` keeps its forms and annotations; `--paper letter` lays notebook pages out on US Letter instead of A4. Rendering is in the macOS, Linux and Windows builds; on Linux the release archive's `libpdfium.so` must stay beside `rmctl`, on Windows the zip's DLLs beside `rmctl.exe`.
 
 ## Library reports
 
