@@ -7,7 +7,8 @@
 // a JPEG or an SVG, with the fonts and page templates rmrender-go bundles.
 //
 // rmrender-go draws natively, with CoreGraphics on macOS and with Cairo,
-// Pango and PDFium on Linux, through cgo, and does not build anywhere else.
+// Pango and PDFium on Linux and Windows, through cgo, and does not build
+// anywhere else.
 // Elsewhere, or without cgo, the package is a stub whose every call answers
 // domain.ErrRenderUnsupported, so the rest of rmctl still builds.
 package renderer

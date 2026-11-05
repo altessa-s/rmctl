@@ -22,7 +22,7 @@ var ErrNoPages = errors.New("this build reads no pages: rebuild with cgo and a C
 var ErrNoArchives = errors.New("this build reads and writes no .rmdoc archives: rebuild with cgo and a C23 compiler")
 
 // ErrNoRender is what a render command says when this build draws nothing.
-var ErrNoRender = errors.New("rendering is not available in this build: it is in the macOS and Linux builds of rmctl")
+var ErrNoRender = errors.New("rendering is not available in this build: it is in the macOS, Linux and Windows builds of rmctl")
 
 // PagesErr names err for the command at path: a build without the page
 // format library, the container library or the renderer gets one sentence

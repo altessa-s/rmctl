@@ -79,9 +79,10 @@ build: ## Build all packages (honors GOOS/GOARCH)
 	@for m in $(MODULES); do (cd $$m && go build ./...) || exit 1; done
 
 # The page commands compile rmlines-lib, a C23 library, through cgo: clang 19+
-# or GCC 13+ (MSVC is not one). Rendering compiles rmrender-lib on macOS and
-# Linux: clang 19+ or GCC 15+, and on Linux Cairo, Pango and PDFium
-# (.github/scripts/setup-render-linux.sh). A build without cgo keeps every
+# or GCC 13+ (MSVC is not one). Rendering compiles rmrender-lib on macOS,
+# Linux and Windows: clang 19+ or GCC 15+, and on Linux Cairo, Pango and PDFium
+# (.github/scripts/setup-render-linux.sh), on Windows MSYS2 CLANG64 with the
+# same stack (.github/scripts/setup-render-windows.sh). A build without cgo keeps every
 # other command and answers the page commands with "built without cgo" and
 # render with "not available in this build"; this target holds that build
 # working.

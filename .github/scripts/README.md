@@ -70,6 +70,26 @@ and the Cairo stack's development packages, fetches the PDFium build rmrender-li
 the binary finds `libpdfium.so` on: PDFium's own directory by default, for tests run in place; the release passes `'$ORIGIN'` and puts the
 library beside the binary in its archive. Every Linux job that compiles the module with cgo runs it after setting up Go.
 
+## Rendering on Windows
+
+`setup-render-windows.sh` prepares a Windows runner to build rmctl with rendering, as rmrender-go's Windows CI builds it. The job first
+installs MSYS2 CLANG64 with `msys2/setup-msys2` (`msystem: CLANG64`, `path-type: inherit`, so the Go of `setup-go` is found after CLANG64's
+tools) and the packages rmrender-go's README lists: clang, pkgconf, python, cairo, pango, fontconfig, harfbuzz, gdk-pixbuf2, zlib and
+ntldd. The script runs in that `msys2` shell: it fetches the PDFium `win-x64` SDK rmrender-lib pins with the `fetch-pdfium.py` vendored in
+rmrender-go (checksum-verified) and writes `CC=clang`, `CGO_ENABLED`, `CGO_CFLAGS`, `CGO_LDFLAGS` (in `cygpath -m` form, as the native clang
+and Go want them), `PDFIUM_DIR` and `PDFIUM_BIN` to `$GITHUB_ENV`. A step that runs a program built with the renderer puts `$PDFIUM_BIN`, with
+`pdfium.dll`, on `PATH` first; CLANG64's `bin` is there already. CI's Windows job vets every package with cgo and runs the renderer's tests and
+the end-to-end render tests; the release builds the Windows archive the same way.
+
+`bundle-windows-dlls.sh EXE` makes the Windows archive run without MSYS2. A Windows rmctl loads PDFium and the Cairo stack as DLLs, so it
+cannot be linked statically; the script copies every DLL `ntldd -R` resolves under CLANG64's `bin` or PDFium's `bin` beside `EXE` and fails on
+one found anywhere else or not at all (Windows' own DLLs and API sets stay out). Each CLANG64 DLL's package (`pacman -Qo`) gets
+`licenses/msys2/<package>/` with the files it installs under `$MSYSTEM_PREFIX/share/licenses` and its `pacman -Qi` record as `PACKAGE.txt`;
+a package with no licence file is warned about. PDFium's licences and the fonts' are copied by the release as on Linux.
+`bundle-windows-dlls.sh --verify EXE` checks an unpacked archive: with `PATH` reduced to the Windows directory, every DLL must resolve beside
+`EXE` or in Windows. The release's smoke test runs it on the zip unpacked into an empty directory, then runs `version --full` and renders the
+sample to PDF and PNG with that `PATH`.
+
 ## macOS release
 
 The release workflow builds and publishes the Linux and Windows archives. The macOS archives are built on a Mac, so they carry the Developer ID signature of Altessa Solutions Inc without the certificate leaving its keychain: once the release is published, `release-macos.sh TAG` checks the tag out into a temporary worktree, builds `darwin/arm64` and `darwin/amd64` with cgo, signs each binary with the hardened runtime and a secure timestamp, notarizes both in one submission, renders a sample with the binary of the Mac's own architecture, packs `rmctl_<version>_darwin_<arch>.zip` with `ditto`, uploads them to the release, puts their lines into `checksums.txt` and starts [`homebrew.yml`](../workflows/homebrew.yml), which writes the formula from the release's macOS and Linux archives. A bare binary cannot be stapled, so Gatekeeper looks its ticket up online. `UPLOAD=0` stops after packing and leaves the archives in `dist/`.
@@ -86,7 +106,7 @@ xcrun notarytool store-credentials rmctl-notary --apple-id <apple-id> --team-id 
 
 After a release (not a pre-release) is published, the release workflow updates two package managers from its Windows archive. A job whose token is not set warns and does nothing.
 
-- **Scoop.** `scoop-manifest.sh VERSION CHECKSUMS` writes `rmctl.json` from the release's `checksums.txt`; the `scoop` job commits it as `bucket/rmctl.json` to [altessa-s/scoop-bucket](https://github.com/altessa-s/scoop-bucket). It needs `SCOOP_BUCKET_TOKEN`, a token with contents: write on that repository. Users install with `scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket` and `scoop install rmctl`.
-- **winget.** The `winget` job runs [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser), which opens a pull request to `microsoft/winget-pkgs` for `Altessa.rmctl` from the fork of that repository under altessa-s. It needs `WINGET_TOKEN`, a classic token with the `public_repo` and `workflow` scopes, and it only updates a package already there: the first version is submitted once by hand, for example with [Komac](https://github.com/russellbanks/Komac) (`komac new Altessa.rmctl --version <version> --urls <url of rmctl_<version>_windows_amd64.zip> --submit`, a zip with `rmctl.exe` as its nested portable installer, command `rmctl`). Microsoft reviews every pull request before `winget install Altessa.rmctl` sees the version.
+- **Scoop.** `scoop-manifest.sh VERSION CHECKSUMS` writes `rmctl.json` from the release's `checksums.txt` (Scoop unpacks the whole zip into the app's folder and its `rmctl` shim starts `rmctl.exe` there, beside its DLLs); the `scoop` job commits it as `bucket/rmctl.json` to [altessa-s/scoop-bucket](https://github.com/altessa-s/scoop-bucket). It needs `SCOOP_BUCKET_TOKEN`, a token with contents: write on that repository. Users install with `scoop bucket add altessa-s https://github.com/altessa-s/scoop-bucket` and `scoop install rmctl`.
+- **winget.** The `winget` job runs [winget-releaser](https://github.com/vedantmgoyal9/winget-releaser), which opens a pull request to `microsoft/winget-pkgs` for `Altessa.rmctl` from the fork of that repository under altessa-s. It needs `WINGET_TOKEN`, a classic token with the `public_repo` and `workflow` scopes, and it only updates a package already there: the first version is submitted once by hand, for example with [Komac](https://github.com/russellbanks/Komac) (`komac new Altessa.rmctl --version <version> --urls <url of rmctl_<version>_windows_amd64.zip> --submit`, a zip with `rmctl.exe` as its nested portable installer, command `rmctl`). The zip holds the DLLs `rmctl.exe` loads beside it, so the installer manifest needs `ArchiveBinariesDependOnPath: true`: winget then adds the package's folder to `PATH` instead of linking `rmctl.exe` from its `Links` folder, through which Windows would look for the DLLs in the wrong directory (see the `ArchiveBinariesDependOnPath` field of the [installer manifest schema](https://github.com/microsoft/winget-pkgs/blob/master/doc/manifest/schema/1.12.0/installer.md)). winget-releaser bases each new version on the one already there, so the field is set once, by hand, in the first submission (or in the pull request of the first version with DLLs, if an older version is already there). Microsoft reviews every pull request before `winget install Altessa.rmctl` sees the version.
 
 The Windows binary is not signed yet, so SmartScreen may warn when it is started from Explorer; installed by either manager and run from a terminal, it is not.

@@ -1,4 +1,4 @@
-//go:build (darwin || linux) && cgo
+//go:build (darwin || linux || windows) && cgo
 
 // Copyright 2026 ALTESSA SOLUTIONS INC.
 // Use of this source code is governed by the MIT license that can be found in

@@ -33,7 +33,7 @@ scoop install rmctl          # later: scoop update rmctl
 winget install Altessa.rmctl # later: winget upgrade Altessa.rmctl
 ```
 
-By hand: every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, `LICENSE` and `README.md`, and `checksums.txt` with the SHA-256 of every archive. The binary is self-contained: it needs no runtime and no DLL beyond Windows' own. It is built for x64; Windows on Arm runs it under emulation.
+By hand: every release attaches `rmctl_<version>_windows_amd64.zip`, which holds `rmctl.exe`, the DLLs it draws documents with (`pdfium.dll` and the Cairo and Pango libraries, see [rendering.md](rendering.md)), `LICENSE`, `README.md` and `licenses/`, and `checksums.txt` with the SHA-256 of every archive. `rmctl.exe` needs no runtime to install: Windows finds the DLLs in its own folder, so keep the zip's files together. It is built for x64; Windows on Arm runs it under emulation.
 
 Download both files from the [releases page](https://github.com/altessa-s/rmctl/releases), or from PowerShell:
 
@@ -66,7 +66,7 @@ rmctl version
 
 `-ne` compares the hashes without case, so the lowercase line of `checksums.txt` matches the uppercase hash of `Get-FileHash`. `SetEnvironmentVariable` writes the user's `Path` back with any `%VARIABLE%` in it expanded; to keep those, add the folder by hand instead, under *Settings → System → About → Advanced system settings → Environment Variables*. Windows opened afterwards see the new `Path`; a Windows Terminal that was already running may need to be restarted.
 
-To update, run the same steps again. A running `rmctl watch` keeps `rmctl.exe` open, and Windows refuses to replace a running program: stop it first.
+To update, run the same steps again. A running `rmctl watch` keeps `rmctl.exe` and its DLLs open, and Windows refuses to replace a running program: stop it first.
 
 Then register the machine with a one-time code from [my.remarkable.com](https://my.remarkable.com/device/desktop/connect), and turn on tab completion:
 
@@ -83,7 +83,7 @@ Add-Content -LiteralPath $PROFILE -Value 'rmctl completion powershell | Out-Stri
 
 ## What is different on Windows
 
-- **No rendering.** The Windows build has the `render` command, which says that rendering is not available in this build and fails. Every other command works, including `text`, `highlights`, `put --notebook`, `export` and `backup`. To draw documents as PDF or images, run `rmctl render` on macOS or Linux; the Linux build under WSL can draw too, with the libraries [rendering.md](rendering.md) lists. `rmctl render` also reads an `.rmdoc` from `export` or `backup` there, without the cloud.
+- **Rendering needs the DLLs beside `rmctl.exe`.** `rmctl render` draws as on macOS and Linux, with the DLLs the zip carries; Scoop and winget install them with it. A copy of `rmctl.exe` alone, without them, does not start. The first rendering writes the bundled fonts once to `%LocalAppData%\rmrender\fonts`.
 - **Tokens are in a file.** The macOS Keychain backend is macOS-only, so `secrets migrate --to keychain` is not for Windows; the tokens stay in `token.json` in the profile's directory. On macOS and Linux rmctl refuses a token file that other users can read; Windows has no such mode bits, so there the file is exactly as private as the user's profile folder, `%AppData%` included. Treat it as a password: it gives the whole account.
 - **Where things are.** rmctl keeps its files in the user config and cache directories, which on Windows are `%AppData%` (roaming) and `%LocalAppData%`:
 
@@ -628,7 +628,7 @@ rmctl backup restore "$HOME\Backups\reMarkable" --to /Restored --yes
 
 `watch --exec` runs a program each time the library changes ([watch.md](watch.md)). The program gets the batch as JSON on its standard input, `{"profile": ..., "dropped": N, "events": [{"time", "event", "id", "name", "path", "kind", "this_device"}, ...]}`, and the last event in its environment: `RMCTL_EVENT`, `RMCTL_ID`, `RMCTL_NAME`, `RMCTL_PATH`, `RMCTL_KIND`, `RMCTL_THIS_DEVICE`, `RMCTL_TIME`, `RMCTL_COUNT`, `RMCTL_DROPPED` and `RMCTL_PROFILE`. Names never go into its command line. An item no longer in the library has no path or kind.
 
-Since rendering is not in the Windows build, this handler keeps Markdown copies instead: for each document of the batch that is still in the library, the typed text of a notebook or the highlights of a PDF or EPUB, mirroring the library's folders.
+This handler keeps Markdown copies: for each document of the batch that is still in the library, the typed text of a notebook or the highlights of a PDF or EPUB, mirroring the library's folders. To keep PDFs as well, the handler can end with `rmctl -P $rmProfile render /Meetings -o "$HOME\Documents\reMarkable PDF" --incremental`, which redraws only the documents that changed ([rendering.md](rendering.md)).
 
 `$HOME\bin\rm-on-change.ps1`:
 
