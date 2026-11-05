@@ -5,7 +5,7 @@ Thank you for your interest in contributing to rmctl! This guide will help you g
 ## Prerequisites
 
 - **Go 1.27+** — [download](https://go.dev/dl/)
-- **A C23 compiler** — clang 19+ or GCC 13+, for the page and archive commands: rmlines-go and rmdoc-go compile rmlines-lib and rmdoc-lib through cgo. Apple's clang in a current Xcode qualifies; MSVC does not, so on Windows that means clang. Point `CC` at it when the default one is older (`CC=clang-19 make test`). `make build-nocgo` checks the build without cgo, which keeps every command but the page and archive ones.
+- **A C23 compiler** — clang 19+ or GCC 13+, for the page and archive commands: rmlines-go and rmdoc-go compile rmlines-lib and rmdoc-lib through cgo. Apple's clang in a current Xcode qualifies; MSVC does not, so on Windows that means clang. Point `CC` at it when the default one is older (`CC=clang-19 make test`). `make build-nocgo` checks the build without cgo, which keeps every command but the page and archive ones. `make rmctl-lite` builds rmctl-lite, rmctl without the renderer (`-tags norender`), into `bin/rmctl`; `make build-lite`, `make golangci-lite` and `make test-lite` build, lint and test every package with that tag, as CI's rmctl-lite job does, and need no Cairo stack or PDFium.
 - **Make** — for running project targets
 - **Git** — for version control
 
@@ -160,7 +160,7 @@ All `.go` files must include the copyright header. Run `make copyright` to add i
 
 ## CI checks
 
-CI requires at least 93% total statement coverage on Linux, and every protocol package listed in [`.coverage.yml`](.coverage.yml) must stay at or above its threshold (`make coverage-gate`). Raise these floors as coverage improves; do not lower them to accommodate untested changes. Every protocol scenario needs a negative test alongside the positive one. The full suite runs with the race detector and shuffled test order, and the platform-gated code is cross-compiled for darwin and windows; a Windows job builds the renderer with cgo (MSYS2 CLANG64 and PDFium) and runs its tests.
+CI requires at least 93% total statement coverage on Linux, and every protocol package listed in [`.coverage.yml`](.coverage.yml) must stay at or above its threshold (`make coverage-gate`). Raise these floors as coverage improves; do not lower them to accommodate untested changes. Every protocol scenario needs a negative test alongside the positive one. The full suite runs with the race detector and shuffled test order, and the platform-gated code is cross-compiled for darwin and windows; Windows jobs build the renderer with cgo (MSYS2 CLANG64 on x64, CLANGARM64 on ARM64, and PDFium) and run its tests, with the race detector on x64.
 
 ## Tests
 

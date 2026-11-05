@@ -1,12 +1,13 @@
 name: Homebrew
 
-# Writes the formula in altessa-s/homebrew-tap for a published release once
-# it holds the archives of every platform the formula installs: the Linux
-# ones the release workflow builds, and the macOS ones
+# Writes the formulas in altessa-s/homebrew-tap for a published release once
+# it holds the archives of every platform they install, rmctl.rb from
+# rmctl's and rmctl-lite.rb from rmctl-lite's: the Linux ones the release
+# workflow builds, and the macOS ones
 # .github/scripts/release-macos.sh adds from a Mac, which then starts this
 # workflow. GITHUB_TOKEN cannot push to another repository, so the job needs
 # HOMEBREW_TAP_TOKEN (contents: write on the tap); pre-releases leave the
-# formula alone.
+# formulas alone.
 on:
   workflow_dispatch:
     inputs:
@@ -47,28 +48,30 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir artifacts \
-            --pattern 'rmctl_*_darwin_*.zip' --pattern 'rmctl_*_linux_*.tar.gz'
+            --pattern 'rmctl_*_darwin_*.zip' --pattern 'rmctl_*_linux_*.tar.gz' \
+            --pattern 'rmctl-lite_*_darwin_*.zip' --pattern 'rmctl-lite_*_linux_*.tar.gz'
 
-      - name: Write the formula
+      - name: Write the formulas
         # homebrew-formula.sh fails when an archive is missing.
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          (cd artifacts && sha256sum rmctl_* > checksums.txt && cat checksums.txt)
+          (cd artifacts && sha256sum rmctl_* rmctl-lite_* > checksums.txt && cat checksums.txt)
           .github/scripts/homebrew-formula.sh "${TAG#v}" artifacts/checksums.txt > rmctl.rb
-          cat rmctl.rb
+          .github/scripts/homebrew-formula.sh --lite "${TAG#v}" artifacts/checksums.txt > rmctl-lite.rb
+          cat rmctl.rb rmctl-lite.rb
 
-      - name: Push it to the tap
+      - name: Push them to the tap
         env:
           TAG: ${{ inputs.tag }}
         run: |
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/altessa-s/homebrew-tap.git" tap
           mkdir -p tap/Formula
-          cp rmctl.rb tap/Formula/rmctl.rb
+          cp rmctl.rb rmctl-lite.rb tap/Formula/
           cd tap
-          git add Formula/rmctl.rb
+          git add Formula/rmctl.rb Formula/rmctl-lite.rb
           if git diff --cached --quiet; then
-            echo "the formula is already current"
+            echo "the formulas are already current"
             exit 0
           fi
           git -c user.name=DM -c user.email=dm@altessa-s.com commit -m "feat(rmctl): update to ${TAG#v}"

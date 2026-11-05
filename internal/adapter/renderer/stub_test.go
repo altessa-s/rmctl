@@ -1,4 +1,4 @@
-//go:build !((darwin || linux || windows) && cgo)
+//go:build norender || !((darwin || linux || windows) && cgo)
 
 // Copyright 2026 ALTESSA SOLUTIONS INC.
 // Use of this source code is governed by the MIT license that can be found in
@@ -17,10 +17,10 @@ import (
 func TestStubAnswersUnsupported(t *testing.T) {
 	t.Parallel()
 	r := New()
-	if err := r.Available(); !errors.Is(err, domain.ErrRenderUnsupported) {
+	if err := r.Available(); !errors.Is(err, domain.ErrRenderUnsupported) || !errors.Is(err, errNoRender) {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}); !errors.Is(err, domain.ErrRenderUnsupported) {
+	if _, _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}); !errors.Is(err, domain.ErrRenderUnsupported) || !errors.Is(err, errNoRender) {
 		t.Fatal(err)
 	}
 }
