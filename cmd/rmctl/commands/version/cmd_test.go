@@ -27,6 +27,27 @@ func run(t *testing.T, args ...string) clitest.Result {
 	return clitest.Exec(t, cliutil.Services{}, clitest.Options{}, build, args...)
 }
 
+// version --full says whether the build draws documents, so rmctl-lite is
+// told from rmctl.
+func TestVersionRender(t *testing.T) {
+	t.Parallel()
+	for _, renders := range []bool{true, false} {
+		want := map[bool]string{true: "render\tyes\n", false: "render\tno\n"}[renders]
+		opts := clitest.Options{Renders: renders}
+		if r := clitest.Exec(t, cliutil.Services{}, opts, build, "version", "--full"); r.Code != 0 || !strings.Contains(r.Out, want) {
+			t.Fatalf("%v: %d %q", renders, r.Code, r.Out)
+		}
+		r := clitest.Exec(t, cliutil.Services{}, opts, build, "version", "--full", "-o", "json")
+		var full fullView
+		if err := json.Unmarshal([]byte(r.Out), &full); err != nil || full.Render != renders {
+			t.Fatalf("%v: %q %v", renders, r.Out, err)
+		}
+		if r = clitest.Exec(t, cliutil.Services{}, opts, build, "version"); strings.Contains(r.Out, "render") {
+			t.Fatalf("%v: %q", renders, r.Out)
+		}
+	}
+}
+
 func TestVersion(t *testing.T) {
 	t.Parallel()
 	if r := run(t, "version"); r.Code != 0 || r.Out != appinfo.Version+"\n" {
@@ -56,8 +77,8 @@ func TestVersion(t *testing.T) {
 
 func TestPrintFailingWriter(t *testing.T) {
 	t.Parallel()
-	if (out.PlainRenderer{}).Render(failWriter{}, result(false), out.Style{}) == nil ||
-		(out.JSONRenderer{}).Render(failWriter{}, result(true), out.Style{}) == nil {
+	if (out.PlainRenderer{}).Render(failWriter{}, result(false, false), out.Style{}) == nil ||
+		(out.JSONRenderer{}).Render(failWriter{}, result(true, true), out.Style{}) == nil {
 		t.Fatal("a failing writer went unnoticed")
 	}
 }

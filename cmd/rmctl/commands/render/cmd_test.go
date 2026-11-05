@@ -158,6 +158,12 @@ func TestRenderErrors(t *testing.T) {
 	if r.Code != cliutil.CodeError || !errors.Is(r.Error, cliutil.ErrNoRender) || !strings.Contains(r.Error.Error(), "not available in this build") {
 		t.Fatalf("%d %v", r.Code, r.Error)
 	}
+	// rmctl-lite says so, and names the full build.
+	r = run(t, &clitest.Fake{RenderErr: domain.ErrRenderLite}, clitest.Options{}, "render", "x")
+	if r.Code != cliutil.CodeError || !errors.Is(r.Error, cliutil.ErrNoRenderLite) ||
+		r.Error.Error() != "render: rendering is not in rmctl-lite: install rmctl, the full build, for it" {
+		t.Fatalf("%d %v", r.Code, r.Error)
+	}
 	r = run(t, &clitest.Fake{RenderErr: domain.ErrNoSuchPage}, clitest.Options{}, "render", "x", "--page", "9")
 	if r.Code != cliutil.CodeError || r.Error.Error() != "render: no such page" {
 		t.Fatalf("%d %v", r.Code, r.Error)

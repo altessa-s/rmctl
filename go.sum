@@ -14,8 +14,8 @@ github.com/altessa-s/rmdoc-go v1.1.0 h1:cdhkHB9PxXd0TRFakRIDNJwQRo2e+u9edt1Ox3e7
 github.com/altessa-s/rmdoc-go v1.1.0/go.mod h1:g/8YBALvTkPelp6lgnv5+rZvCd4FCFjTHPpfvZl3C1s=
 github.com/altessa-s/rmlines-go v1.1.2 h1:balGzQ6NS2d19OJgXPyOx8r0bznrazcid/wjASNCukw=
 github.com/altessa-s/rmlines-go v1.1.2/go.mod h1:P3mBD/5/LosB/uendofvLl1NhmCzN0Wfh+i/iXJuMFQ=
-github.com/altessa-s/rmrender-go v1.3.2 h1:gNiAv9i65R9Yz7MMPYJneL2ajcromkWos+cUUf0LXbk=
-github.com/altessa-s/rmrender-go v1.3.2/go.mod h1:UFMwIabChq9Q5CRnLQsDjSw+e3vG3TVvvAtSGTqRBk4=
+github.com/altessa-s/rmrender-go v1.4.0 h1:DOi0O16wzXrlnhRc0M/NseS0NdIvNkFmyItnn/Eehvg=
+github.com/altessa-s/rmrender-go v1.4.0/go.mod h1:UFMwIabChq9Q5CRnLQsDjSw+e3vG3TVvvAtSGTqRBk4=
 github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=
 github.com/clipperhouse/uax29/v2 v2.7.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=

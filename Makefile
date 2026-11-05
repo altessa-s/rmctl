@@ -56,6 +56,12 @@ golangci: ## Run golangci-lint without rewriting files (as CI does)
 	@cd devtools && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	@for m in $(MODULES); do (cd $$m && golangci-lint run ./...) || exit 1; done
 
+# rmctl-lite's files: the norender tag swaps the renderer for its stub.
+.PHONY: golangci-lite
+golangci-lite: ## Run golangci-lint on the rmctl-lite build (-tags integration,norender)
+	@cd devtools && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+	@for m in $(MODULES); do (cd $$m && golangci-lint run --build-tags integration,norender ./...) || exit 1; done
+
 .PHONY: tidy
 tidy: ## Run go mod tidy
 	@for m in $(MODULES); do (cd $$m && go mod tidy) || exit 1; done
@@ -65,14 +71,22 @@ vet: ## Run go vet and fail when a go fix modernizer would rewrite code (as CI d
 	@for m in $(MODULES); do (cd $$m && go vet ./...) || exit 1; done
 	@for m in $(MODULES); do (cd $$m && go fix -diff ./...) || { echo "go fix -diff is not empty in $$m: run go fix ./..."; exit 1; }; done
 
+# The version information both builds of the binary carry.
+RMCTL_LDFLAGS := -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Name=rmctl \
+                 -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Project=rmctl \
+                 -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+                 -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Commit=$$(git rev-parse --short HEAD 2>/dev/null)
+
 .PHONY: rmctl
 rmctl: ## Build the rmctl binary into bin/ with version information
-	@go build -trimpath -o bin/rmctl \
-	  -ldflags "-X github.com/altessa-s/go-atlas-core/runtime/appinfo.Name=rmctl \
-	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Project=rmctl \
-	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
-	            -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Commit=$$(git rev-parse --short HEAD 2>/dev/null)" \
-	  ./cmd/rmctl
+	@go build -trimpath -o bin/rmctl -ldflags "$(RMCTL_LDFLAGS)" ./cmd/rmctl
+
+# rmctl-lite is rmctl without the renderer: the norender tag leaves
+# rmrender-go, its fonts and the Cairo/PDFium stack out, and render says it is
+# in the full build. The binary is still named rmctl.
+.PHONY: rmctl-lite
+rmctl-lite: ## Build rmctl-lite (no rendering) into bin/rmctl with version information
+	@go build -trimpath -tags norender -o bin/rmctl -ldflags "$(RMCTL_LDFLAGS)" ./cmd/rmctl
 
 .PHONY: build
 build: ## Build all packages (honors GOOS/GOARCH)
@@ -81,11 +95,16 @@ build: ## Build all packages (honors GOOS/GOARCH)
 # The page commands compile rmlines-lib, a C23 library, through cgo: clang 19+
 # or GCC 13+ (MSVC is not one). Rendering compiles rmrender-lib on macOS,
 # Linux and Windows: clang 19+ or GCC 15+, and on Linux Cairo, Pango and PDFium
-# (.github/scripts/setup-render-linux.sh), on Windows MSYS2 CLANG64 with the
+# (.github/scripts/setup-render-linux.sh), on Windows MSYS2 CLANG64 (CLANGARM64 on ARM64) with the
 # same stack (.github/scripts/setup-render-windows.sh). A build without cgo keeps every
 # other command and answers the page commands with "built without cgo" and
 # render with "not available in this build"; this target holds that build
 # working.
+# The norender build is rmctl-lite: every package without the renderer.
+.PHONY: build-lite
+build-lite: ## Build and vet all packages as rmctl-lite (-tags norender)
+	@for m in $(MODULES); do (cd $$m && go build -tags norender ./... && go vet -tags norender ./...) || exit 1; done
+
 .PHONY: build-nocgo
 build-nocgo: ## Build all packages without cgo (no page commands)
 	@for m in $(MODULES); do (cd $$m && CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go vet ./...) || exit 1; done
@@ -163,6 +182,10 @@ coverage-gate: coverage ## Fail if a protocol package is below the threshold in 
 .PHONY: test-integration
 test-integration: ## Run unit and integration tests (-tags integration) with race detector and shuffle
 	@for m in $(MODULES); do (cd $$m && go test -race -shuffle=on -tags=integration ./...) || exit 1; done
+
+.PHONY: test-lite
+test-lite: ## Run unit and integration tests of rmctl-lite (-tags norender,integration) with race detector and shuffle
+	@for m in $(MODULES); do (cd $$m && go test -race -shuffle=on -tags=norender,integration ./...) || exit 1; done
 
 .PHONY: bench
 bench: ## Run all benchmarks

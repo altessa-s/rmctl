@@ -1,4 +1,4 @@
-//go:build integration && cgo && (darwin || linux || windows)
+//go:build integration && cgo && (darwin || linux || windows) && !norender
 
 // Copyright 2026 ALTESSA SOLUTIONS INC.
 // Use of this source code is governed by the MIT license that can be found in

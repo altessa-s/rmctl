@@ -28,6 +28,7 @@ import (
 
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands"
 	"github.com/altessa-s/rmctl/cmd/rmctl/commands/cliutil"
+	"github.com/altessa-s/rmctl/internal/wiring"
 
 	"golang.org/x/term"
 
@@ -57,6 +58,7 @@ func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), 
 		Out:        out,
 		Err:        errOut,
 		IsTerminal: isTerminal(in) && isTerminal(errOut),
+		Renders:    wiring.Renders(),
 	}
 	if f, ok := out.(*os.File); ok && isTerminal(f) {
 		streams.OutTerminal = true

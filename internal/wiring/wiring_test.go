@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/adapter/config"
+	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 	"github.com/altessa-s/rmctl/internal/wiring"
 )
@@ -53,6 +54,20 @@ func TestBuild(t *testing.T) {
 		if err := svc.Close(); err != nil {
 			t.Fatal("a second Close failed:", err)
 		}
+	}
+}
+
+// Renders agrees with the renderer the services draw with.
+func TestRenders(t *testing.T) {
+	t.Parallel()
+	svc, err := wiring.Build(options(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	_, err = svc.Rendering.RenderFile(t.Context(), filepath.Join(t.TempDir(), "missing.rmdoc"), "", port.RenderOptions{})
+	if unsupported := errors.Is(err, domain.ErrRenderUnsupported); wiring.Renders() == unsupported {
+		t.Fatalf("Renders %v, rendering: %v", wiring.Renders(), err)
 	}
 }
 

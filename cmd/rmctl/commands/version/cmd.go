@@ -34,8 +34,9 @@ func New(env *cliutil.Env) *cobra.Command {
 				Display version information for rmctl.
 
 				By default, only the version number is shown. Use --full to display
-				additional build information including commit hash, build time, and
-				platform.
+				additional build information including commit hash, build time,
+				platform, and whether this build renders documents: render is no in
+				rmctl-lite, the build without the renderer, and in a build without cgo.
 
 				Output can be formatted as plain text (default) or JSON for
 				programmatic consumption.
@@ -63,7 +64,7 @@ func (c *command) configure() {
 
 func (c *command) run(cmd *cobra.Command, _ []string) error {
 	full, _ := cmd.Flags().GetBool("full") //nolint:errcheck // the flag exists
-	r := result(full)
+	r := result(full, c.env.Streams.Renders)
 	if !cmd.Flags().Changed("output") {
 		return c.env.Emit(cmd, r)
 	}
@@ -81,8 +82,9 @@ func (c *command) run(cmd *cobra.Command, _ []string) error {
 	}
 }
 
-// result is the version, or with full the build information as a record.
-func result(full bool) out.Result {
+// result is the version, or with full the build information as a record;
+// renders says this build draws documents.
+func result(full, renders bool) out.Result {
 	if !full {
 		return out.Result{
 			JSON: struct {
@@ -97,6 +99,7 @@ func result(full bool) out.Result {
 		Commit:    appinfo.Commit,
 		GoVersion: appinfo.BuildGoVersion(),
 		Platform:  appinfo.BuildPlatform(),
+		Render:    renders,
 	}
 	return out.Result{JSON: v, Doc: out.Doc{out.Record{Fields: []out.Field{
 		{Key: "version", Value: out.Text(v.Version)},
@@ -104,7 +107,16 @@ func result(full bool) out.Result {
 		{Key: "commit", Value: out.ID(v.Commit)},
 		{Key: "go_version", Value: out.Text(v.GoVersion)},
 		{Key: "platform", Value: out.Text(v.Platform)},
+		{Key: "render", Value: out.Text(yesNo(v.Render))},
 	}}}}
+}
+
+// yesNo is on as yes or no.
+func yesNo(on bool) string {
+	if on {
+		return "yes"
+	}
+	return "no"
 }
 
 // fullView is version --full as JSON.
@@ -114,4 +126,6 @@ type fullView struct {
 	Commit    string `json:"commit"`
 	GoVersion string `json:"go_version"`
 	Platform  string `json:"platform"`
+	// Render says this build draws documents: false in rmctl-lite.
+	Render bool `json:"render"`
 }

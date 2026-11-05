@@ -8,7 +8,10 @@
 # Usage: bundle-windows-dlls.sh EXE
 #        bundle-windows-dlls.sh --verify EXE
 #
-# Runs in the MSYS2 CLANG64 shell setup-render-windows.sh ran in. A Windows
+# Runs in the MSYS2 CLANG64 or CLANGARM64 shell setup-render-windows.sh ran
+# in (called CLANG64 below; CLANGARM64 is the same on ARM64, its packages
+# named mingw-w64-clang-aarch64-* after MINGW_PACKAGE_PREFIX, which the
+# MSYS2 shell sets). A Windows
 # rmctl draws with CLANG64's Cairo stack and the PDFium SDK's pdfium.dll,
 # which are DLLs, so the release archive carries them next to rmctl.exe,
 # where Windows looks first. ntldd -R lists every DLL the program loads,
@@ -38,7 +41,11 @@ fi
 exe=${1:?exe}
 [[ -f "$exe" ]] || { printf '%s: no such file\n' "$exe" >&2; exit 1; }
 : "${MSYSTEM_PREFIX:?run this in an MSYS2 shell}"
-prefix=${MINGW_PACKAGE_PREFIX:-mingw-w64-clang-x86_64}
+case "${MSYSTEM:-}" in
+    CLANGARM64) default_prefix=mingw-w64-clang-aarch64 ;;
+    *) default_prefix=mingw-w64-clang-x86_64 ;;
+esac
+prefix=${MINGW_PACKAGE_PREFIX:-$default_prefix}
 out=$(dirname "$exe")
 ntldd="$MSYSTEM_PREFIX/bin/ntldd"
 
