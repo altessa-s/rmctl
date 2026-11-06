@@ -44,13 +44,19 @@ type manifestEntry struct {
 }
 
 // fingerprint names the options a folder's PDF is drawn with, which an
-// incremental drawing must find the same to keep the PDF.
+// incremental drawing must find the same to keep the PDF. The default
+// grain adds nothing, so the records written before there was a choice
+// still hold.
 func fingerprint(opts port.RenderOptions) string {
 	templates := "templates"
 	if opts.NoTemplates {
 		templates = "no-templates"
 	}
-	return fmt.Sprintf("%s/%s/%s", opts.Mode, opts.Paper, templates)
+	f := fmt.Sprintf("%s/%s/%s", opts.Mode, opts.Paper, templates)
+	if opts.Grain != "" && opts.Grain != port.PDFGrainMask {
+		f += "/grain-" + string(opts.Grain)
+	}
+	return f
 }
 
 // entryOf is what the manifest records of a document drawn with opts.

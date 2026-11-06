@@ -127,6 +127,7 @@ func TestRenderImages(t *testing.T) {
 		{port.RenderOptions{Page: 3, Format: port.FormatSVG, Paper: port.PaperTablet}, "Paper-p3.svg", "SVG d1aaaaaa p3 tablet"},
 		{port.RenderOptions{Page: 1, NoTemplates: true}, "Paper-p1.png", "PNG d1aaaaaa p1 x1 a4 no-template"},
 		{port.RenderOptions{NoTemplates: true}, "Paper-rendered.pdf", "PDF d1aaaaaa fresh a4 no-template"},
+		{port.RenderOptions{Grain: port.PDFGrainGroup}, "Paper-rendered.pdf", "PDF d1aaaaaa fresh a4 grain-group"},
 	} {
 		f := setup(t)
 		report, err := f.s.Render(t.Context(), "d1", "", c.opts)
@@ -308,10 +309,10 @@ func TestNormalized(t *testing.T) {
 	for _, c := range []struct {
 		in, want port.RenderOptions
 	}{
-		{port.RenderOptions{}, port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFFresh, Paper: port.PaperA4}},
+		{port.RenderOptions{}, port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFFresh, Grain: port.PDFGrainMask, Paper: port.PaperA4}},
 		{
-			port.RenderOptions{Mode: port.PDFPreserving, Paper: port.PaperLetter, NoTemplates: true},
-			port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFPreserving, Paper: port.PaperLetter, NoTemplates: true},
+			port.RenderOptions{Mode: port.PDFPreserving, Grain: port.PDFGrainGroup, Paper: port.PaperLetter, NoTemplates: true},
+			port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFPreserving, Grain: port.PDFGrainGroup, Paper: port.PaperLetter, NoTemplates: true},
 		},
 		{port.RenderOptions{Page: 3}, port.RenderOptions{Page: 3, Format: port.FormatPNG, Paper: port.PaperA4, Scale: render.DefaultScale}},
 		{
@@ -336,6 +337,7 @@ func TestNormalized(t *testing.T) {
 		{Page: -1},
 		{Paper: "a3"},
 		{Mode: "draft"},
+		{Grain: "fine"},
 		{Scale: 2},
 		{Page: 1, Mode: port.PDFFresh},
 		{Page: 1, Scale: -1},
@@ -347,6 +349,8 @@ func TestNormalized(t *testing.T) {
 		{Format: port.FormatSVG},
 		{Page: 1, Format: port.FormatSVG, Scale: 2},
 		{Page: 1, Format: port.FormatSVG, Mode: port.PDFFresh},
+		{Page: 1, Grain: port.PDFGrainMask},
+		{Page: 1, Format: port.FormatSVG, Grain: port.PDFGrainGroup},
 		{Page: 1, Quality: 50},
 		{Page: 1, Format: port.FormatSVG, Quality: 50},
 		{Quality: 50},

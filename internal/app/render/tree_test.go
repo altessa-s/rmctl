@@ -209,7 +209,7 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 		t.Fatal("no manifest")
 	}
 	// The defaults spelled out are the same options.
-	if r := draw(port.RenderOptions{Paper: port.PaperA4, Mode: port.PDFFresh}); r.Count(port.RenderUnchanged) != 2 {
+	if r := draw(port.RenderOptions{Paper: port.PaperA4, Mode: port.PDFFresh, Grain: port.PDFGrainMask}); r.Count(port.RenderUnchanged) != 2 {
 		t.Fatalf("%q", rows(r))
 	}
 	for _, c := range []struct {
@@ -219,6 +219,7 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 		{"paper", port.RenderOptions{Paper: port.PaperLetter}},
 		{"mode", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving}},
 		{"templates", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}},
+		{"grain", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true, Grain: port.PDFGrainGroup}},
 	} {
 		if r := draw(c.opts); r.Count(port.RenderRendered) != 2 {
 			t.Fatalf("%s: %q", c.name, rows(r))
@@ -227,10 +228,10 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 			t.Fatalf("%s again: %q", c.name, rows(r))
 		}
 	}
-	if head, _ := f.written(t, "out/Deep.pdf"); head != "PDF d3aaaaaa preserving letter no-template" {
+	if head, _ := f.written(t, "out/Deep.pdf"); head != "PDF d3aaaaaa preserving letter grain-group no-template" {
 		t.Fatalf("%q", head)
 	}
-	last := port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}
+	last := port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true, Grain: port.PDFGrainGroup}
 	for name, damage := range map[string]func(){
 		"corrupt": func() { f.files.Write("out/"+render.ManifestName, []byte("{not json")) },
 		"version": func() { f.files.Write("out/"+render.ManifestName, []byte(`{"v":99,"documents":{}}`)) },

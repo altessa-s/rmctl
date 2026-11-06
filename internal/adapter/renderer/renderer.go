@@ -51,7 +51,7 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		return nil, port.RenderReport{}, fmt.Errorf("open the document: %w", err)
 	}
 	defer func() { _ = doc.Close() }()
-	o := &rmrender.Options{Fonts: f, Paper: paper(opts.Paper)}
+	o := &rmrender.Options{Fonts: f, Paper: paper(opts.Paper), PDFGrain: grain(opts.Grain)}
 	if opts.NoTemplates {
 		o.Templates = rmrender.NoTemplates()
 	}
@@ -101,6 +101,14 @@ func paper(p port.Paper) rmrender.Paper {
 	default:
 		return rmrender.PaperA4
 	}
+}
+
+// grain is rmrender's PDF grain; anything unknown is the mask.
+func grain(g port.PDFGrain) rmrender.PDFGrain {
+	if g == port.PDFGrainGroup {
+		return rmrender.PDFGrainGroup
+	}
+	return rmrender.PDFGrainMask
 }
 
 // mode is rmrender's PDF mode; anything unknown is a fresh PDF.

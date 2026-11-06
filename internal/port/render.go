@@ -28,6 +28,22 @@ const (
 	PDFRecomposed PDFMode = "recomposed"
 )
 
+// PDFGrain is how a PDF draws grained ink: pencils, brushes and
+// ballpoints. The grains differ only on Linux and Windows; macOS draws
+// both the same.
+type PDFGrain string
+
+// The PDF grains.
+const (
+	// PDFGrainMask draws opaque ink's grain straight onto the page: about
+	// half the bytes of PDFGrainGroup, with the edges macOS draws.
+	PDFGrainMask PDFGrain = "mask"
+	// PDFGrainGroup draws each grained stroke in a transparency group of
+	// its own, as Linux and Windows did before: twice the bytes, and edges
+	// most viewers draw lighter.
+	PDFGrainGroup PDFGrain = "group"
+)
+
 // Format is what a rendering is drawn as: the whole document as a PDF, or
 // one page as an image.
 type Format string
@@ -66,6 +82,8 @@ type RenderOptions struct {
 	Format Format
 	// Mode is the PDF mode; empty is PDFFresh.
 	Mode PDFMode
+	// Grain is how a PDF draws grained ink; empty is PDFGrainMask.
+	Grain PDFGrain
 	// Paper is the sheet; empty is PaperA4.
 	Paper Paper
 	// Scale is a PNG's or a JPEG's pixels per .rm unit; 0 is the default,
@@ -101,7 +119,7 @@ type Renderer interface {
 	// Render draws the document id of the archive (the first one when id
 	// is empty), which the caller has found in it: the page opts.Page as
 	// the image opts.Format names, or the whole document as a PDF. Format,
-	// Mode, Paper and Scale are set. A page beyond the document's is
+	// Mode, Grain, Paper and Scale are set. A page beyond the document's is
 	// domain.ErrNoSuchPage.
 	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions) ([]byte, RenderReport, error)
 }

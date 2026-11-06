@@ -17,7 +17,8 @@ import (
 // Renderer is the renderer double. A PDF is "PDF <id> <mode> <paper>", a
 // PNG "PNG <id> p<page> x<scale> <paper>", a JPEG "JPG <id> p<page>
 // x<scale> q<quality> <paper>" and an SVG "SVG <id> p<page> <paper>", with
-// " no-template" after when the templates are left out, each followed by a
+// " grain-<grain>" after for a grain other than the default and
+// " no-template" when the templates are left out, each followed by a
 // newline and the archive it was drawn from, so a test sees both what was
 // asked and what was drawn. Pages is how many pages every document has (0
 // is 3); Report is what a PDF reports beyond its pages. Unavailable makes
@@ -86,6 +87,9 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		report = port.RenderReport{Pages: 1}
 	} else {
 		report.Pages = pages
+	}
+	if opts.Grain != "" && opts.Grain != port.PDFGrainMask {
+		head += " grain-" + string(opts.Grain)
 	}
 	if opts.NoTemplates {
 		head += " no-template"

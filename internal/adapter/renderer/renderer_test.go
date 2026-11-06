@@ -50,6 +50,18 @@ func TestRenderPDF(t *testing.T) {
 	}
 }
 
+// Either grain draws the whole document; how differently is the backend's.
+func TestRenderPDFGrain(t *testing.T) {
+	t.Parallel()
+	r := New()
+	for _, g := range []port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup} {
+		out, report, err := r.Render(t.Context(), notes(t), "", port.RenderOptions{Grain: g, Paper: port.PaperA4})
+		if err != nil || !bytes.HasPrefix(out, []byte("%PDF-")) || report.Pages != 3 {
+			t.Fatalf("%s: %+v %v", g, report, err)
+		}
+	}
+}
+
 func TestRenderPNG(t *testing.T) {
 	t.Parallel()
 	r := New()
@@ -184,6 +196,9 @@ func TestOptionMapping(t *testing.T) {
 	}
 	if mode(port.PDFPreserving) != rmrender.PDFPreserving || mode(port.PDFRecomposed) != rmrender.PDFRecomposed || mode("") != rmrender.PDFFresh {
 		t.Fatal("mode")
+	}
+	if grain(port.PDFGrainGroup) != rmrender.PDFGrainGroup || grain(port.PDFGrainMask) != rmrender.PDFGrainMask || grain("") != rmrender.PDFGrainMask {
+		t.Fatal("grain")
 	}
 }
 
