@@ -1,6 +1,8 @@
 GOPATH         			:= ${HOME}/go
 PATH           			:= ${GOPATH}/bin:$(PATH)
-SHELL          			:= /bin/bash -o pipefail
+# bash wherever PATH has it: NixOS, for one, has no /bin/bash.
+BASH           			:= $(or $(shell command -v bash 2>/dev/null),/bin/bash)
+SHELL          			:= $(BASH) -o pipefail
 .DELETE_ON_ERROR:
 MAKEFLAGS      			+= --warn-undefined-variables
 MAKEFLAGS      			+= --no-builtin-rules
@@ -212,7 +214,7 @@ test-all: coverage ## Run tests with race detector, shuffle, and coverage
 
 .PHONY: coverage-gate
 coverage-gate: coverage ## Fail if a protocol package is below the threshold in .coverage.yml
-	@.github/scripts/coverage-gate.sh coverage.out
+	@bash .github/scripts/coverage-gate.sh coverage.out
 	@rm -f coverage.out
 
 .PHONY: test-integration
