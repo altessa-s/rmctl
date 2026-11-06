@@ -375,7 +375,7 @@ func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOpt
 // renderArgs are a rendering's arguments as a call records them.
 func renderArgs(from, dest string, o port.RenderOptions) []string {
 	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
-		"paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
+		"grain=" + string(o.Grain), "paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
 	if o.NoTemplates {
 		args = append(args, "no-template")
 	}

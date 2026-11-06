@@ -257,8 +257,8 @@ func TestRenderer(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	r := &porttest.Renderer{Report: port.RenderReport{Pages: 9}}
-	out, rep, err := r.Render(ctx, []byte("archive"), "d1", port.RenderOptions{Mode: "pages", Paper: "a4", NoTemplates: true})
-	if err != nil || string(out) != "PDF d1 pages a4 no-template\narchive" || rep.Pages != 3 {
+	out, rep, err := r.Render(ctx, []byte("archive"), "d1", port.RenderOptions{Mode: "pages", Grain: "group", Paper: "a4", NoTemplates: true})
+	if err != nil || string(out) != "PDF d1 pages a4 grain-group no-template\narchive" || rep.Pages != 3 {
 		t.Fatalf("%q %+v %v", out, rep, err)
 	}
 	for format, want := range map[port.Format]string{

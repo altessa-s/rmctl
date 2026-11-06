@@ -18,9 +18,11 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// The values --mode and --paper take, the first of each the default.
+// The values --mode, --grain and --paper take, the first of each the
+// default.
 var (
 	modes  = []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed} //nolint:gochecknoglobals // a fixed list
+	grains = []port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup}                //nolint:gochecknoglobals // a fixed list
 	papers = []port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}        //nolint:gochecknoglobals // a fixed list
 )
 
@@ -46,11 +48,11 @@ type renderView struct {
 
 // flags are what render is asked.
 type flags struct {
-	dest, format, mode, paper, id string
-	page, quality                 int
-	noTemplate                    bool
-	scale                         float64
-	tree                          port.RenderTreeOptions
+	dest, format, mode, grain, paper, id string
+	page, quality                        int
+	noTemplate                           bool
+	scale                                float64
+	tree                                 port.RenderTreeOptions
 }
 
 // New returns the render command. It changes nothing; a local archive needs
@@ -80,11 +82,16 @@ func New(env *cliutil.Env) *cobra.Command {
 			the marks to the original PDF, its bytes untouched, and refuses a
 			document whose pages were moved, added or hidden; recomposed writes a
 			new PDF from the original's objects, keeping forms and annotations, and
-			breaks signatures. --paper is the sheet a notebook page is laid out on;
-			a page of a PDF keeps its own size. --scale is a PNG's or a JPEG's
-			pixels per tablet unit: at 1, the default, a page is 1404 pixels wide,
-			as on the tablet's screen. --quality is a JPEG's, from 1 to 100; 0, the
-			default, is the renderer's own, 75.
+			breaks signatures. --grain is how a PDF draws the grained ink of
+			pencils, brushes and ballpoints: mask, the default, draws the grain
+			straight onto the page; group draws each stroke in a transparency group
+			of its own, as Linux and Windows did before, at twice the size and with
+			edges most viewers draw lighter. macOS draws both the same. --paper is
+			the sheet a notebook page is laid out on; a page of a PDF keeps its own
+			size. --scale is a PNG's or a JPEG's pixels per tablet unit: at 1, the
+			default, a page is 1404 pixels wide, as on the tablet's screen.
+			--quality is a JPEG's, from 1 to 100; 0, the default, is the renderer's
+			own, 75.
 
 			Without -o the file is written in the working directory under the
 			document's name: <name>-rendered.pdf, or <name>-p<N>.png, .jpg or .svg
@@ -97,11 +104,11 @@ func New(env *cliutil.Env) *cobra.Command {
 			or remarkable for "/", in the working directory. Each document becomes
 			<folder path>/<name>.pdf; two names that collide in one directory get
 			the first 8 characters of the later one's id in brackets. --mode,
-			--paper and --no-template apply to every document; --page, --scale,
-			--quality and image formats do not. Documents in the trash are left out
-			unless --all. The directory keeps .rmctl-render.json, a record of what
-			each PDF was drawn from and with which --mode, --paper and
-			--no-template. --incremental skips a document whose PDF is there with
+			--grain, --paper and --no-template apply to every document; --page,
+			--scale, --quality and image formats do not. Documents in the trash are
+			left out unless --all. The directory keeps .rmctl-render.json, a record
+			of what each PDF was drawn from and with which --mode, --grain, --paper
+			and --no-template. --incremental skips a document whose PDF is there with
 			the document's modification time, which each PDF written takes, and
 			which that record shows drawn from the same document with the same
 			options; other options, or a record missing or damaged, draw it again.
@@ -124,6 +131,7 @@ func New(env *cliutil.Env) *cobra.Command {
 			rmctl render /Books/Paper -o paper.pdf
 			rmctl render /Notes/Meeting --paper letter
 			rmctl render /Books/Paper --mode preserving
+			rmctl render /Notes/Sketches --grain group
 			rmctl render 3f2a --page 3 --scale 2 -o page3.png
 			rmctl render 3f2a --page 3 --format jpg --quality 90
 			rmctl render /Notes/Meeting --page 1 -o page1.svg --no-template
@@ -175,6 +183,7 @@ func New(env *cliutil.Env) *cobra.Command {
 	fl.StringVarP(&f.dest, "output", "o", "", "file to write, or a folder's directory (default: <name>-rendered.pdf, <name>-p<N>.<format> or <folder> here)")
 	fl.StringVar(&f.format, "format", "", "pdf, png, jpg or svg (default: from -o's extension, else png with --page and pdf without)")
 	fl.StringVar(&f.mode, "mode", string(port.PDFFresh), "PDF mode: fresh, preserving or recomposed")
+	fl.StringVar(&f.grain, "grain", string(port.PDFGrainMask), "PDF drawing of pencil and brush grain: mask or group")
 	fl.StringVar(&f.paper, "paper", string(port.PaperA4), "paper of a notebook page: a4, letter or tablet")
 	fl.IntVar(&f.page, "page", 0, "the page to draw as an image, from 1")
 	fl.Float64Var(&f.scale, "scale", 1, "pixels per tablet unit of a PNG or a JPEG: 1 is 1404 pixels across")
@@ -334,11 +343,17 @@ func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 		return opts, cliutil.Usagef("render: --quality is for a page drawn as a JPEG")
 	case changed("mode") && format != port.FormatPDF:
 		return opts, cliutil.Usagef("render: --mode is for a whole document drawn as a PDF")
+	case changed("grain") && format != port.FormatPDF:
+		return opts, cliutil.Usagef("render: --grain is for a whole document drawn as a PDF")
 	}
 	if format == port.FormatPDF {
 		opts.Mode = port.PDFMode(strings.ToLower(f.mode))
 		if !slices.Contains(modes, opts.Mode) {
 			return opts, cliutil.Usagef("render: unknown --mode %q: use fresh, preserving or recomposed", f.mode)
+		}
+		opts.Grain = port.PDFGrain(strings.ToLower(f.grain))
+		if !slices.Contains(grains, opts.Grain) {
+			return opts, cliutil.Usagef("render: unknown --grain %q: use mask or group", f.grain)
 		}
 		return opts, nil
 	}

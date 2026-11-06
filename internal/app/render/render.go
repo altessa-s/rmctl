@@ -75,10 +75,10 @@ func New(
 }
 
 // Normalized is opts with the defaults filled in, or ErrBadOptions: a
-// page below 0, a format, mode or paper not known, a PDF of one page or an
-// image of the whole document, a scale out of (0, MaxScale] or asked of
-// anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or asked
-// of anything but a JPEG, or a mode asked of an image.
+// page below 0, a format, mode, grain or paper not known, a PDF of one page
+// or an image of the whole document, a scale out of (0, MaxScale] or asked
+// of anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or
+// asked of anything but a JPEG, or a mode or a grain asked of an image.
 func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	if opts.Page < 0 {
 		return opts, fmt.Errorf("%w: page %d: pages count from 1", ErrBadOptions, opts.Page)
@@ -112,6 +112,12 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 		if !slices.Contains([]port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed}, opts.Mode) {
 			return opts, fmt.Errorf("%w: unknown PDF mode %q", ErrBadOptions, opts.Mode)
 		}
+		if opts.Grain == "" {
+			opts.Grain = port.PDFGrainMask
+		}
+		if !slices.Contains([]port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup}, opts.Grain) {
+			return opts, fmt.Errorf("%w: unknown PDF grain %q", ErrBadOptions, opts.Grain)
+		}
 		return opts, nil
 	}
 	if opts.Page == 0 {
@@ -119,6 +125,9 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	}
 	if opts.Mode != "" {
 		return opts, fmt.Errorf("%w: a PDF mode is for a whole document drawn as a PDF", ErrBadOptions)
+	}
+	if opts.Grain != "" {
+		return opts, fmt.Errorf("%w: a PDF grain is for a whole document drawn as a PDF", ErrBadOptions)
 	}
 	if opts.Format == port.FormatSVG {
 		if opts.Scale != 0 {
