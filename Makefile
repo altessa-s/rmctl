@@ -38,6 +38,23 @@ FUZZPKG ?= ./...
 # into shell source; fuzz-inputs checks them against narrow allowlists first.
 export FUZZTIME FUZZPKG
 
+# On Linux rmrender-go links PDFium, which distributions do not package.
+# make pdfium fetches the build rmrender-lib pins, checksum checked, into
+# PDFIUM_DIR; once it is there every Go target compiles and links against it,
+# with its lib as the run path of the binaries built. A PDFium installed
+# elsewhere is used through CGO_CFLAGS and CGO_LDFLAGS as usual.
+PDFIUM_DIR ?= $(CURDIR)/.cache/pdfium
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_S),Linux)
+ifneq ($(wildcard $(PDFIUM_DIR)/include/fpdf_edit.h),)
+CGO_CFLAGS ?= -O2 -g
+CGO_LDFLAGS ?=
+export CGO_CFLAGS := $(CGO_CFLAGS) -I$(PDFIUM_DIR)/include
+export CGO_LDFLAGS := $(CGO_LDFLAGS) -L$(PDFIUM_DIR)/lib -Wl,-rpath,$(PDFIUM_DIR)/lib
+endif
+endif
+
 .PHONY: all
 all: help
 
@@ -77,9 +94,28 @@ RMCTL_LDFLAGS := -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Name=rmct
                  -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
                  -X github.com/altessa-s/go-atlas-core/runtime/appinfo.Commit=$$(git rev-parse --short HEAD 2>/dev/null)
 
+.PHONY: pdfium
+pdfium: ## Fetch the PDFium build rendering links on Linux into PDFIUM_DIR (.cache/pdfium)
+	@case "$(UNAME_S)/$(UNAME_M)" in \
+	    Linux/x86_64) platform=linux-x64 ;; \
+	    Linux/aarch64 | Linux/arm64) platform=linux-arm64 ;; \
+	    *) echo "make pdfium is for Linux on x86_64 or arm64; on macOS rendering needs no PDFium, on Windows see docs/rendering.md" >&2; exit 1 ;; \
+	esac; \
+	go mod download github.com/altessa-s/rmrender-go && \
+	module=$$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go) && \
+	python3 "$$module/internal/clib/rmrender/scripts/fetch-pdfium.py" --platform "$$platform" --output "$(PDFIUM_DIR)"
+
 .PHONY: rmctl
-rmctl: ## Build the rmctl binary into bin/ with version information
-	@go build -trimpath -o bin/rmctl -ldflags "$(RMCTL_LDFLAGS)" ./cmd/rmctl
+rmctl: ## Build the rmctl binary into bin/ with version information (on Linux, run make pdfium first)
+	@go build -trimpath -o bin/rmctl -ldflags "$(RMCTL_LDFLAGS)" ./cmd/rmctl || { \
+	    status=$$?; \
+	    if [[ "$(UNAME_S)" == Linux && ! -f "$(PDFIUM_DIR)/include/fpdf_edit.h" ]]; then \
+	        echo "rendering on Linux needs PDFium and the Cairo stack's development packages (docs/rendering.md):" >&2; \
+	        echo "  make pdfium && make rmctl    fetches PDFium into $(PDFIUM_DIR) and builds against it" >&2; \
+	        echo "  make rmctl-lite              builds rmctl without rendering, which needs neither" >&2; \
+	    fi; \
+	    exit $$status; \
+	}
 
 # rmctl-lite is rmctl without the renderer: the norender tag leaves
 # rmrender-go, its fonts and the Cairo/PDFium stack out, and render says it is

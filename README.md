@@ -75,7 +75,7 @@ go install github.com/altessa-s/rmctl/cmd/rmctl@latest                 # rmctl
 go install -tags norender github.com/altessa-s/rmctl/cmd/rmctl@latest  # rmctl-lite
 ```
 
-`make rmctl` builds `bin/rmctl` from a checkout, with its version, and `make rmctl-lite` builds rmctl-lite there under the same name.
+`make rmctl` builds `bin/rmctl` from a checkout, with its version (on Linux after `make pdfium`, which fetches the PDFium rendering links; see [docs/rendering.md](docs/rendering.md)), and `make rmctl-lite` builds rmctl-lite there under the same name.
 
 Rendering is in the macOS, Linux and Windows builds of rmctl; what it needs on each platform and to build from source is in [docs/rendering.md](docs/rendering.md).
 
