@@ -258,6 +258,54 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 	}
 }
 
+// A PDF that holds a page that did not parse is never recorded, so an
+// incremental drawing draws it again, whatever the option for such pages,
+// which is no part of the record: a document without one is kept under any.
+func TestRenderTreeUnreadableIsNotRecorded(t *testing.T) {
+	t.Parallel()
+	f := treeSetup(t)
+	inc := port.RenderTreeOptions{Incremental: true}
+	draw := func(opts port.RenderOptions) port.RenderTreeReport {
+		t.Helper()
+		report, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", opts, inc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	f.renderer.Report = port.RenderReport{UnreadablePages: 1}
+	for range 2 {
+		if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 2 {
+			t.Fatalf("%q", rows(r))
+		}
+	}
+	if data, _ := f.files.File("out/" + render.ManifestName); strings.Contains(string(data), "Deep") {
+		t.Fatalf("recorded: %s", data)
+	}
+	// Once its pages read, the document is recorded and kept, under any
+	// option for the pages that do not.
+	f.renderer.Report = port.RenderReport{}
+	if r := draw(port.RenderOptions{Unreadable: port.UnreadableBlank}); r.Count(port.RenderRendered) != 2 {
+		t.Fatalf("%q", rows(r))
+	}
+	for _, u := range []port.Unreadable{port.UnreadablePlaceholder, port.UnreadableBlank, port.UnreadableStrict} {
+		if r := draw(port.RenderOptions{Unreadable: u}); r.Count(port.RenderUnchanged) != 2 {
+			t.Fatalf("%s: %q", u, rows(r))
+		}
+	}
+	// A recorded PDF drawn again with such a page loses its record.
+	if err := f.files.Remove("out/Deep.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	f.renderer.Report = port.RenderReport{UnreadablePages: 1}
+	if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 1 || r.Count(port.RenderUnchanged) != 1 {
+		t.Fatalf("%q", rows(r))
+	}
+	if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 1 {
+		t.Fatalf("%q", rows(r))
+	}
+}
+
 // A drawing under other options forgets the old record of a PDF before it
 // draws anything: stopped halfway, it never leaves a PDF of the new options
 // recorded under the old ones.

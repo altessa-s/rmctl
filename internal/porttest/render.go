@@ -18,11 +18,14 @@ import (
 // Renderer is the renderer double. A PDF is "PDF <id> <mode> <paper>", a
 // PNG "PNG <id> p<page> x<scale> <paper>", a JPEG "JPG <id> p<page>
 // x<scale> q<quality> <paper>" and an SVG "SVG <id> p<page> <paper>", with
-// " grain-<grain>" after for a grain other than the default and
-// " no-template" when the templates are left out, each followed by a
+// " grain-<grain>" after for a grain other than the default,
+// " unreadable-<policy>" for an unreadable page policy other than the
+// default and " no-template" when the templates are left out, each followed
+// by a
 // newline and the archive it was drawn from, so a test sees both what was
 // asked and what was drawn. Pages is how many pages every document has (0
-// is 3); Report is what a PDF reports beyond its pages. Unavailable makes
+// is 3); Report is what a PDF reports beyond its pages, and its
+// UnreadablePages what a page reports too. Unavailable makes
 // it a build without the renderer; Fail fails Render before it writes, and
 // FailIDs fails it for the documents it names alone; FailWritten fails it
 // once it has written the first line, as a drawing that stops partway.
@@ -87,12 +90,15 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		default:
 			head = fmt.Sprintf("PNG %s p%d x%g %s", id, opts.Page, opts.Scale, opts.Paper)
 		}
-		report = port.RenderReport{Pages: 1}
+		report = port.RenderReport{Pages: 1, UnreadablePages: r.Report.UnreadablePages}
 	} else {
 		report.Pages = pages
 	}
 	if opts.Grain != "" && opts.Grain != port.PDFGrainMask {
 		head += " grain-" + string(opts.Grain)
+	}
+	if opts.Unreadable != "" && opts.Unreadable != port.UnreadablePlaceholder {
+		head += " unreadable-" + string(opts.Unreadable)
 	}
 	if opts.NoTemplates {
 		head += " no-template"

@@ -3,5 +3,6 @@
   "pages": 12,
   "skipped_blocks": 2,
   "refused_pages": 1,
-  "links_dropped": 3
+  "links_dropped": 3,
+  "unreadable_pages": 2
 }

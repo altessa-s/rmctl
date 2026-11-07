@@ -9,7 +9,8 @@
       "pages": 4,
       "skipped_blocks": 2,
       "refused_pages": 0,
-      "links_dropped": 1
+      "links_dropped": 1,
+      "unreadable_pages": 1
     },
     {
       "path": "out/B.pdf",
@@ -19,7 +20,8 @@
       "pages": 0,
       "skipped_blocks": 0,
       "refused_pages": 0,
-      "links_dropped": 0
+      "links_dropped": 0,
+      "unreadable_pages": 0
     },
     {
       "path": "out/Sub/C.pdf",
@@ -30,6 +32,7 @@
       "skipped_blocks": 0,
       "refused_pages": 0,
       "links_dropped": 0,
+      "unreadable_pages": 0,
       "error": "C: refused: pages moved"
     }
   ],

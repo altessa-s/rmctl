@@ -75,7 +75,8 @@ func New(
 }
 
 // Normalized is opts with the defaults filled in, or ErrBadOptions: a
-// page below 0, a format, mode, grain or paper not known, a PDF of one page
+// page below 0, a format, mode, grain, paper or unreadable page policy not
+// known, a PDF of one page
 // or an image of the whole document, a scale out of (0, MaxScale] or asked
 // of anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or
 // asked of anything but a JPEG, or a mode or a grain asked of an image.
@@ -83,11 +84,9 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	if opts.Page < 0 {
 		return opts, fmt.Errorf("%w: page %d: pages count from 1", ErrBadOptions, opts.Page)
 	}
-	if opts.Paper == "" {
-		opts.Paper = port.PaperA4
-	}
-	if !slices.Contains([]port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}, opts.Paper) {
-		return opts, fmt.Errorf("%w: unknown paper %q", ErrBadOptions, opts.Paper)
+	opts, err := pageOptions(opts)
+	if err != nil {
+		return opts, err
 	}
 	opts.Format = format(opts)
 	if !slices.Contains([]port.Format{port.FormatPDF, port.FormatPNG, port.FormatJPEG, port.FormatSVG}, opts.Format) {
@@ -140,6 +139,25 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	}
 	if opts.Scale < 0 || opts.Scale > MaxScale {
 		return opts, fmt.Errorf("%w: scale %g is outside (0, %g]", ErrBadOptions, opts.Scale, MaxScale)
+	}
+	return opts, nil
+}
+
+// pageOptions is opts with the defaults of what every format draws its pages
+// with filled in, the paper and the policy for unreadable pages, or
+// ErrBadOptions for one not known.
+func pageOptions(opts port.RenderOptions) (port.RenderOptions, error) {
+	if opts.Paper == "" {
+		opts.Paper = port.PaperA4
+	}
+	if !slices.Contains([]port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}, opts.Paper) {
+		return opts, fmt.Errorf("%w: unknown paper %q", ErrBadOptions, opts.Paper)
+	}
+	if opts.Unreadable == "" {
+		opts.Unreadable = port.UnreadablePlaceholder
+	}
+	if !slices.Contains([]port.Unreadable{port.UnreadablePlaceholder, port.UnreadableBlank, port.UnreadableStrict}, opts.Unreadable) {
+		return opts, fmt.Errorf("%w: unknown unreadable page policy %q", ErrBadOptions, opts.Unreadable)
 	}
 	return opts, nil
 }

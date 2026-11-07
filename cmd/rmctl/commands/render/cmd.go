@@ -18,12 +18,13 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// The values --mode, --grain and --paper take, the first of each the
-// default.
+// The values --mode, --grain, --paper and --unreadable-pages take, the
+// first of each the default.
 var (
-	modes  = []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed} //nolint:gochecknoglobals // a fixed list
-	grains = []port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup}                //nolint:gochecknoglobals // a fixed list
-	papers = []port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}        //nolint:gochecknoglobals // a fixed list
+	modes       = []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed}                      //nolint:gochecknoglobals // a fixed list
+	grains      = []port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup}                                     //nolint:gochecknoglobals // a fixed list
+	papers      = []port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}                             //nolint:gochecknoglobals // a fixed list
+	unreadables = []port.Unreadable{port.UnreadablePlaceholder, port.UnreadableBlank, port.UnreadableStrict} //nolint:gochecknoglobals // a fixed list
 )
 
 // formats are the values --format takes and the extensions of -o that
@@ -39,20 +40,21 @@ var (
 
 // renderView is what render wrote, for --json.
 type renderView struct {
-	Path          string `json:"path"`
-	Pages         int    `json:"pages"`
-	SkippedBlocks int    `json:"skipped_blocks"`
-	RefusedPages  int    `json:"refused_pages"`
-	LinksDropped  int    `json:"links_dropped"`
+	Path            string `json:"path"`
+	Pages           int    `json:"pages"`
+	SkippedBlocks   int    `json:"skipped_blocks"`
+	RefusedPages    int    `json:"refused_pages"`
+	LinksDropped    int    `json:"links_dropped"`
+	UnreadablePages int    `json:"unreadable_pages"`
 }
 
 // flags are what render is asked.
 type flags struct {
-	dest, format, mode, grain, paper, id string
-	page, quality                        int
-	noTemplate                           bool
-	scale                                float64
-	tree                                 port.RenderTreeOptions
+	dest, format, mode, grain, paper, id, unreadable string
+	page, quality                                    int
+	noTemplate                                       bool
+	scale                                            float64
+	tree                                             port.RenderTreeOptions
 }
 
 // New returns the render command. It changes nothing; a local archive needs
@@ -93,6 +95,16 @@ func New(env *cliutil.Env) *cobra.Command {
 			--quality is a JPEG's, from 1 to 100; 0, the default, is the renderer's
 			own, 75.
 
+			--unreadable-pages is what becomes of a page whose .rm file is in the
+			document but does not parse, damaged or written by a newer tablet than
+			this rmctl reads: placeholder, the default, draws "Rendering error" in
+			the middle of the page, on a plain sheet in a notebook or over the
+			original page of a PDF; blank draws it as a page nobody wrote on, on its
+			template or the original page without marks; strict fails, naming the
+			page. Either way the other pages are drawn as they are, and the answer
+			counts such pages as unreadable_pages. A page the tablet never wrote on
+			has no .rm file and is always drawn blank.
+
 			Without -o the file is written in the working directory under the
 			document's name: <name>-rendered.pdf, or <name>-p<N>.png, .jpg or .svg
 			for a page; a directory takes that name inside it. The file appears
@@ -104,7 +116,8 @@ func New(env *cliutil.Env) *cobra.Command {
 			or remarkable for "/", in the working directory. Each document becomes
 			<folder path>/<name>.pdf; two names that collide in one directory get
 			the first 8 characters of the later one's id in brackets. --mode,
-			--grain, --paper and --no-template apply to every document; --page,
+			--grain, --paper, --no-template and --unreadable-pages apply to every
+			document; --page,
 			--scale, --quality and image formats do not. Documents in the trash are
 			left out unless --all. The directory keeps .rmctl-render.json, a record
 			of what each PDF was drawn from and with which --mode, --grain, --paper
@@ -112,6 +125,8 @@ func New(env *cliutil.Env) *cobra.Command {
 			the document's modification time, which each PDF written takes, and
 			which that record shows drawn from the same document with the same
 			options; other options, or a record missing or damaged, draw it again.
+			A PDF that holds an unreadable page is not recorded, so --incremental
+			draws its document every time, until a page reads.
 			--jobs is how many documents are drawn at a time. A document that
 			fails is reported and the others go on; the answer is a row per
 			document (rendered, unchanged or failed) and the totals, and the
@@ -132,6 +147,7 @@ func New(env *cliutil.Env) *cobra.Command {
 			rmctl render /Notes/Meeting --paper letter
 			rmctl render /Books/Paper --mode preserving
 			rmctl render /Notes/Sketches --grain group
+			rmctl render /Notes/Meeting --unreadable-pages strict
 			rmctl render 3f2a --page 3 --scale 2 -o page3.png
 			rmctl render 3f2a --page 3 --format jpg --quality 90
 			rmctl render /Notes/Meeting --page 1 -o page1.svg --no-template
@@ -189,6 +205,7 @@ func New(env *cliutil.Env) *cobra.Command {
 	fl.Float64Var(&f.scale, "scale", 1, "pixels per tablet unit of a PNG or a JPEG: 1 is 1404 pixels across")
 	fl.IntVar(&f.quality, "quality", 0, "quality of a JPEG, 1 to 100 (default: 0, the renderer's, 75)")
 	fl.BoolVar(&f.noTemplate, "no-template", false, "draw the pages without their templates")
+	fl.StringVar(&f.unreadable, "unreadable-pages", string(port.UnreadablePlaceholder), "a page that does not parse: placeholder, blank or strict")
 	fl.StringVar(&f.id, "id", "", "the document of a local archive that holds several: an id or a unique prefix")
 	fl.BoolVarP(&f.tree.All, "all", "a", false, "with a folder: draw the documents in the trash too")
 	fl.BoolVar(&f.tree.Incremental, "incremental", false, "with a folder: skip a document whose PDF is there, drawn from it as it is with these options")
@@ -202,16 +219,17 @@ func (f *flags) answer(cmd *cobra.Command, env *cliutil.Env, report port.RenderR
 	if err != nil {
 		return cliutil.PagesErr("render", err)
 	}
-	notes(cmd.ErrOrStderr(), "", report)
+	notes(cmd.ErrOrStderr(), "", report, port.Unreadable(strings.ToLower(f.unreadable)))
 	return env.Emit(cmd, output.Fields(renderView{
 		Path: report.Path, Pages: report.Pages, SkippedBlocks: report.SkippedBlocks,
-		RefusedPages: report.RefusedPages, LinksDropped: report.LinksDropped,
+		RefusedPages: report.RefusedPages, LinksDropped: report.LinksDropped, UnreadablePages: report.UnreadablePages,
 	},
 		output.Field{Key: "path", Value: output.Path(report.Path)},
 		output.Field{Key: "pages", Value: output.Count(report.Pages)},
 		output.Field{Key: "skipped_blocks", Value: output.Count(report.SkippedBlocks)},
 		output.Field{Key: "refused_pages", Value: output.Count(report.RefusedPages)},
-		output.Field{Key: "links_dropped", Value: output.Count(report.LinksDropped)}))
+		output.Field{Key: "links_dropped", Value: output.Count(report.LinksDropped)},
+		output.Field{Key: "unreadable_pages", Value: output.Count(report.UnreadablePages)}))
 }
 
 // treeFlags are the flags for a folder alone.
@@ -245,7 +263,7 @@ func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Renderin
 	}
 	w := cmd.ErrOrStderr()
 	for _, d := range report.Documents {
-		notes(w, d.LibraryPath+": ", d.Report)
+		notes(w, d.LibraryPath+": ", d.Report, opts.Unreadable)
 	}
 	if len(report.Documents) == 0 && !env.JSON(cmd) {
 		cliutil.Notef(w, "no document to draw below %s", query)
@@ -267,15 +285,16 @@ type treeView struct {
 
 // treeDocument is one document of a folder drawn.
 type treeDocument struct {
-	Path          string `json:"path"`
-	Document      string `json:"document"`
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	Pages         int    `json:"pages"`
-	SkippedBlocks int    `json:"skipped_blocks"`
-	RefusedPages  int    `json:"refused_pages"`
-	LinksDropped  int    `json:"links_dropped"`
-	Error         string `json:"error,omitempty"`
+	Path            string `json:"path"`
+	Document        string `json:"document"`
+	ID              string `json:"id"`
+	Status          string `json:"status"`
+	Pages           int    `json:"pages"`
+	SkippedBlocks   int    `json:"skipped_blocks"`
+	RefusedPages    int    `json:"refused_pages"`
+	LinksDropped    int    `json:"links_dropped"`
+	UnreadablePages int    `json:"unreadable_pages"`
+	Error           string `json:"error,omitempty"`
 }
 
 // treeResult is one row per document, then the totals.
@@ -295,6 +314,7 @@ func treeResult(r port.RenderTreeReport) output.Result {
 		dv := treeDocument{
 			Path: d.Report.Path, Document: d.LibraryPath, ID: string(d.Document.ID), Status: string(d.Status), Pages: d.Report.Pages,
 			SkippedBlocks: d.Report.SkippedBlocks, RefusedPages: d.Report.RefusedPages, LinksDropped: d.Report.LinksDropped,
+			UnreadablePages: d.Report.UnreadablePages,
 		}
 		pages := output.Count(d.Report.Pages)
 		if d.Status != port.RenderRendered {
@@ -322,9 +342,15 @@ func treeResult(r port.RenderTreeReport) output.Result {
 // combination that cannot be drawn.
 func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 	changed := cmd.Flags().Changed
-	opts := port.RenderOptions{Paper: port.Paper(strings.ToLower(f.paper)), Document: f.id, NoTemplates: f.noTemplate}
+	opts := port.RenderOptions{
+		Paper: port.Paper(strings.ToLower(f.paper)), Document: f.id, NoTemplates: f.noTemplate,
+		Unreadable: port.Unreadable(strings.ToLower(f.unreadable)),
+	}
 	if !slices.Contains(papers, opts.Paper) {
 		return opts, cliutil.Usagef("render: unknown --paper %q: use a4, letter or tablet", f.paper)
+	}
+	if !slices.Contains(unreadables, opts.Unreadable) {
+		return opts, cliutil.Usagef("render: unknown --unreadable-pages %q: use placeholder, blank or strict", f.unreadable)
 	}
 	format, err := f.chosenFormat(changed)
 	if err != nil {
@@ -394,13 +420,20 @@ func (f *flags) chosenFormat(changed func(string) bool) (port.Format, error) {
 }
 
 // notes says on w what the drawing could not keep, each line after
-// prefix.
-func notes(w io.Writer, prefix string, r port.RenderReport) {
+// prefix; unreadable is what became of a page that does not parse.
+func notes(w io.Writer, prefix string, r port.RenderReport, unreadable port.Unreadable) {
 	if r.SkippedBlocks > 0 {
 		cliutil.Notef(w, "%s%d blocks of the pages did not parse and were left out", prefix, r.SkippedBlocks)
 	}
 	if r.RefusedPages > 0 {
 		cliutil.Notef(w, "%s%d pages name a page the original PDF does not have; they are drawn without it", prefix, r.RefusedPages)
+	}
+	if r.UnreadablePages > 0 {
+		drawn := `with "Rendering error" in their place`
+		if unreadable == port.UnreadableBlank {
+			drawn = "as pages nobody wrote on"
+		}
+		cliutil.Notef(w, "%s%d pages do not parse and are drawn %s; --unreadable-pages strict fails on them instead", prefix, r.UnreadablePages, drawn)
 	}
 	if r.LinksDropped > 0 {
 		cliutil.Notef(w, "%s%d links of the original PDF could not be carried over; --mode preserving or recomposed keeps them", prefix, r.LinksDropped)

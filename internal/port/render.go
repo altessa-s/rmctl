@@ -45,6 +45,26 @@ const (
 	PDFGrainGroup PDFGrain = "group"
 )
 
+// Unreadable is what a rendering does with an unreadable page: one whose .rm
+// file is in the document but does not parse, because it is truncated,
+// malformed or of a version this build does not read. A page without a .rm
+// file is not one: the tablet writes none for a page nobody wrote on, and
+// it is drawn as an empty page on its template.
+type Unreadable string
+
+// The ways of drawing an unreadable page.
+const (
+	// UnreadablePlaceholder draws "Rendering error" in the middle of the
+	// page: on a plain sheet in a notebook, over the original page in a
+	// document made from a PDF.
+	UnreadablePlaceholder Unreadable = "placeholder"
+	// UnreadableBlank draws the page as one nobody wrote on: an empty page
+	// on its template, or the original page without marks.
+	UnreadableBlank Unreadable = "blank"
+	// UnreadableStrict fails the rendering, naming the page.
+	UnreadableStrict Unreadable = "strict"
+)
+
 // Format is what a rendering is drawn as: the whole document as a PDF, or
 // one page as an image.
 type Format string
@@ -94,6 +114,9 @@ type RenderOptions struct {
 	Quality int
 	// NoTemplates draws the pages without their templates.
 	NoTemplates bool
+	// Unreadable is what an unreadable page becomes; empty is
+	// UnreadablePlaceholder.
+	Unreadable Unreadable
 	// Document names the document of a local archive that holds several:
 	// an identifier or a unique prefix of one.
 	Document string
@@ -107,8 +130,9 @@ type RenderReport struct {
 	// SkippedBlocks counts the blocks of pages that did not parse and were
 	// left out; RefusedPages the pages naming a page the imported PDF does
 	// not have; LinksDropped the links of an imported PDF a fresh PDF could
-	// not carry over.
-	SkippedBlocks, RefusedPages, LinksDropped int
+	// not carry over; UnreadablePages the pages that did not parse at all,
+	// drawn as RenderOptions.Unreadable says.
+	SkippedBlocks, RefusedPages, LinksDropped, UnreadablePages int
 }
 
 // Renderer draws documents packed as .rmdoc archives. A build without the
@@ -120,10 +144,11 @@ type Renderer interface {
 	// Render draws the document id of the archive (the first one when id
 	// is empty), which the caller has found in it, into w: the page
 	// opts.Page as the image opts.Format names, or the whole document as a
-	// PDF, written as it is produced. Format, Mode, Grain, Paper and Scale
-	// are set. A page beyond the document's is domain.ErrNoSuchPage. On
-	// failure w may have received part of the drawing, which the caller
-	// discards.
+	// PDF, written as it is produced. Format, Mode, Grain, Paper, Scale and
+	// Unreadable are set. A page beyond the document's is
+	// domain.ErrNoSuchPage; an unreadable page under UnreadableStrict is
+	// domain.ErrUnreadablePage. On failure w may have received part of the
+	// drawing, which the caller discards.
 	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions, w io.Writer) (RenderReport, error)
 }
 
