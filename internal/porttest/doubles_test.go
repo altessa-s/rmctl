@@ -263,6 +263,15 @@ func TestRenderer(t *testing.T) {
 	if err != nil || out.String() != "PDF d1 pages a4 grain-group no-template\narchive" || rep.Pages != 3 {
 		t.Fatalf("%q %+v %v", out.String(), rep, err)
 	}
+	// The default policy for unreadable pages is left out; another is
+	// named, and a page reports the unreadable pages the PDF would.
+	out.Reset()
+	r.Report.UnreadablePages = 1
+	rep, err = r.Render(ctx, nil, "d1", port.RenderOptions{Page: 1, Paper: "a4", Unreadable: port.UnreadableStrict}, &out)
+	if err != nil || out.String() != "PNG d1 p1 x0 a4 unreadable-strict\n" || rep.Pages != 1 || rep.UnreadablePages != 1 {
+		t.Fatalf("%q %+v %v", out.String(), rep, err)
+	}
+	r.Report.UnreadablePages = 0
 	for format, want := range map[port.Format]string{
 		port.FormatPNG:  "PNG d1 p2 x1.5 a4",
 		port.FormatJPEG: "JPG d1 p2 x1.5 q80 a4",
@@ -277,7 +286,7 @@ func TestRenderer(t *testing.T) {
 	if _, err := r.Render(ctx, nil, "d1", port.RenderOptions{Page: 4}, io.Discard); !errors.Is(err, domain.ErrNoSuchPage) {
 		t.Fatalf("a page past the last: %v", err)
 	}
-	if calls := r.Calls(); len(calls) != 4 || !strings.HasPrefix(calls[0], "PDF d1") {
+	if calls := r.Calls(); len(calls) != 5 || !strings.HasPrefix(calls[0], "PDF d1") {
 		t.Fatalf("%v", calls)
 	}
 

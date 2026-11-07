@@ -222,14 +222,24 @@ func (s *Service) RenderTree(
 }
 
 // record adds the documents drawn to the manifest of dir, recorded, and
-// writes it, if any was.
+// writes it, if any was. A PDF holding a page that did not parse is left
+// out, its record dropped: what stands in that page's place is not the
+// document as it is, and an incremental drawing draws it again, which a
+// later rmctl may read. So the policy for such pages is no part of the
+// options recorded: it changes no PDF that is recorded.
 func (s *Service) record(ctx context.Context, dir string, recorded map[string]manifestEntry, docs []port.RenderedDocument, opts string) error {
 	drawn := false
 	for _, d := range docs {
-		if d.Status == port.RenderRendered && !d.Document.Modified.IsZero() {
-			recorded[manifestKey(dir, d.Report.Path)] = entryOf(d.Document, opts)
-			drawn = true
+		if d.Status != port.RenderRendered || d.Document.Modified.IsZero() {
+			continue
 		}
+		key := manifestKey(dir, d.Report.Path)
+		if d.Report.UnreadablePages > 0 {
+			delete(recorded, key)
+		} else {
+			recorded[key] = entryOf(d.Document, opts)
+		}
+		drawn = true
 	}
 	if !drawn {
 		return nil

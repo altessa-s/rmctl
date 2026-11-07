@@ -47,6 +47,10 @@ var (
 	ErrAnnotationsDropped = errors.New("the new PDF has fewer pages, and pages it no longer has carry annotations; pass --drop-annotations to drop them")
 	// ErrNoSuchPage means a page number is beyond a document's pages.
 	ErrNoSuchPage = errors.New("no such page")
+	// ErrUnreadablePage means a page of a document drawn does not parse,
+	// and the drawing was asked to fail on one; its words say how to draw
+	// the document anyway, after the page and why it cannot be read.
+	ErrUnreadablePage = errors.New("--unreadable-pages placeholder or blank draws the rest of the document")
 	// ErrFolderTags means tags were asked of a folder: the tablet tags
 	// documents and their pages, and a folder's .content holds no tags.
 	ErrFolderTags = errors.New("a folder takes no tags; tag the documents in it")

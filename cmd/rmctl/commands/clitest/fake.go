@@ -379,6 +379,9 @@ func renderArgs(from, dest string, o port.RenderOptions) []string {
 	if o.NoTemplates {
 		args = append(args, "no-template")
 	}
+	if o.Unreadable != "" && o.Unreadable != port.UnreadablePlaceholder {
+		args = append(args, "unreadable="+string(o.Unreadable))
+	}
 	if o.Document != "" {
 		args = append(args, "id="+o.Document)
 	}

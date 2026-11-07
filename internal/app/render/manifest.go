@@ -46,7 +46,8 @@ type manifestEntry struct {
 // fingerprint names the options a folder's PDF is drawn with, which an
 // incremental drawing must find the same to keep the PDF. The default
 // grain adds nothing, so the records written before there was a choice
-// still hold.
+// still hold. What becomes of a page that does not parse is left out: a PDF
+// holding such a page is never recorded (see Service.record).
 func fingerprint(opts port.RenderOptions) string {
 	templates := "templates"
 	if opts.NoTemplates {

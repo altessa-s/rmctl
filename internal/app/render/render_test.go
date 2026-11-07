@@ -331,7 +331,19 @@ func TestNormalized(t *testing.T) {
 			port.RenderOptions{Page: 2, Format: port.FormatJPEG, Paper: port.PaperA4, Scale: render.DefaultScale, Quality: render.MaxQuality},
 		},
 		{port.RenderOptions{Page: 2, Format: port.FormatSVG}, port.RenderOptions{Page: 2, Format: port.FormatSVG, Paper: port.PaperA4}},
+		{
+			port.RenderOptions{Unreadable: port.UnreadableStrict},
+			port.RenderOptions{Format: port.FormatPDF, Mode: port.PDFFresh, Grain: port.PDFGrainMask, Paper: port.PaperA4, Unreadable: port.UnreadableStrict},
+		},
+		{
+			port.RenderOptions{Page: 2, Format: port.FormatSVG, Unreadable: port.UnreadableBlank},
+			port.RenderOptions{Page: 2, Format: port.FormatSVG, Paper: port.PaperA4, Unreadable: port.UnreadableBlank},
+		},
 	} {
+		// An unreadable page is a placeholder unless said otherwise.
+		if c.want.Unreadable == "" {
+			c.want.Unreadable = port.UnreadablePlaceholder
+		}
 		if got, err := render.Normalized(c.in); err != nil || got != c.want {
 			t.Errorf("%+v: %+v %v", c.in, got, err)
 		}
@@ -341,6 +353,8 @@ func TestNormalized(t *testing.T) {
 		{Paper: "a3"},
 		{Mode: "draft"},
 		{Grain: "fine"},
+		{Unreadable: "skip"},
+		{Page: 1, Unreadable: "Strict"},
 		{Scale: 2},
 		{Page: 1, Mode: port.PDFFresh},
 		{Page: 1, Scale: -1},
