@@ -27,6 +27,7 @@ watch                       # Live notifications
 archives                    # Local .rmdoc archives, offline
 inspect                     # Protocol diagnostics (rmctl debug ...)
 pages                       # Page text, highlights, unmark and notebooks from text
+render                      # Drawing documents and folders to PDF, images and SVG (render, renderer)
 
 # Adapters (internal)
 cloud                       # The reMarkable cloud through rmcloud-go
