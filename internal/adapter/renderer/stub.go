@@ -8,6 +8,7 @@ package renderer
 
 import (
 	"context"
+	"io"
 
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
@@ -29,6 +30,6 @@ func New() *Renderer { return &Renderer{} }
 func (*Renderer) Available() error { return errNoRender }
 
 // Render implements port.Renderer.
-func (*Renderer) Render(context.Context, []byte, domain.ItemID, port.RenderOptions) ([]byte, port.RenderReport, error) {
-	return nil, port.RenderReport{}, errNoRender
+func (*Renderer) Render(context.Context, []byte, domain.ItemID, port.RenderOptions, io.Writer) (port.RenderReport, error) {
+	return port.RenderReport{}, errNoRender
 }

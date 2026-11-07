@@ -315,12 +315,20 @@ func TestRenderTreeFailedDocumentsGoOn(t *testing.T) {
 			f.files.Fail["ModTime"] = errBoom
 		}},
 		{"set the modification time", func(f fixture) { f.files.Fail["SetModTime"] = errBoom }},
+		{"drawing partway", func(f fixture) { f.renderer.FailWritten = errBoom }},
 	} {
 		f := treeSetup(t)
 		c.set(f)
 		report, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{}, port.RenderTreeOptions{Incremental: true})
 		if !errors.Is(err, render.ErrDocumentsFailed) || report.Count(port.RenderFailed) != 2 || !errors.Is(report.Documents[0].Err, errBoom) {
 			t.Fatalf("%s: %v %q", c.name, err, rows(report))
+		}
+		if c.name == "drawing partway" {
+			for _, d := range report.Documents {
+				if _, ok := f.files.File(d.Report.Path); ok {
+					t.Fatalf("%s: %s was written", c.name, d.Report.Path)
+				}
+			}
 		}
 	}
 }

@@ -42,7 +42,7 @@ func TestRenderPDF(t *testing.T) {
 	}
 	for _, m := range []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed} {
 		for _, p := range []port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet} {
-			out, report, err := r.Render(t.Context(), notes(t), "", port.RenderOptions{Mode: m, Paper: p})
+			out, report, err := draw(t.Context(), r, notes(t), "", port.RenderOptions{Mode: m, Paper: p})
 			if err != nil || !bytes.HasPrefix(out, []byte("%PDF-")) || report.Pages != 3 || report.SkippedBlocks != 0 {
 				t.Fatalf("%s %s: %+v %v", m, p, report, err)
 			}
@@ -55,7 +55,7 @@ func TestRenderPDFGrain(t *testing.T) {
 	t.Parallel()
 	r := New()
 	for _, g := range []port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup} {
-		out, report, err := r.Render(t.Context(), notes(t), "", port.RenderOptions{Grain: g, Paper: port.PaperA4})
+		out, report, err := draw(t.Context(), r, notes(t), "", port.RenderOptions{Grain: g, Paper: port.PaperA4})
 		if err != nil || !bytes.HasPrefix(out, []byte("%PDF-")) || report.Pages != 3 {
 			t.Fatalf("%s: %+v %v", g, report, err)
 		}
@@ -69,7 +69,7 @@ func TestRenderPNG(t *testing.T) {
 		scale float64
 		width int
 	}{{1, 1404}, {0.5, 702}} {
-		out, report, err := r.Render(t.Context(), notes(t), "a1b2", port.RenderOptions{Page: 2, Scale: c.scale, Paper: port.PaperA4})
+		out, report, err := draw(t.Context(), r, notes(t), "a1b2", port.RenderOptions{Page: 2, Scale: c.scale, Paper: port.PaperA4})
 		if err != nil || report.Pages != 1 {
 			t.Fatalf("%+v %v", report, err)
 		}
@@ -89,7 +89,7 @@ func TestRenderJPEG(t *testing.T) {
 		width   int
 	}{{1, 0, 1404}, {0.5, 90, 702}} {
 		opts := port.RenderOptions{Page: 2, Format: port.FormatJPEG, Scale: c.scale, Quality: c.quality, Paper: port.PaperA4}
-		out, report, err := r.Render(t.Context(), notes(t), "", opts)
+		out, report, err := draw(t.Context(), r, notes(t), "", opts)
 		if err != nil || report.Pages != 1 {
 			t.Fatalf("%+v %v", report, err)
 		}
@@ -102,7 +102,7 @@ func TestRenderJPEG(t *testing.T) {
 
 func TestRenderSVG(t *testing.T) {
 	t.Parallel()
-	out, report, err := New().Render(t.Context(), notes(t), "", port.RenderOptions{Page: 3, Format: port.FormatSVG, Paper: port.PaperA4})
+	out, report, err := draw(t.Context(), New(), notes(t), "", port.RenderOptions{Page: 3, Format: port.FormatSVG, Paper: port.PaperA4})
 	if err != nil || report.Pages != 1 {
 		t.Fatalf("%+v %v", report, err)
 	}
@@ -137,12 +137,12 @@ func TestRenderNoTemplates(t *testing.T) {
 		{Page: 1, Format: port.FormatJPEG, Scale: 0.5, Paper: port.PaperA4},
 		{Page: 1, Format: port.FormatSVG, Paper: port.PaperA4},
 	} {
-		with, _, err := r.Render(t.Context(), notes(t), "", opts)
+		with, _, err := draw(t.Context(), r, notes(t), "", opts)
 		if err != nil {
 			t.Fatalf("%+v: %v", opts, err)
 		}
 		opts.NoTemplates = true
-		without, _, err := r.Render(t.Context(), notes(t), "", opts)
+		without, _, err := draw(t.Context(), r, notes(t), "", opts)
 		if err != nil {
 			t.Fatalf("%+v: %v", opts, err)
 		}
@@ -170,10 +170,10 @@ func TestRenderNoTemplates(t *testing.T) {
 func TestRenderFails(t *testing.T) {
 	t.Parallel()
 	r := New()
-	if _, _, err := r.Render(t.Context(), notes(t), "", port.RenderOptions{Page: 4, Scale: 1}); !errors.Is(err, domain.ErrNoSuchPage) {
+	if _, _, err := draw(t.Context(), r, notes(t), "", port.RenderOptions{Page: 4, Scale: 1}); !errors.Is(err, domain.ErrNoSuchPage) {
 		t.Fatalf("page 4 of 3: %v", err)
 	}
-	if _, _, err := r.Render(t.Context(), []byte("not an archive"), "", port.RenderOptions{}); !errors.Is(err, rmrender.ErrInvalidArgument) {
+	if _, _, err := draw(t.Context(), r, []byte("not an archive"), "", port.RenderOptions{}); !errors.Is(err, rmrender.ErrInvalidArgument) {
 		t.Fatalf("not an archive: %v", err)
 	}
 	// A canceled context stops the drawing and says why.
@@ -183,7 +183,54 @@ func TestRenderFails(t *testing.T) {
 	for _, opts := range []port.RenderOptions{
 		{}, {Page: 1, Scale: 1}, {Page: 1, Format: port.FormatJPEG, Scale: 1}, {Page: 1, Format: port.FormatSVG},
 	} {
-		if _, _, err := r.Render(ctx, notes(t), "", opts); !errors.Is(err, cause) {
+		if _, _, err := draw(ctx, r, notes(t), "", opts); !errors.Is(err, cause) {
+			t.Fatalf("%+v: %v", opts, err)
+		}
+	}
+}
+
+// draw is r.Render into memory.
+func draw(ctx context.Context, r *Renderer, archive []byte, id domain.ItemID, opts port.RenderOptions) ([]byte, port.RenderReport, error) {
+	var b bytes.Buffer
+	report, err := r.Render(ctx, archive, id, opts, &b)
+	return b.Bytes(), report, err
+}
+
+// writes counts what it is written, failing every write with fail once
+// failAt writes (from 1) have been made.
+type writes struct {
+	bytes.Buffer
+	count, failAt int
+	fail          error
+}
+
+func (w *writes) Write(p []byte) (int, error) {
+	w.count++
+	if w.failAt != 0 && w.count >= w.failAt {
+		return 0, w.fail
+	}
+	return w.Buffer.Write(p)
+}
+
+// A PDF goes to the writer as it is drawn, up to MaxPDFBytes rather than
+// rmrender-go's in-memory default, and the writer's failure is the
+// drawing's.
+func TestRenderPDFWrites(t *testing.T) {
+	t.Parallel()
+	if MaxPDFBytes <= rmrender.DefaultLimits().MaximumPDFBytes {
+		t.Fatalf("MaxPDFBytes %d", MaxPDFBytes)
+	}
+	r := New()
+	var w writes
+	report, err := r.Render(t.Context(), notes(t), "", port.RenderOptions{Paper: port.PaperA4}, &w)
+	if err != nil || report.Pages != 3 || w.count == 0 || !bytes.HasPrefix(w.Bytes(), []byte("%PDF-")) ||
+		!bytes.HasSuffix(w.Bytes(), []byte("%%EOF\n")) {
+		t.Fatalf("%+v %v: %d writes", report, err, w.count)
+	}
+	full := errors.New("disk full")
+	for _, opts := range []port.RenderOptions{{Paper: port.PaperA4}, {Page: 1, Scale: 0.25, Paper: port.PaperA4}} {
+		failing := writes{failAt: 1, fail: full}
+		if _, err := r.Render(t.Context(), notes(t), "", opts, &failing); !errors.Is(err, full) {
 			t.Fatalf("%+v: %v", opts, err)
 		}
 	}
