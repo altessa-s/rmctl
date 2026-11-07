@@ -5,6 +5,7 @@
 package porttest_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -257,21 +258,23 @@ func TestRenderer(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	r := &porttest.Renderer{Report: port.RenderReport{Pages: 9}}
-	out, rep, err := r.Render(ctx, []byte("archive"), "d1", port.RenderOptions{Mode: "pages", Grain: "group", Paper: "a4", NoTemplates: true})
-	if err != nil || string(out) != "PDF d1 pages a4 grain-group no-template\narchive" || rep.Pages != 3 {
-		t.Fatalf("%q %+v %v", out, rep, err)
+	var out bytes.Buffer
+	rep, err := r.Render(ctx, []byte("archive"), "d1", port.RenderOptions{Mode: "pages", Grain: "group", Paper: "a4", NoTemplates: true}, &out)
+	if err != nil || out.String() != "PDF d1 pages a4 grain-group no-template\narchive" || rep.Pages != 3 {
+		t.Fatalf("%q %+v %v", out.String(), rep, err)
 	}
 	for format, want := range map[port.Format]string{
 		port.FormatPNG:  "PNG d1 p2 x1.5 a4",
 		port.FormatJPEG: "JPG d1 p2 x1.5 q80 a4",
 		port.FormatSVG:  "SVG d1 p2 a4",
 	} {
-		out, rep, err := r.Render(ctx, nil, "d1", port.RenderOptions{Page: 2, Format: format, Scale: 1.5, Quality: 80, Paper: "a4"})
-		if err != nil || string(out) != want+"\n" || rep.Pages != 1 {
-			t.Errorf("%s: %q %+v %v", format, out, rep, err)
+		out.Reset()
+		rep, err := r.Render(ctx, nil, "d1", port.RenderOptions{Page: 2, Format: format, Scale: 1.5, Quality: 80, Paper: "a4"}, &out)
+		if err != nil || out.String() != want+"\n" || rep.Pages != 1 {
+			t.Errorf("%s: %q %+v %v", format, out.String(), rep, err)
 		}
 	}
-	if _, _, err := r.Render(ctx, nil, "d1", port.RenderOptions{Page: 4}); !errors.Is(err, domain.ErrNoSuchPage) {
+	if _, err := r.Render(ctx, nil, "d1", port.RenderOptions{Page: 4}, io.Discard); !errors.Is(err, domain.ErrNoSuchPage) {
 		t.Fatalf("a page past the last: %v", err)
 	}
 	if calls := r.Calls(); len(calls) != 4 || !strings.HasPrefix(calls[0], "PDF d1") {
@@ -279,23 +282,33 @@ func TestRenderer(t *testing.T) {
 	}
 
 	r.FailIDs = map[domain.ItemID]error{"bad": errBoom}
-	if _, _, err := r.Render(ctx, nil, "bad", port.RenderOptions{}); !errors.Is(err, errBoom) {
+	if _, err := r.Render(ctx, nil, "bad", port.RenderOptions{}, io.Discard); !errors.Is(err, errBoom) {
 		t.Fatalf("FailIDs: %v", err)
 	}
-	if _, _, err := r.Render(ctx, nil, "d1", port.RenderOptions{}); err != nil {
+	if _, err := r.Render(ctx, nil, "d1", port.RenderOptions{}, io.Discard); err != nil {
 		t.Fatalf("FailIDs failed another document: %v", err)
 	}
+	// A drawing that fails partway has written its first line.
+	partway := &porttest.Renderer{FailWritten: errBoom}
+	out.Reset()
+	if _, err := partway.Render(ctx, []byte("archive"), "d1", port.RenderOptions{Mode: "fresh"}, &out); !errors.Is(err, errBoom) || out.String() != "PDF d1 fresh \n" {
+		t.Fatalf("FailWritten: %q %v", out.String(), err)
+	}
+	// The writer's failure is the drawing's.
+	if _, err := (&porttest.Renderer{}).Render(ctx, nil, "d1", port.RenderOptions{}, failWriter{}); !errors.Is(err, errBoom) {
+		t.Fatalf("a failing writer: %v", err)
+	}
 	r.Fail = errBoom
-	if _, _, err := r.Render(ctx, nil, "d1", port.RenderOptions{}); !errors.Is(err, errBoom) {
+	if _, err := r.Render(ctx, nil, "d1", port.RenderOptions{}, io.Discard); !errors.Is(err, errBoom) {
 		t.Fatalf("Fail: %v", err)
 	}
 	cancelled, cancel := context.WithCancelCause(ctx)
 	cancel(errBoom)
-	if _, _, err := (&porttest.Renderer{}).Render(cancelled, nil, "d1", port.RenderOptions{}); !errors.Is(err, errBoom) {
+	if _, err := (&porttest.Renderer{}).Render(cancelled, nil, "d1", port.RenderOptions{}, io.Discard); !errors.Is(err, errBoom) {
 		t.Fatalf("a cancelled render: %v", err)
 	}
 	off := &porttest.Renderer{Unavailable: true}
-	if _, _, err := off.Render(ctx, nil, "d1", port.RenderOptions{}); !errors.Is(err, domain.ErrRenderUnsupported) || off.Available() == nil {
+	if _, err := off.Render(ctx, nil, "d1", port.RenderOptions{}, io.Discard); !errors.Is(err, domain.ErrRenderUnsupported) || off.Available() == nil {
 		t.Fatalf("unavailable: %v", err)
 	}
 }

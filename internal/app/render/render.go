@@ -233,16 +233,17 @@ func (s *Service) ready(opts port.RenderOptions) (port.RenderOptions, error) {
 	return opts, s.renderer.Available()
 }
 
-// draw renders the document it of archive and writes the result to path,
-// whole or not at all.
+// draw renders the document it of archive into path as it is drawn, whole
+// or not at all: the drawing goes to the file Produce stages beside path,
+// which takes its place only once the drawing has succeeded.
 func (s *Service) draw(ctx context.Context, archive []byte, it domain.Item, path string, opts port.RenderOptions) (port.RenderReport, error) {
-	out, report, err := s.renderer.Render(ctx, archive, it.ID, opts)
-	if err != nil {
-		return port.RenderReport{}, fmt.Errorf("%s: %w", it.Name, err)
-	}
-	err = s.files.Produce(ctx, path, func(w io.Writer) error {
-		_, werr := w.Write(out)
-		return werr
+	var report port.RenderReport
+	err := s.files.Produce(ctx, path, func(w io.Writer) error {
+		var rerr error
+		if report, rerr = s.renderer.Render(ctx, archive, it.ID, opts, w); rerr != nil {
+			return fmt.Errorf("%s: %w", it.Name, rerr)
+		}
+		return nil
 	})
 	if err != nil {
 		return port.RenderReport{}, err

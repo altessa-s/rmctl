@@ -193,6 +193,9 @@ func TestRenderFailures(t *testing.T) {
 		{"pack", func(f fixture) { f.archiver.Fail["WriteArchive"] = errBoom }},
 		{"open", func(f fixture) { f.files.Fail["Open"] = errBoom }},
 		{"render", func(f fixture) { f.renderer.Fail = errBoom }},
+		// A drawing that fails once it has written part of the file leaves
+		// none behind.
+		{"partway", func(f fixture) { f.renderer.FailWritten = errBoom }},
 		{"write", func(f fixture) { f.files.Fail["Produce"] = errBoom }},
 	} {
 		f := setup(t)

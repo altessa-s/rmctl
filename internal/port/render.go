@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"io"
 
 	"github.com/altessa-s/rmctl/internal/domain"
 )
@@ -117,11 +118,13 @@ type Renderer interface {
 	// nothing, so a caller fails before downloading anything.
 	Available() error
 	// Render draws the document id of the archive (the first one when id
-	// is empty), which the caller has found in it: the page opts.Page as
-	// the image opts.Format names, or the whole document as a PDF. Format,
-	// Mode, Grain, Paper and Scale are set. A page beyond the document's is
-	// domain.ErrNoSuchPage.
-	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions) ([]byte, RenderReport, error)
+	// is empty), which the caller has found in it, into w: the page
+	// opts.Page as the image opts.Format names, or the whole document as a
+	// PDF, written as it is produced. Format, Mode, Grain, Paper and Scale
+	// are set. A page beyond the document's is domain.ErrNoSuchPage. On
+	// failure w may have received part of the drawing, which the caller
+	// discards.
+	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions, w io.Writer) (RenderReport, error)
 }
 
 // RenderTreeOptions shape the drawing of every document below a folder.
