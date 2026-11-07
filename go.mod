@@ -11,7 +11,7 @@ require (
 	github.com/altessa-s/rmcloud-go v1.0.0
 	github.com/altessa-s/rmdoc-go v1.1.0
 	github.com/altessa-s/rmlines-go v1.1.2
-	github.com/altessa-s/rmrender-go v1.4.2-0.20261107063839-22e4dba1a28d
+	github.com/altessa-s/rmrender-go v1.4.2-0.20261107064425-f22f321d3357
 	github.com/coder/websocket v1.8.15
 	github.com/keybase/go-keychain v0.0.1
 	github.com/mattn/go-runewidth v0.0.31
