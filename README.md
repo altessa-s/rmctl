@@ -23,7 +23,7 @@ rmctl find 'go|rust' --tag reading --json
 - **[Notebooks from Markdown](docs/pages-and-archives.md#pages):** `put --notebook` turns a `.md` or `.txt` file into a notebook of typed text laid out for the tablet (`rm2`, `pure`, `pro`, `move`).
 - **[Typed text and highlights](docs/pages-and-archives.md#pages):** `text` and `highlights` as plain text, Markdown or JSON, from the cloud or from a local `.rmdoc`.
 - **[Highlight notes](docs/pages-and-archives.md#highlight-notes):** `highlights --format note` writes a document's highlights and typed text as a Markdown note with YAML front matter for Obsidian, Logseq or a Readwise-style vault, and `highlights <folder> -o dir` a note per document keeping the tree, incrementally, linked to the pages of the PDFs `render` draws with `--pdf-link`.
-- **[Rendering](docs/rendering.md):** `render` draws a document with its ink as a PDF, or a page as PNG, JPEG or SVG, and a folder's documents as PDFs mirroring its tree, incrementally and several at a time.
+- **[Rendering](docs/rendering.md):** `render` draws a document with its ink as a PDF, or a page as PNG, JPEG or SVG, and a folder's documents as PDFs mirroring its tree, incrementally and several at a time; [`open`](docs/rendering.md#open) draws a document and shows it in the system's viewer, at once the next time while it is unchanged.
 - **[Backups](docs/backups.md):** `backup` keeps an incremental local copy, one `.rmdoc` per document with a manifest, and `backup restore` puts it back.
 - **[Watch and exec](docs/watch.md):** `watch` follows the library's notifications live, and `--exec` runs a program on each batch of changes.
 - **[Edits in place](docs/library.md#editing-in-place):** `rename`, `pin`, `unpin` and `tag` change only the metadata, `mv` and `mkdir` organize, and `unmark` erases highlights.
@@ -31,6 +31,7 @@ rmctl find 'go|rust' --tag reading --json
 - **[Space and duplicates](docs/library.md#space-and-duplicates):** `du` adds up folders and kinds, `dupes` finds documents made from the same file.
 - **[Profiles and the Keychain](docs/configuration.md#profiles):** several accounts side by side, each with its own token and cache; tokens in a 0600 file or the macOS Keychain.
 - **[Offline cache](docs/configuration.md#cache):** a read asks the cloud one question when nothing changed, and `--offline` answers from the cache without any request; `sync` fills the cache ahead of time (`--files` with the originals too), so the page commands, `get`, `export`, `mget`, `backup` and `render` run offline, within each profile's own budget set in config.toml (`0` for no limit).
+- **[Shell completion](docs/completion.md):** Tab completes library paths folder by folder and identifiers in bash, zsh, fish and PowerShell, from the profile's cache alone: no request, no credentials, about 12 ms on a library of 5,000 items.
 - **[Output and exit codes](docs/output.md):** tables, TAB-separated lines or JSON; distinct exit codes; every write asks first or takes `--yes`, and is one commit.
 - **Diagnostics:** `debug` shows the root, blobs, files, pages and the cache; `--verbose` and `RMCLOUD_WIRE_LOG` show what goes over the wire.
 - **Platforms:** macOS, Linux and Windows, with Homebrew, Scoop and winget; rendering on all three, on x64 and ARM64; [rmctl-lite](#install) is the build without it.
@@ -38,11 +39,11 @@ rmctl find 'go|rust' --tag reading --json
 
 ## Install
 
-rmctl comes in two builds. Both install a binary named `rmctl` with the same commands; **rmctl-lite** leaves the renderer out, so it is smaller and needs no graphics libraries, and `render` tells you to install rmctl for it.
+rmctl comes in two builds. Both install a binary named `rmctl` with the same commands; **rmctl-lite** leaves the renderer out, so it is smaller and needs no graphics libraries, and `render` and `open` tell you to install rmctl for them.
 
 | | rmctl | rmctl-lite |
 |---|---|---|
-| `render` (PDF, PNG, JPEG, SVG) | yes | no: it says to install rmctl |
+| `render` (PDF, PNG, JPEG, SVG) and `open` | yes | no: they say to install rmctl |
 | Every other command, `text` and `highlights` included | yes | yes |
 | macOS binary (arm64) | about 47 MB | about 17 MB |
 | Linux needs | Cairo, Pango and their libraries; `libpdfium.so` ships beside the binary | only the C library |
@@ -66,6 +67,8 @@ winget install Altessa.rmctl         # or: winget install Altessa.rmctl.Lite
 ```
 
 Install one of the two. Scoop has no way to mark them as conflicting: with both installed, they shim the same `rmctl` command and the one installed last answers it.
+
+The Homebrew formulas install shell completion for bash, zsh and fish; elsewhere `rmctl completion <shell>` writes the script, as [docs/completion.md](docs/completion.md) shows for each shell.
 
 Every release also attaches archives of both builds, `rmctl_<version>_<os>_<arch>` and `rmctl-lite_<version>_<os>_<arch>`: a `.zip` for macOS, its binary signed with the Developer ID of Altessa Solutions Inc and notarized by Apple; a `.tar.gz` for Linux; a `.zip` for Windows, rmctl's with the DLLs `rmctl.exe` draws with beside it, rmctl-lite's with `rmctl.exe` alone; both are built for x64 (`amd64`) and ARM64 (`arm64`). `checksums.txt` lists the SHA-256 of every archive.
 
@@ -120,7 +123,7 @@ More examples: [docs/examples.md](docs/examples.md).
 | Group | Commands |
 |---|---|
 | Account | `register <code> [--replace]`, `logout [--revoke]`, `account`, `secrets status`, `secrets migrate --to file\|keychain [--replace] [--set-default]`, `profile ls`, `profile add <name> <code>`, `profile info [name]`, `profile del <name> [--revoke]` |
-| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `sync [path] [--files] [--all] [--force] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|note\|json] [--pdf-link pattern]`, `highlights <folder> [-o dir] [--pdf-link pattern] [--all] [--all-docs] [--incremental] [--prune] [--jobs N]`, `render <path\|id\|file.rmdoc> [-o file] [--mode fresh\|preserving\|recomposed] [--grain mask\|group] [--paper a4\|letter\|tablet] [--page N [--format png\|jpg\|svg] [--scale S] [--quality Q]] [--no-template] [--unreadable-pages placeholder\|blank\|strict] [--id id]`, `render <folder> [-o dir] [--mode …] [--grain …] [--paper …] [--no-template] [--unreadable-pages …] [--all] [--incremental] [--jobs N]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
+| Reading | `ls [path] [-l] [--all]`, `tree [path] [--all]`, `stat <path\|id>`, `find [pattern] [--tag t]... [--starred] [--under path] [--text s] [--all]`, `du [path] [--depth N] [--all]`, `dupes [path] [--all]`, `get <path\|id> [-o file]`, `export <path\|id>... -o file.rmdoc`, `rmdoc <file.rmdoc> [--raw]`, `mget <path> -o dir [--incremental] [--delete] [--jobs N]`, `backup <dir> [path] [--all] [--prune] [--force] [--rescope] [--jobs N]`, `sync [path] [--files] [--all] [--force] [--jobs N]`, `text <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|json]`, `highlights <path\|id\|file.rmdoc> [--page N]... [--format text\|markdown\|note\|json] [--pdf-link pattern]`, `highlights <folder> [-o dir] [--pdf-link pattern] [--all] [--all-docs] [--incremental] [--prune] [--jobs N]`, `render <path\|id\|file.rmdoc> [-o file] [--mode fresh\|preserving\|recomposed] [--grain mask\|group] [--paper a4\|letter\|tablet] [--page N [--format png\|jpg\|svg] [--scale S] [--quality Q]] [--no-template] [--unreadable-pages placeholder\|blank\|strict] [--id id]`, `render <folder> [-o dir] [--mode …] [--grain …] [--paper …] [--no-template] [--unreadable-pages …] [--all] [--incremental] [--jobs N]`, `open <path\|id\|file.rmdoc> [--mode …] [--grain …] [--paper …] [--page N [--format png\|jpg\|svg] [--scale S] [--quality Q]] [--no-template] [--unreadable-pages …] [--id id]`, `watch [--raw] [--exec program [--shell] [--debounce d] [--exec-timeout d] [--only document\|folder] [--under path] [-- arg...]]` |
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
@@ -140,7 +143,8 @@ Formats, colors, Ctrl-C and tokens: [docs/output.md](docs/output.md).
 
 - [docs/examples.md](docs/examples.md) — real answers of browsing, finding, notebooks, rendering and scripting commands.
 - [docs/pages-and-archives.md](docs/pages-and-archives.md) — typed text, highlights, Markdown notes of highlights for Obsidian, Logseq and Readwise, page diagnostics, `unmark`, notebooks from text, and `.rmdoc` export and import.
-- [docs/rendering.md](docs/rendering.md) — `render` modes, page images, templates, paper, and the platform and build requirements.
+- [docs/rendering.md](docs/rendering.md) — `render` modes, page images, templates, paper, `open`, and the platform and build requirements.
+- [docs/completion.md](docs/completion.md) — installing shell completion for bash, zsh, fish and PowerShell, and what it completes.
 - [docs/uploads.md](docs/uploads.md) — how `put` validates, `--current-page`, `--cover` and `--content-only`.
 - [docs/library.md](docs/library.md) — `du`, `dupes`, and `rename`, `pin`, `unpin` and `tag` editing in place.
 - [docs/backups.md](docs/backups.md) — incremental backups, the manifest, and `backup restore`.

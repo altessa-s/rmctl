@@ -37,13 +37,17 @@ const (
 	// SpaceIndexes holds document and root indexes, named by the hash
 	// that addresses them; the reader checks them.
 	SpaceIndexes = "indexes"
+	// SpaceRendered holds the drawings "rmctl open" shows: a directory per
+	// drawing, named by the sha256 of what it was drawn from and with,
+	// holding the one file a viewer opens, under the document's name.
+	SpaceRendered = "rendered"
 	// SpaceState holds a few small named files, such as the profile's last
 	// known root. They are never evicted.
 	SpaceState = "state"
 )
 
 // Spaces are every space, in the order a report lists them.
-func Spaces() []string { return []string{SpaceBlobs, SpaceIndexes, SpaceState} }
+func Spaces() []string { return []string{SpaceBlobs, SpaceIndexes, SpaceRendered, SpaceState} }
 
 // KeyCovered is the name, among the state, of the entry that vouches for
 // what the blobs and indexes hold: the last complete sync. Whatever leaves
@@ -53,7 +57,11 @@ func Spaces() []string { return []string{SpaceBlobs, SpaceIndexes, SpaceState} }
 const KeyCovered = "sync"
 
 // evictable are the spaces the byte budget covers.
-func evictable(space string) bool { return space == SpaceBlobs || space == SpaceIndexes }
+func evictable(space string) bool { return covered(space) || space == SpaceRendered }
+
+// covered are the spaces the record of the last complete sync vouches for:
+// what leaves them bumps [KeyRemovals]. A drawing is not one.
+func covered(space string) bool { return space == SpaceBlobs || space == SpaceIndexes }
 
 // nameKey is a name of the state space, and a profile's directory: no
 // separator, no dot, nothing a path could climb out with.
@@ -178,6 +186,24 @@ func (c *Cache) Entry(space, key string) ([]byte, bool) {
 	return data, true
 }
 
+// Peek is [Cache.Entry] for a reader that changes nothing: a hit does not
+// count as a use, and a damaged entry stays where it is.
+func (c *Cache) Peek(space, key string) ([]byte, bool) {
+	if !validKey(space, key) {
+		return nil, false
+	}
+	root, err := os.OpenRoot(filepath.Join(c.dir, space))
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(key)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
 // PutEntry stores data as the entry key of space, replacing any, then
 // evicts down to the budget.
 func (c *Cache) PutEntry(space, key string, data []byte) {
@@ -191,16 +217,16 @@ func (c *Cache) PutEntry(space, key string, data []byte) {
 		return
 	}
 	if evictable(space) {
-		c.account(int64(len(data)))
+		c.account(int64(len(data)), "")
 	}
 }
 
 // account adds n bytes just written to the total, and evicts when the
-// total passes the budget. The total may count a replaced entry twice, or
-// miss what another process wrote; the count it evicts by is always the
-// one on disk. Without a limit nothing is counted or evicted. The caller
-// holds mu.
-func (c *Cache) account(n int64) {
+// total passes the budget, never the entry at keep. The total may count a
+// replaced entry twice, or miss what another process wrote; the count it
+// evicts by is always the one on disk. Without a limit nothing is counted
+// or evicted. The caller holds mu.
+func (c *Cache) account(n int64, keep string) {
 	if c.maxBytes == 0 {
 		return
 	}
@@ -210,7 +236,7 @@ func (c *Cache) account(n int64) {
 			return
 		}
 	}
-	c.evict()
+	c.evict(keep)
 }
 
 // Drop removes the entry key of space, if there is one. An entry of the
@@ -225,15 +251,15 @@ func (c *Cache) Drop(space, key string) {
 	// leaves no mark vouching for an entry that is gone, only one sync
 	// that walks again. The bump after the removal covers a sync that
 	// records a mark in between.
-	if evictable(space) {
+	if covered(space) {
 		if _, err := os.Stat(path); err == nil {
 			c.uncover()
 		}
 	}
-	err := os.Remove(path)
+	err := remove(space, path)
 	switch {
 	case err == nil:
-		if evictable(space) {
+		if covered(space) {
 			c.removed()
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -260,7 +286,7 @@ func (c *Cache) Reconcile() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.known || c.total > c.maxBytes {
-		c.evict()
+		c.evict("")
 	}
 }
 
@@ -281,15 +307,29 @@ func (c *Cache) write(dir, key string, data []byte) error {
 	return os.Rename(name, filepath.Join(dir, key))
 }
 
-// cached is one entry on disk.
+// cached is one entry on disk of space.
 type cached struct {
-	path string
-	size int64
-	used time.Time
+	space string
+	path  string
+	size  int64
+	used  time.Time
+}
+
+// remove removes the entry of space at path: a drawing's directory with
+// its file, any other entry's file.
+func remove(space, path string) error {
+	if space == SpaceRendered {
+		if _, err := os.Lstat(path); err != nil {
+			return err
+		}
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
 }
 
 // scan lists the entries of space that are the cache's own: regular files
-// with a valid name.
+// with a valid name, and in the drawings, directories with a valid name,
+// which take what their regular files take.
 func (c *Cache) scan(space string) []cached {
 	dir := filepath.Join(c.dir, space)
 	entries, err := os.ReadDir(dir)
@@ -305,15 +345,39 @@ func (c *Cache) scan(space string) []cached {
 			continue
 		}
 		info, err := e.Info()
-		if err != nil || !info.Mode().IsRegular() {
+		if err != nil {
 			continue
 		}
-		out = append(out, cached{path: filepath.Join(dir, e.Name()), size: info.Size(), used: info.ModTime()})
+		path := filepath.Join(dir, e.Name())
+		switch {
+		case space == SpaceRendered && info.IsDir():
+			out = append(out, cached{space: space, path: path, size: dirSize(path), used: info.ModTime()})
+		case space != SpaceRendered && info.Mode().IsRegular():
+			out = append(out, cached{space: space, path: path, size: info.Size(), used: info.ModTime()})
+		}
 	}
 	return out
 }
 
-func (c *Cache) evict() {
+// dirSize is what the regular files directly in dir take.
+func dirSize(dir string) int64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var n int64
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			n += info.Size()
+		}
+	}
+	return n
+}
+
+// evict removes the least recently used entries until the evictable
+// spaces fit the budget, never the entry at keep: the drawing about to be
+// shown stays even when it alone takes more.
+func (c *Cache) evict(keep string) {
 	var all []cached
 	var total int64
 	for _, space := range Spaces() {
@@ -330,20 +394,26 @@ func (c *Cache) evict() {
 		return
 	}
 	slices.SortFunc(all, func(a, b cached) int { return cmp.Compare(a.used.UnixNano(), b.used.UnixNano()) })
-	// As in Drop, the mark goes before anything is evicted and the
-	// generation is bumped after.
-	c.uncover()
-	evicted := false
+	// As in Drop, the mark goes before a blob or an index is evicted and
+	// the generation is bumped after.
+	uncovered, evicted := false, false
 	for _, f := range all {
 		if total <= c.maxBytes {
 			break
 		}
-		if err := os.Remove(f.path); err != nil {
+		if f.path == keep {
+			continue
+		}
+		if covered(f.space) && !uncovered {
+			c.uncover()
+			uncovered = true
+		}
+		if err := remove(f.space, f.path); err != nil {
 			c.log.Debug("cache eviction failed", "err", err)
 			continue
 		}
 		total -= f.size
-		evicted = true
+		evicted = evicted || covered(f.space)
 	}
 	c.total = total
 	if evicted {
@@ -375,7 +445,7 @@ func (c *Cache) Clear() error {
 	var errs []error
 	for _, space := range Spaces() {
 		for _, e := range c.scan(space) {
-			if err := os.Remove(e.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := remove(space, e.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				errs = append(errs, err)
 			}
 		}

@@ -39,3 +39,4 @@ packages:
   - internal/app/outdir
   - internal/app/notes
   - internal/adapter/renderer
+  - internal/adapter/opener

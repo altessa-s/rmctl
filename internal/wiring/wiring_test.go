@@ -17,7 +17,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/wiring"
 )
 
-func options(t *testing.T) wiring.Options {
+func options(t testing.TB) wiring.Options {
 	t.Helper()
 	dir := t.TempDir()
 	return wiring.Options{

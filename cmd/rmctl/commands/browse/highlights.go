@@ -92,7 +92,7 @@ func newHighlights(env *cliutil.Env) *cobra.Command {
 			rmctl highlights / -o ~/vault/rm --incremental --prune --pdf-link '{root}../rm-pdf/{path}.pdf#page={page}'
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.OrFiles(cliutil.CompleteRemote(env, false), "rmdoc")),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			link, err := domain.ParsePageLink(f.pdfLink)

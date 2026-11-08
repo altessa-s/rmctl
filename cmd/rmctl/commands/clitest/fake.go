@@ -6,6 +6,7 @@ package clitest
 
 import (
 	"context"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -104,6 +105,14 @@ type Fake struct {
 	// progress it was given.
 	Synced    port.SyncReport
 	SyncSteps []port.SyncProgress
+	// NoListing makes Completion answer port.ErrNoListing, as a cache
+	// nothing listed the library into; otherwise it lists Library.
+	NoListing bool
+	// Opened is what Open and OpenFile answer, with the path filled in
+	// when it has none; RenderErr fails them before anything is drawn, and
+	// OpenErr after, as a viewer that would not start.
+	Opened  port.OpenReport
+	OpenErr error
 
 	mu    sync.Mutex
 	calls []string
@@ -114,7 +123,7 @@ func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
 		Archives: (*archivesFake)(f), Rendering: f, Notes: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
-		Profiles: (*profilesFake)(f),
+		Profiles: (*profilesFake)(f), Completion: (*listingFake)(f), Viewing: (*viewingFake)(f),
 	}
 }
 
@@ -731,4 +740,47 @@ func (p *profilesFake) Remove(_ context.Context, name string, o port.RemoveProfi
 		return port.ProfileRemoval{}, err
 	}
 	return f.Removal, f.RemoveErr
+}
+
+// listingFake is the Fake's port.Completion.
+type listingFake Fake
+
+var _ port.Completion = (*listingFake)(nil)
+
+// Listing implements port.Completion; it records no call.
+func (l *listingFake) Listing(context.Context) (*domain.Tree, error) {
+	f := (*Fake)(l)
+	if f.NoListing {
+		return nil, port.ErrNoListing
+	}
+	return f.tree(), nil
+}
+
+// viewingFake is the Fake's port.Viewing.
+type viewingFake Fake
+
+var _ port.Viewing = (*viewingFake)(nil)
+
+// Open implements port.Viewing.
+func (v *viewingFake) Open(_ context.Context, query string, o port.RenderOptions) (port.OpenReport, error) {
+	return (*Fake)(v).opened("Open", query, o)
+}
+
+// OpenFile implements port.Viewing.
+func (v *viewingFake) OpenFile(_ context.Context, path string, o port.RenderOptions) (port.OpenReport, error) {
+	return (*Fake)(v).opened("OpenFile", path, o)
+}
+
+func (f *Fake) opened(method, from string, o port.RenderOptions) (port.OpenReport, error) {
+	if err := f.record(method, renderArgs(from, "", o)...); err != nil {
+		return port.OpenReport{}, err
+	}
+	if f.RenderErr != nil {
+		return port.OpenReport{}, f.RenderErr
+	}
+	r := f.Opened
+	if r.Path == "" {
+		r.Path = "rendered/" + path.Base(from) + ".pdf"
+	}
+	return r, f.OpenErr
 }

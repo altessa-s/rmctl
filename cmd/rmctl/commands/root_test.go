@@ -115,12 +115,12 @@ func TestCompletion(t *testing.T) {
 	}
 	s, out, _ := streams()
 	err := Run(context.Background(), []string{"__complete", "ls", "/B"}, s, cliutil.Fixed((&clitest.Fake{}).Services()))
-	if err != nil || !strings.HasPrefix(out.String(), "/Books/\n") {
+	if err != nil || !strings.HasPrefix(out.String(), "/Books/\tfolder\n") {
 		t.Fatalf("%v %q", err, out.String())
 	}
 	s, out, _ = streams()
 	err = Run(context.Background(), []string{"__complete", "put", "a.pdf", "/"}, s, cliutil.Fixed((&clitest.Fake{}).Services()))
-	if err != nil || !strings.HasPrefix(out.String(), "/Books/\n") || strings.Contains(out.String(), "/Notes") {
+	if err != nil || !strings.HasPrefix(out.String(), "/Books/\tfolder\n") || strings.Contains(out.String(), "/Notes") {
 		t.Fatalf("%v %q", err, out.String())
 	}
 	s, out, _ = streams()
@@ -135,7 +135,7 @@ func TestCompletion(t *testing.T) {
 	}
 	s, out, _ = streams()
 	if err := Run(context.Background(), []string{"__complete", "mput", "d", "/"}, s, cliutil.Fixed((&clitest.Fake{}).Services())); err != nil ||
-		!strings.HasPrefix(out.String(), "/Books/\n") {
+		!strings.HasPrefix(out.String(), "/Books/\tfolder\n") {
 		t.Fatalf("%v %q", err, out.String())
 	}
 }

@@ -111,6 +111,7 @@ var layers = map[string]rule{
 	"internal/adapter/renderer":   adapter(renderLib),
 	"internal/adapter/vault":      adapter(transport),
 	"internal/adapter/indexcache": adapter(""),
+	"internal/adapter/opener":     adapter(""),
 	"internal/adapter/keychain": func() rule {
 		r := adapter(transport)
 		r.allow = append(r.allow, "internal/adapter/keychain/system")
@@ -126,7 +127,7 @@ var layers = map[string]rule{
 		"internal/adapter/pdf", "internal/adapter/blobcache", "internal/adapter/ids", "internal/adapter/clock",
 		"internal/adapter/rmpages", "internal/adapter/rmdocs", "internal/adapter/keychain", "internal/adapter/vault",
 		"internal/app/secrets", "internal/adapter/indexcache", "internal/app/render", "internal/adapter/renderer",
-		"internal/app/profile", "internal/app/prefetch", "internal/app/notes",
+		"internal/app/profile", "internal/app/prefetch", "internal/app/notes", "internal/adapter/opener",
 	}},
 
 	"internal/porttest":    {allow: []string{"internal/domain", "internal/port"}},

@@ -293,3 +293,63 @@ func TestNewPanics(t *testing.T) {
 		}()
 	}
 }
+
+// listings records the listings kept.
+type listings struct {
+	hashes []string
+	trees  []*domain.Tree
+}
+
+func (l *listings) PutListing(hash string, tree *domain.Tree) {
+	l.hashes = append(l.hashes, hash)
+	l.trees = append(l.trees, tree)
+}
+
+func TestListings(t *testing.T) {
+	t.Parallel()
+	t.Run("a load keeps its tree", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		kept := &listings{}
+		tree, state, err := newLib(c, library.WithListings(kept)).Load(t.Context())
+		if err != nil || len(kept.hashes) != 1 || kept.hashes[0] != state.Hash || kept.trees[0] != tree {
+			t.Fatalf("%v %+v", err, kept)
+		}
+	})
+	t.Run("a commit keeps the tree it wrote", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		kept := &listings{}
+		root, err := newLib(c, library.WithListings(kept)).Commit(t.Context(), appendFolder(c))
+		if err != nil || len(kept.hashes) != 2 || kept.hashes[1] != root.Hash {
+			t.Fatalf("%v %+v", err, kept.hashes)
+		}
+		if _, ok := kept.trees[1].Get("new"); !ok {
+			t.Fatal("the committed listing lacks the new folder")
+		}
+	})
+	t.Run("a committed tree that does not build keeps nothing", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		kept := &listings{}
+		change := func(_ context.Context, _ *domain.Tree, state port.RootState) ([]domain.Record, error) {
+			return append(slices.Clone(state.Records), domain.Record{ID: "ghost", Hash: "missing"}), nil
+		}
+		if _, err := newLib(c, library.WithListings(kept)).Commit(t.Context(), change); err != nil || len(kept.hashes) != 1 {
+			t.Fatalf("%v %+v", err, kept.hashes)
+		}
+	})
+	t.Run("a load that fails keeps nothing", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		c.Fail = map[string]error{"Files": errBoom}
+		kept := &listings{}
+		if _, _, err := newLib(c, library.WithListings(kept)).Load(t.Context()); err == nil || len(kept.hashes) != 0 {
+			t.Fatalf("%v %+v", err, kept.hashes)
+		}
+	})
+}

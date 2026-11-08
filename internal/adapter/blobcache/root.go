@@ -73,6 +73,16 @@ func (r *Root) Profile(profile string) (*Cache, error) {
 	return c, nil
 }
 
+// Peek is the cache of profile as it is, for a reader that changes
+// nothing: unlike [Root.Profile] it evicts nothing, and nothing it does
+// creates a directory.
+func (r *Root) Peek(profile string) (*Cache, error) {
+	if !nameKey.MatchString(profile) {
+		return nil, ErrProfileName
+	}
+	return New(filepath.Join(r.base.dir, profile), 0, r.base.clock, r.base.log), nil
+}
+
 // Profiles are the profiles that have a cache directory, by name.
 func (r *Root) Profiles() []string {
 	entries, err := os.ReadDir(r.base.dir)

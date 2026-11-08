@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/altessa-s/go-atlas-core/runtime/appinfo"
+
 	"github.com/altessa-s/rmctl/internal/adapter/blobcache"
 	"github.com/altessa-s/rmctl/internal/adapter/clock"
 	"github.com/altessa-s/rmctl/internal/adapter/cloud"
@@ -18,6 +20,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/adapter/indexcache"
 	"github.com/altessa-s/rmctl/internal/adapter/keychain"
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
+	"github.com/altessa-s/rmctl/internal/adapter/opener"
 	"github.com/altessa-s/rmctl/internal/adapter/pdf"
 	"github.com/altessa-s/rmctl/internal/adapter/renderer"
 	"github.com/altessa-s/rmctl/internal/adapter/rmdocs"
@@ -76,7 +79,13 @@ type Options struct {
 	// is the login Keychain. A test keeps the user's Keychain out of reach
 	// with it.
 	Keychain KeychainItems
+	// Opener shows what "rmctl open" drew; nil is the system's viewer. A
+	// test keeps viewers from starting with it.
+	Opener Opener
 }
+
+// Opener shows a file in a viewer.
+type Opener = port.Opener
 
 // KeychainItems are the Keychain as the keychain adapter needs it.
 type KeychainItems = keychain.Items
@@ -93,6 +102,7 @@ type Services struct {
 	Archives  port.Archives
 	Rendering port.Rendering
 	Notes     port.Notes
+	Viewing   port.Viewing
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
@@ -150,13 +160,14 @@ func Build(opts Options) (Services, error) {
 	}
 	libOpts := []library.Option{library.WithLogger(opts.Logger)}
 	if st.blobCache != nil {
-		libOpts = append(libOpts, library.WithCache(st.blobCache))
+		libOpts = append(libOpts, library.WithCache(st.blobCache), library.WithListings(indexcache.NewListings(st.profile, opts.Logger)))
 	}
 	lib := library.New(st.roots, st.docs, st.blobs, libOpts...)
 	rm := rmpages.New(opts.Logger)
 	docs := rmdocs.New()
 	reader := pages.NewReader(lib, rm)
 	newIDs := ids.New()
+	rendering := render.New(lib, st.blobs, files, docs, docs, renderer.New())
 
 	return Services{
 		Account:   account.New(indexcache.NewRegistry(remote, st.profile)),
@@ -167,8 +178,9 @@ func Build(opts Options) (Services, error) {
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
-		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
+		Rendering: rendering,
 		Notes:     notes.New(lib, reader, files),
+		Viewing:   render.NewViewer(rendering, st.previews(), openerOf(opts), appinfo.Version),
 		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
@@ -179,6 +191,30 @@ func Build(opts Options) (Services, error) {
 		Config:  cfg,
 		Close:   client.Close,
 	}, nil
+}
+
+// Completion is the library as the profile's cache last listed it, for
+// shell completion. It reads config.toml and the environment for the
+// profile and the cache directory, and then one file of the cache: nothing
+// it builds reaches the cloud, reads a token, writes or evicts anything.
+// With the cache off (NoCache, or a negative CacheBytes) it lists nothing.
+func Completion(opts Options) (port.Completion, error) {
+	read := opts.ReadConfig
+	if read == nil {
+		read = config.ReadFile
+	}
+	cfg, err := config.LoadFrom(opts.Env, opts.Profile, opts.Dirs, read)
+	if err != nil {
+		return nil, err
+	}
+	if opts.NoCache || opts.CacheBytes < 0 {
+		return indexcache.NewCompletion(nil), nil
+	}
+	store, err := blobcache.NewRoot(cfg.CacheDir, blobcache.Fixed(0), clock.Real(), opts.Logger).Peek(cfg.Profile)
+	if err != nil {
+		return nil, err
+	}
+	return indexcache.NewCompletion(store), nil
 }
 
 // built are the stores the use cases read and write through: the cloud,
@@ -210,6 +246,23 @@ func (b built) syncer(lib *library.Library, remote port.BlobStore, clk port.Cloc
 	default:
 		return prefetch.New(b.live, lib, remote, b.syncs, clk)
 	}
+}
+
+// previews keep what "rmctl open" draws in the profile's cache, counted
+// against its budget, or in the temporary directory when the cache is off.
+func (b built) previews() port.Previews {
+	if b.blobCache == nil {
+		return localfs.TempPreviews{}
+	}
+	return b.profile
+}
+
+// openerOf is the opener opts names, else the system's.
+func openerOf(opts Options) port.Opener {
+	if opts.Opener != nil {
+		return opts.Opener
+	}
+	return opener.New()
 }
 
 // refusal is a Syncer that cannot run in this configuration.

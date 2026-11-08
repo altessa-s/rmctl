@@ -71,6 +71,26 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+// A request for completion builds the listing alone: nothing that could
+// reach the cloud or read a token.
+func TestBuildForCompletion(t *testing.T) {
+	isolate(t)
+	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Completion: true}, &bytes.Buffer{}, seams{})
+	if err != nil || svc.Completion == nil || svc.Browser != nil || svc.Account != nil || svc.Viewing != nil {
+		t.Fatalf("%+v %v", svc, err)
+	}
+	if err = closeFn(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = build(context.Background(), commands.Request{Profile: "../escape", Completion: true}, &bytes.Buffer{}, seams{}); err == nil {
+		t.Fatal("an unsafe profile name was accepted")
+	}
+	var out, errOut bytes.Buffer
+	if code := run([]string{"__complete", "ls", "/"}, nil, &out, &errOut, func(int) { t.Error("exited") }); code != 0 || out.String() != ":4\n" {
+		t.Fatalf("%d %q %q", code, out.String(), errOut.String())
+	}
+}
+
 func TestNewLogger(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

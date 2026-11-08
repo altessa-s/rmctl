@@ -70,7 +70,7 @@ func newRename(env *cliutil.Env) *cobra.Command {
 			rmctl rename /Books/Novel "Novel (2nd ed.)" --yes
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(withDest)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)

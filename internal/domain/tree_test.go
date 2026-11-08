@@ -230,3 +230,18 @@ func FuzzResolve(f *testing.F) {
 		}
 	})
 }
+
+func TestNewListedItem(t *testing.T) {
+	t.Parallel()
+	tree := domain.NewTree(1, []domain.Item{
+		domain.NewListedItem("f", "Folder", domain.KindFolder, domain.TrashID, true),
+		domain.NewListedItem("d", "Doc", domain.KindPDF, "f", false),
+	})
+	d, ok := tree.Get("d")
+	if !ok || d.Name != "Doc" || d.Kind != domain.KindPDF || d.Parent != "f" || d.TrashedHere() || len(d.Files) != 0 {
+		t.Fatalf("%+v", d)
+	}
+	if f, _ := tree.Get("f"); !f.TrashedHere() || !tree.IsTrashed("d") {
+		t.Fatal("the trash flag is lost")
+	}
+}

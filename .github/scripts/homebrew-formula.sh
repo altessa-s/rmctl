@@ -21,6 +21,9 @@
 # the build without the renderer, whose binary needs no library beyond the
 # system's and goes straight into bin. Both binaries are named rmctl, so each
 # formula conflicts with the other.
+#
+# Both install the completion scripts of bash, zsh and fish, which the
+# installed binary writes with "rmctl completion <shell>".
 set -euo pipefail
 
 lite=0
@@ -105,6 +108,7 @@ ${linux_deps}    on_arm do
 
   def install
 ${install}
+    generate_completions_from_executable(bin/"rmctl", "completion")
     doc.install "licenses" if File.directory?("licenses")
   end
 

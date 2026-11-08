@@ -82,7 +82,7 @@ func newSync(env *cliutil.Env) *cobra.Command {
 			rmctl --offline text /Books/Novel
 		`),
 		Args:              cliutil.Args(cobra.MaximumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if noCache, _ := cmd.Flags().GetBool(cliutil.FlagNoCache); noCache { //nolint:errcheck // the flag is persistent on the root

@@ -231,3 +231,43 @@ type Rendering interface {
 	// Render does, without the cloud.
 	RenderFile(ctx context.Context, path, dest string, opts RenderOptions) (RenderReport, error)
 }
+
+// Previews keeps the drawings "rmctl open" shows, so a document opened
+// again unchanged with the same options is shown at once rather than drawn
+// again.
+type Previews interface {
+	// Preview is the path of the drawing kept under key, a file named
+	// name. When none is kept, draw produces it into a staging file, which
+	// takes its place only once draw succeeds; drawn says it was drawn now.
+	// key is a sha256 in hex of everything the drawing depends on.
+	Preview(ctx context.Context, key, name string, draw func(w io.Writer) error) (path string, drawn bool, err error)
+}
+
+// Opener shows a file in the viewer the system picks for it. It returns
+// once the viewer is asked to start, without waiting for it to close.
+type Opener interface {
+	Open(ctx context.Context, path string) error
+}
+
+// OpenReport is what "rmctl open" showed: the drawing, and whether it was
+// drawn now or kept from an earlier open. A kept drawing reports its Path
+// alone.
+type OpenReport struct {
+	RenderReport
+	Drawn bool
+}
+
+// Viewing is the input port of "rmctl open": a document drawn as
+// [Rendering] draws it, into the profile's previews, then shown in the
+// system's viewer.
+type Viewing interface {
+	// Open draws the document query names, unless the previews keep its
+	// drawing with opts from this very version of it, and shows the file.
+	// A drawing that could not be shown still reports its path, with the
+	// error.
+	Open(ctx context.Context, query string, opts RenderOptions) (OpenReport, error)
+	// OpenFile does the same for a document of the local .rmdoc archive at
+	// path, without the cloud; the archive's size and modification time
+	// stand for its version.
+	OpenFile(ctx context.Context, path string, opts RenderOptions) (OpenReport, error)
+}

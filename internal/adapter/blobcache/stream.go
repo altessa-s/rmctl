@@ -76,7 +76,7 @@ func (c *Cache) Fill(hash string, write func(w io.Writer) error) error {
 	}
 	now := c.clock.Now()
 	_ = os.Chtimes(path, now, now)
-	c.account(counter.n)
+	c.account(counter.n, "")
 	return nil
 }
 

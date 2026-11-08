@@ -130,6 +130,10 @@ func newWatch(env *cliutil.Env, run runner) *cobra.Command {
 	cmd.Flags().DurationVar(&x.timeout, "exec-timeout", DefaultExecTimeout, "stop a run that takes longer")
 	cmd.Flags().StringVar(&x.only, "only", "", "run only for a document or a folder")
 	cmd.Flags().StringVar(&x.under, "under", "", "run only for items below this folder")
+	cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{
+		"only":  cliutil.CompleteRemote(env, false),
+		"under": cliutil.CompleteRemote(env, true),
+	})
 	return cmd
 }
 

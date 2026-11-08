@@ -150,7 +150,7 @@ func newText(env *cliutil.Env) *cobra.Command {
 			rmctl text backup.rmdoc --format markdown
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.OrFiles(cliutil.CompleteRemote(env, false), "rmdoc")),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			docs, format, local, err := f.load(cmd, env, args[0])
