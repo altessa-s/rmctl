@@ -9,7 +9,8 @@
 # rmrender-go draws with Cairo, Pango and PDFium on Linux and is C23 that
 # needs clang 19 or newer. This installs clang 19 and the Cairo stack's
 # development packages, fetches the PDFium build rmrender-lib pins (its
-# fetch-pdfium.py, vendored in rmrender-go, checks the checksum), and writes
+# fetch-pdfium.py, vendored in rmrender-go, checks the checksum; with
+# PDFIUM_CACHE set, fetch-pdfium.sh keeps it there), and writes
 # CC, CGO_CFLAGS, CGO_LDFLAGS and PDFIUM_DIR to $GITHUB_ENV for the steps
 # after it. RPATH is the run path the binary finds libpdfium.so on: the
 # default is PDFium's own directory, for tests run in place; a release
@@ -32,8 +33,8 @@ $sudo apt-get install -y -q --no-install-recommends clang-19 pkg-config python3 
 
 go mod download github.com/altessa-s/rmrender-go
 module=$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)
-dir="${RUNNER_TEMP:?}/pdfium"
-python3 "$module/internal/clib/rmrender/scripts/fetch-pdfium.py" --platform "$platform" --output "$dir"
+dir=$(bash "$(dirname "$0")/fetch-pdfium.sh" python3 "$module/internal/clib/rmrender/scripts/fetch-pdfium.py" \
+    "$platform" "${RUNNER_TEMP:?}/pdfium")
 [[ -n "$rpath" ]] || rpath="$dir/lib"
 
 {

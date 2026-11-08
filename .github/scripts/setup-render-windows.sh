@@ -15,7 +15,8 @@
 # the PDFium SDK rmrender-lib pins for PLATFORM (win-x64 or win-arm64; by
 # default the one of the MSYS2 environment: win-x64 for CLANG64, win-arm64
 # for CLANGARM64) with its fetch-pdfium.py, vendored in rmrender-go, which
-# checks the checksum, and writes
+# checks the checksum (with PDFIUM_CACHE set, fetch-pdfium.sh keeps it
+# there), and writes
 # CC, CGO_ENABLED, CGO_CFLAGS, CGO_LDFLAGS, PDFIUM_DIR and PDFIUM_BIN to
 # $GITHUB_ENV for the steps after it.
 #
@@ -44,8 +45,10 @@ go version
 
 go mod download github.com/altessa-s/rmrender-go
 module=$(cygpath -m "$(go list -m -f '{{.Dir}}' github.com/altessa-s/rmrender-go)")
-dir="$(cygpath -m "${RUNNER_TEMP:?}")/pdfium"
-python "$module/internal/clib/rmrender/scripts/fetch-pdfium.py" --platform "$platform" --output "$dir"
+[[ -z "${PDFIUM_CACHE:-}" ]] || PDFIUM_CACHE=$(cygpath -m "$PDFIUM_CACHE")
+export PDFIUM_CACHE
+dir=$(bash "$(dirname "$0")/fetch-pdfium.sh" python "$module/internal/clib/rmrender/scripts/fetch-pdfium.py" \
+    "$platform" "$(cygpath -m "${RUNNER_TEMP:?}")/pdfium")
 
 {
     echo "CC=clang"
