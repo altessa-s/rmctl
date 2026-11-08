@@ -16,9 +16,10 @@ import (
 )
 
 // seams are the parts of the machine a test replaces: keychain, when set,
-// stands in for the login Keychain.
+// stands in for the login Keychain, and opener for the system's viewer.
 type seams struct {
 	keychain wiring.KeychainItems
+	opener   wiring.Opener
 }
 
 // build is the composition root's entry: the services req asks for, with a
@@ -33,6 +34,15 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 	if err != nil {
 		return commands.Services{}, nil, err
 	}
+	if req.Completion {
+		listing, cerr := wiring.Completion(wiring.Options{
+			Env: config.Environ(), Profile: req.Profile, Dirs: dirs, Logger: logger, NoCache: req.NoCache,
+		})
+		if cerr != nil {
+			return commands.Services{}, nil, cerr
+		}
+		return commands.Services{Completion: listing}, func() error { return nil }, nil
+	}
 	svc, err := wiring.Build(wiring.Options{
 		Env:      config.Environ(),
 		Profile:  req.Profile,
@@ -43,6 +53,7 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		NoCache:  req.NoCache,
 		ReadOnly: req.ReadOnly,
 		Keychain: s.keychain,
+		Opener:   s.opener,
 	})
 	if err != nil {
 		return commands.Services{}, nil, err
@@ -61,6 +72,7 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		Rendering: svc.Rendering,
 		Syncer:    svc.Syncer,
 		Cache:     svc.Cache,
+		Viewing:   svc.Viewing,
 		Offline:   svc.Offline,
 	}, svc.Close, nil
 }

@@ -190,3 +190,31 @@ func (FS) Stage() (dir string, remove func() error, err error) {
 	}
 	return dir, func() error { return os.RemoveAll(dir) }, nil
 }
+
+// TempPreviews implements port.Previews without a cache, for --no-cache:
+// every drawing goes to a new directory of mode 0700 in the system's
+// temporary directory, named rmctl-open-<random>, and stays there for the
+// viewer; the system's own clean-up of that directory removes it. Nothing
+// is kept, so every open draws again.
+type TempPreviews struct {
+	files FS
+}
+
+var _ port.Previews = TempPreviews{}
+
+// Preview implements port.Previews; key is not used.
+func (p TempPreviews) Preview(ctx context.Context, _, name string, draw func(w io.Writer) error) (string, bool, error) {
+	if name == "" || name != filepath.Base(name) {
+		return "", false, fmt.Errorf("a drawing is named by a plain file name, not %q", name)
+	}
+	dir, err := os.MkdirTemp("", "rmctl-open-*")
+	if err != nil {
+		return "", false, fmt.Errorf("create a directory for the drawing: %w", err)
+	}
+	path := filepath.Join(dir, name)
+	if err = p.files.Produce(ctx, path, draw); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", false, err
+	}
+	return path, true, nil
+}

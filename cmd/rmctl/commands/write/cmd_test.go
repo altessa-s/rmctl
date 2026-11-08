@@ -145,15 +145,35 @@ func TestCompletion(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"__complete", "put", ""}, "pdf\nepub\n"},
-		{[]string{"__complete", "put", "a.pdf", "/"}, "/Books/\n"},
+		{[]string{"__complete", "put", ""}, "pdf\nepub\nrmdoc\n"},
+		{[]string{"__complete", "put", "a.pdf", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "put", "a.pdf", "/Users/"}, "txt\n:8\n"},
+		{[]string{"__complete", "put", "a.pdf", "--to", "/"}, "/Books/\tfolder\n"},
+		{[]string{"__complete", "put", "--to", "/", "a.pdf", "/"}, "txt\n:8\n"},
+		{[]string{"__complete", "put", "a.pdf", "--device", ""}, "rm2\npure\npro\nmove\n:4\n"},
 		{[]string{"__complete", "mput", ""}, ":16\n"},
-		{[]string{"__complete", "mput", "d", "/"}, "/Books/\n"},
+		{[]string{"__complete", "mput", "d", "/"}, "/Books/\tfolder\n"},
+		{[]string{"__complete", "mput", "d", "/Books", ""}, ":4\n"},
+		{[]string{"__complete", "mkdir", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "mv", "/"}, "/Books/\tfolder\n/Notes\tnotebook\n:6\n"},
+		{[]string{"__complete", "mv", "/Notes", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "mv", "/Notes", "/Books", ""}, ":4\n"},
+		{[]string{"__complete", "rename", "/Books", ""}, ":4\n"},
+		{[]string{"__complete", "trash", "/"}, "/Books/\tfolder\n/Notes\tnotebook\n:6\n"},
+		{[]string{"__complete", "restore", "/"}, "/Old\tpdf, in the trash\n:4\n"},
+		{[]string{"__complete", "restore", "d-", "--to", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "rm", "/"}, "/Books/\tfolder\n/Notes\tnotebook\n/Old\tpdf, in the trash\n:6\n"},
+		{[]string{"__complete", "unmark", "d-p"}, "d-paper\t/Books/Paper\n:4\n"},
+		{[]string{"__complete", "unmark", "d-paper", ""}, ":4\n"},
+		{[]string{"__complete", "tag", "add", "/Books/"}, "/Books/Novel\tepub\n/Books/Paper\tpdf\n:4\n"},
 	} {
 		r := run(t, &clitest.Fake{}, clitest.Options{}, tc.args...)
 		if r.Code != 0 || !strings.Contains(r.Out, tc.want) {
 			t.Fatalf("%v: %d %q", tc.args, r.Code, r.Out)
 		}
+	}
+	if r := run(t, &clitest.Fake{NoListing: true}, clitest.Options{}, "__complete", "mv", "/"); r.Code != 0 || r.Out != ":4\n" {
+		t.Fatalf("no listing: %d %q", r.Code, r.Out)
 	}
 }
 

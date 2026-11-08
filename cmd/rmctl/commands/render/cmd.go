@@ -38,6 +38,12 @@ var (
 	}
 )
 
+// The keys of the answer that name the file and its pages.
+const (
+	keyPath  = "path"
+	keyPages = "pages"
+)
+
 // renderView is what render wrote, for --json.
 type renderView struct {
 	Path            string `json:"path"`
@@ -48,8 +54,9 @@ type renderView struct {
 	UnreadablePages int    `json:"unreadable_pages"`
 }
 
-// flags are what render is asked.
+// flags are what render, or open, is asked; name is the command's.
 type flags struct {
+	name                                             string
 	dest, format, mode, grain, paper, id, unreadable string
 	page, quality                                    int
 	noTemplate                                       bool
@@ -60,7 +67,7 @@ type flags struct {
 // New returns the render command. It changes nothing; a local archive needs
 // no cloud, and a cloud document is drawn from the cache when offline.
 func New(env *cliutil.Env) *cobra.Command {
-	var f flags
+	f := flags{name: "render"}
 	cmd := &cobra.Command{
 		Use:     "render <path|id|file.rmdoc> [-o file|dir]",
 		GroupID: cliutil.GroupRead,
@@ -157,7 +164,7 @@ func New(env *cliutil.Env) *cobra.Command {
 			rmctl render / -o ~/remarkable-pdf --incremental --jobs 8
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.OrFiles(cliutil.CompleteRemote(env, false), "rmdoc")),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := f.options(cmd)
@@ -166,7 +173,7 @@ func New(env *cliutil.Env) *cobra.Command {
 			}
 			local := cliutil.LocalArchive(args[0])
 			if opts.Document != "" && !local {
-				return cliutil.Usagef("render: --id picks a document of a local .rmdoc archive; name a cloud document by its path or id")
+				return cliutil.Usagef("%s: --id picks a document of a local .rmdoc archive; name a cloud document by its path or id", f.name)
 			}
 			if local {
 				if err = f.onlyFolder(cmd, "a local archive"); err != nil {
@@ -210,7 +217,33 @@ func New(env *cliutil.Env) *cobra.Command {
 	fl.BoolVarP(&f.tree.All, "all", "a", false, "with a folder: draw the documents in the trash too")
 	fl.BoolVar(&f.tree.Incremental, "incremental", false, "with a folder: skip a document whose PDF is there, drawn from it as it is with these options")
 	fl.IntVarP(&f.tree.Jobs, "jobs", "j", 0, "with a folder: documents at a time (0: the default)")
+	completeValues(cmd)
 	return cmd
+}
+
+// completeValues completes the values of the drawing flags cmd has.
+func completeValues(cmd *cobra.Command) {
+	values := map[string][]string{
+		"format":           {"pdf", "png", "jpg", "svg"},
+		"mode":             names(modes),
+		"grain":            names(grains),
+		"paper":            names(papers),
+		"unreadable-pages": names(unreadables),
+	}
+	for flag, vals := range values {
+		if cmd.Flags().Lookup(flag) != nil {
+			cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{flag: cobra.FixedCompletions(vals, cobra.ShellCompDirectiveNoFileComp)})
+		}
+	}
+}
+
+// names are the values of a fixed list as strings.
+func names[T ~string](values []T) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = string(v)
+	}
+	return out
 }
 
 // answer prints what one document drawn wrote, with what the drawing could
@@ -224,8 +257,8 @@ func (f *flags) answer(cmd *cobra.Command, env *cliutil.Env, report port.RenderR
 		Path: report.Path, Pages: report.Pages, SkippedBlocks: report.SkippedBlocks,
 		RefusedPages: report.RefusedPages, LinksDropped: report.LinksDropped, UnreadablePages: report.UnreadablePages,
 	},
-		output.Field{Key: "path", Value: output.Path(report.Path)},
-		output.Field{Key: "pages", Value: output.Count(report.Pages)},
+		output.Field{Key: keyPath, Value: output.Path(report.Path)},
+		output.Field{Key: keyPages, Value: output.Count(report.Pages)},
 		output.Field{Key: "skipped_blocks", Value: output.Count(report.SkippedBlocks)},
 		output.Field{Key: "refused_pages", Value: output.Count(report.RefusedPages)},
 		output.Field{Key: "links_dropped", Value: output.Count(report.LinksDropped)},
@@ -240,7 +273,7 @@ var treeFlags = []string{"all", "incremental", "jobs"} //nolint:gochecknoglobals
 func (f *flags) onlyFolder(cmd *cobra.Command, what string) error {
 	for _, name := range treeFlags {
 		if cmd.Flags().Changed(name) {
-			return cliutil.Usagef("render: --%s is for a folder; %s is drawn on its own", name, what)
+			return cliutil.Usagef("%s: --%s is for a folder; %s is drawn on its own", f.name, name, what)
 		}
 	}
 	return nil
@@ -253,9 +286,9 @@ func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Renderin
 	changed := cmd.Flags().Changed
 	switch {
 	case changed("page"):
-		return cliutil.Usagef("render: %s is a folder: its documents are drawn whole as PDFs; leave --page out", query)
+		return cliutil.Usagef("%s: %s is a folder: its documents are drawn whole as PDFs; leave --page out", f.name, query)
 	case f.dest != "" && formats[strings.ToLower(strings.TrimPrefix(filepath.Ext(f.dest), "."))] != "":
-		return cliutil.Usagef("render: %s is a folder: -o names the directory its PDFs go into, not a file such as %s", query, f.dest)
+		return cliutil.Usagef("%s: %s is a folder: -o names the directory its PDFs go into, not a file such as %s", f.name, query, f.dest)
 	}
 	report, err := r.RenderTree(cmd.Context(), query, f.dest, opts, f.tree)
 	if err != nil && (len(report.Documents) == 0 || cmd.Context().Err() != nil) {
@@ -347,10 +380,10 @@ func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 		Unreadable: port.Unreadable(strings.ToLower(f.unreadable)),
 	}
 	if !slices.Contains(papers, opts.Paper) {
-		return opts, cliutil.Usagef("render: unknown --paper %q: use a4, letter or tablet", f.paper)
+		return opts, cliutil.Usagef("%s: unknown --paper %q: use a4, letter or tablet", f.name, f.paper)
 	}
 	if !slices.Contains(unreadables, opts.Unreadable) {
-		return opts, cliutil.Usagef("render: unknown --unreadable-pages %q: use placeholder, blank or strict", f.unreadable)
+		return opts, cliutil.Usagef("%s: unknown --unreadable-pages %q: use placeholder, blank or strict", f.name, f.unreadable)
 	}
 	format, err := f.chosenFormat(changed)
 	if err != nil {
@@ -360,41 +393,41 @@ func (f *flags) options(cmd *cobra.Command) (port.RenderOptions, error) {
 	image := format == port.FormatPNG || format == port.FormatJPEG
 	switch {
 	case format == port.FormatPDF && changed("page"):
-		return opts, cliutil.Usagef("render: a PDF is the whole document: leave --page out, or draw the page with --format png, jpg or svg")
+		return opts, cliutil.Usagef("%s: a PDF is the whole document: leave --page out, or draw the page with --format png, jpg or svg", f.name)
 	case format != port.FormatPDF && !changed("page"):
-		return opts, cliutil.Usagef("render: %s is one page: name it with --page N, or draw the whole document with --format pdf", formatNames[format])
+		return opts, cliutil.Usagef("%s: %s is one page: name it with --page N, or draw the whole document with --format pdf", f.name, formatNames[format])
 	case changed("scale") && !image:
-		return opts, cliutil.Usagef("render: --scale is for a page drawn as a PNG or a JPEG")
+		return opts, cliutil.Usagef("%s: --scale is for a page drawn as a PNG or a JPEG", f.name)
 	case changed("quality") && format != port.FormatJPEG:
-		return opts, cliutil.Usagef("render: --quality is for a page drawn as a JPEG")
+		return opts, cliutil.Usagef("%s: --quality is for a page drawn as a JPEG", f.name)
 	case changed("mode") && format != port.FormatPDF:
-		return opts, cliutil.Usagef("render: --mode is for a whole document drawn as a PDF")
+		return opts, cliutil.Usagef("%s: --mode is for a whole document drawn as a PDF", f.name)
 	case changed("grain") && format != port.FormatPDF:
-		return opts, cliutil.Usagef("render: --grain is for a whole document drawn as a PDF")
+		return opts, cliutil.Usagef("%s: --grain is for a whole document drawn as a PDF", f.name)
 	}
 	if format == port.FormatPDF {
 		opts.Mode = port.PDFMode(strings.ToLower(f.mode))
 		if !slices.Contains(modes, opts.Mode) {
-			return opts, cliutil.Usagef("render: unknown --mode %q: use fresh, preserving or recomposed", f.mode)
+			return opts, cliutil.Usagef("%s: unknown --mode %q: use fresh, preserving or recomposed", f.name, f.mode)
 		}
 		opts.Grain = port.PDFGrain(strings.ToLower(f.grain))
 		if !slices.Contains(grains, opts.Grain) {
-			return opts, cliutil.Usagef("render: unknown --grain %q: use mask or group", f.grain)
+			return opts, cliutil.Usagef("%s: unknown --grain %q: use mask or group", f.name, f.grain)
 		}
 		return opts, nil
 	}
 	if f.page < 1 {
-		return opts, cliutil.Usagef("render: --page %d: pages count from 1", f.page)
+		return opts, cliutil.Usagef("%s: --page %d: pages count from 1", f.name, f.page)
 	}
 	opts.Page = f.page
 	if !image {
 		return opts, nil
 	}
 	if f.scale <= 0 {
-		return opts, cliutil.Usagef("render: --scale %g: it must be above 0", f.scale)
+		return opts, cliutil.Usagef("%s: --scale %g: it must be above 0", f.name, f.scale)
 	}
 	if f.quality < 0 || f.quality > 100 {
-		return opts, cliutil.Usagef("render: --quality %d: use 1 to 100, or 0 for the default", f.quality)
+		return opts, cliutil.Usagef("%s: --quality %d: use 1 to 100, or 0 for the default", f.name, f.quality)
 	}
 	opts.Scale, opts.Quality = f.scale, f.quality
 	return opts, nil
@@ -406,7 +439,7 @@ func (f *flags) chosenFormat(changed func(string) bool) (port.Format, error) {
 	if changed("format") {
 		format, ok := formats[strings.ToLower(f.format)]
 		if !ok {
-			return "", cliutil.Usagef("render: unknown --format %q: use pdf, png, jpg or svg", f.format)
+			return "", cliutil.Usagef("%s: unknown --format %q: use pdf, png, jpg or svg", f.name, f.format)
 		}
 		return format, nil
 	}

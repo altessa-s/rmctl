@@ -70,14 +70,9 @@ func newBackup(env *cliutil.Env) *cobra.Command {
 			rmctl backup ~/rm-backup /Notes --rescope
 			rmctl backup ./restore
 		`),
-		Args: cliutil.Args(cobra.RangeArgs(1, backupArgs)),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			if len(args) == 0 {
-				return nil, cobra.ShellCompDirectiveFilterDirs
-			}
-			return cliutil.CompleteRemote(env, true)(cmd, args, word)
-		},
-		SilenceUsage: true,
+		Args:              cliutil.Args(cobra.RangeArgs(1, backupArgs)),
+		ValidArgsFunction: cliutil.LocalThenRemote(env, backupArgs, cliutil.CompleteDirs),
+		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := fetcher(cmd, env)
 			if err != nil {
@@ -155,11 +150,9 @@ func newBackupRestore(env *cliutil.Env) *cobra.Command {
 			rmctl backup restore ~/rm-backup --to /Restored --yes
 			rmctl backup restore ~/rm-backup --id 3f2a --yes
 		`),
-		Args: cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: func(*cobra.Command, []string, string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			return nil, cobra.ShellCompDirectiveFilterDirs
-		},
-		SilenceUsage: true,
+		Args:              cliutil.Args(cobra.ExactArgs(1)),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteDirs),
+		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := cliutil.Need(cmd, env, func(s cliutil.Services) port.Writer { return s.Writer })
 			if err != nil {
@@ -190,6 +183,7 @@ func newBackupRestore(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().StringVar(&opts.To, "to", "", "the folder to recreate the backup's folders below (default: the top level)")
 	cmd.Flags().StringArrayVar(&opts.IDs, "id", nil, "restore only this document: an id or a unique prefix (repeat or comma-separate)")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "show what would be restored; upload nothing")
+	cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{"to": cliutil.CompleteRemote(env, true)})
 	return cmd
 }
 

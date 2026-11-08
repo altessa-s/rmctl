@@ -33,6 +33,7 @@ type Library struct {
 	blobs port.BlobStore
 
 	cache       port.BlobCache
+	listings    port.ListingCache
 	log         *slog.Logger
 	concurrency int
 	attempts    int
@@ -60,6 +61,12 @@ type Option func(*Library)
 // WithCache keeps read files in cache.
 func WithCache(cache port.BlobCache) Option {
 	return func(l *Library) { l.cache = cache }
+}
+
+// WithListings keeps the tree of every root loaded or committed in
+// listings, for shell completion.
+func WithListings(listings port.ListingCache) Option {
+	return func(l *Library) { l.listings = listings }
 }
 
 // WithLogger logs what the loader skips.
@@ -112,7 +119,27 @@ func (l *Library) Load(ctx context.Context) (*domain.Tree, port.RootState, error
 		return nil, port.RootState{}, err
 	}
 	tree, err := l.Build(ctx, state)
+	if err == nil && l.listings != nil {
+		l.listings.PutListing(state.Hash, tree)
+	}
 	return tree, state, err
+}
+
+// listCommitted keeps the listing of a root just committed. Its items
+// are the ones loaded before the change, and the files the change wrote,
+// which the caches kept as it uploaded them, so it costs no request in
+// practice; a tree it cannot build leaves the listing as it was until the
+// next load.
+func (l *Library) listCommitted(ctx context.Context, root port.RootState) {
+	if l.listings == nil {
+		return
+	}
+	tree, err := l.Build(ctx, root)
+	if err != nil {
+		l.log.Debug("listing of the committed root not kept", "err", err)
+		return
+	}
+	l.listings.PutListing(root.Hash, tree)
 }
 
 // Build builds the tree of a root already read. Items whose record hash was
@@ -264,6 +291,7 @@ func (l *Library) Commit(ctx context.Context, change Change) (port.RootState, er
 		if err != nil {
 			return port.RootState{}, err
 		}
+		l.listCommitted(ctx, root)
 		return root, nil
 	}
 	return port.RootState{}, port.ErrRootConflict

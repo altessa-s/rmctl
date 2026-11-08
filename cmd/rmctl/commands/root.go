@@ -113,6 +113,7 @@ func newRoot(env *cliutil.Env) (*cobra.Command, *cliutil.Env) {
 	root.AddCommand(watch.New(env))
 	root.AddCommand(rmdoc.New(env))
 	root.AddCommand(cliutil.WithAccess(render.New(env), cliutil.AccessOffline))
+	root.AddCommand(cliutil.WithAccess(render.NewOpen(env), cliutil.AccessOffline))
 	root.AddCommand(debug.New(env))
 	root.AddCommand(version.New(env))
 	root.SetHelpCommandGroupID(account.GroupID)

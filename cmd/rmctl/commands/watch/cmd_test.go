@@ -98,3 +98,16 @@ func TestWatchUsage(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 }
+
+func TestWatchCompletesItsFolders(t *testing.T) {
+	t.Parallel()
+	for args, want := range map[string]string{
+		"--only":  "/Books/\tfolder\n/Notes\tnotebook\n:6\n",
+		"--under": "/Books/\tfolder\n:6\n",
+	} {
+		r := clitest.Exec(t, (&clitest.Fake{}).Services(), clitest.Options{}, build, "__complete", "watch", args, "/")
+		if r.Code != 0 || r.Out != want {
+			t.Errorf("%s: %d %q", args, r.Code, r.Out)
+		}
+	}
+}

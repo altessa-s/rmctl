@@ -58,7 +58,7 @@ func newMkdir(env *cliutil.Env) *cobra.Command {
 			rmctl mkdir -p /Papers/2026/Q1 --yes
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)
@@ -95,7 +95,7 @@ func newMv(env *cliutil.Env) *cobra.Command {
 			rmctl mv /Papers/paper "/Papers/Paper 2026" --yes
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(withDest)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: completeMove(env),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)
@@ -118,8 +118,27 @@ func newMv(env *cliutil.Env) *cobra.Command {
 type batchSpec struct {
 	use, short, long, example, verb string
 	run                             func(w port.Writer, ctx context.Context, queries []string) ([]domain.Item, error)
-	// flags declares the command's own flags, if any.
-	flags func(cmd *cobra.Command)
+	// flags declares the command's own flags, if any, with env to
+	// complete them.
+	flags func(cmd *cobra.Command, env *cliutil.Env)
+	// trash is which items in the trash the arguments complete with.
+	trash cliutil.Trash
+}
+
+// completeMove completes the item to move, outside the trash, then the
+// folder it goes to.
+func completeMove(env *cliutil.Env) cobra.CompletionFunc {
+	src, dst := cliutil.CompleteRemote(env, false), cliutil.CompleteRemote(env, true)
+	return func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			return src(cmd, args, word)
+		case 1:
+			return dst(cmd, args, word)
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
 }
 
 func trashSpec() batchSpec {
@@ -153,9 +172,11 @@ func restoreSpec() batchSpec {
 		run: func(w port.Writer, ctx context.Context, q []string) ([]domain.Item, error) {
 			return w.Restore(ctx, q, dest)
 		},
-		flags: func(cmd *cobra.Command) {
+		flags: func(cmd *cobra.Command, env *cliutil.Env) {
 			cmd.Flags().StringVar(&dest, "to", "", "the folder to restore into (the top level by default)")
+			cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{"to": cliutil.CompleteRemote(env, true)})
 		},
+		trash: cliutil.TrashOnly,
 	}
 }
 
@@ -168,7 +189,7 @@ func newBatch(env *cliutil.Env, spec batchSpec) *cobra.Command {
 		Long:              spec.long,
 		Example:           spec.example + "\n",
 		Args:              cliutil.Args(cobra.MinimumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.Complete(env, cliutil.Completing{Trash: spec.trash}),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)
@@ -186,7 +207,7 @@ func newBatch(env *cliutil.Env, spec batchSpec) *cobra.Command {
 		},
 	}
 	if spec.flags != nil {
-		spec.flags(cmd)
+		spec.flags(cmd, env)
 	}
 	return cmd
 }
@@ -213,7 +234,7 @@ func newRm(env *cliutil.Env) *cobra.Command {
 			rmctl rm 3f2a 9c1d --yes
 		`),
 		Args:              cliutil.Args(cobra.MinimumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.Complete(env, cliutil.Completing{Trash: cliutil.TrashToo}),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)
@@ -277,14 +298,9 @@ func newMput(env *cliutil.Env) *cobra.Command {
 			rmctl mput ~/Papers /Papers --yes
 			rmctl mput ./books --jobs 4 --incremental --yes
 		`),
-		Args: cliutil.Args(cobra.RangeArgs(1, withDest)),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			if len(args) == 0 {
-				return nil, cobra.ShellCompDirectiveFilterDirs
-			}
-			return cliutil.CompleteRemote(env, true)(cmd, args, word)
-		},
-		SilenceUsage: true,
+		Args:              cliutil.Args(cobra.RangeArgs(1, withDest)),
+		ValidArgsFunction: cliutil.LocalThenRemote(env, withDest, cliutil.CompleteDirs),
+		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := writer(cmd, env)
 			if err != nil {

@@ -60,3 +60,15 @@ func TestRmdocErrors(t *testing.T) {
 		t.Fatal("ran without the archives service")
 	}
 }
+
+func TestRmdocCompletesArchives(t *testing.T) {
+	t.Parallel()
+	r := clitest.Exec(t, (&clitest.Fake{}).Services(), clitest.Options{}, build, "__complete", "rmdoc", "")
+	if r.Code != 0 || r.Out != "rmdoc\n:8\n" {
+		t.Fatalf("%d %q", r.Code, r.Out)
+	}
+	r = clitest.Exec(t, (&clitest.Fake{}).Services(), clitest.Options{}, build, "__complete", "rmdoc", "a.rmdoc", "")
+	if r.Code != 0 || r.Out != ":4\n" {
+		t.Fatalf("%d %q", r.Code, r.Out)
+	}
+}

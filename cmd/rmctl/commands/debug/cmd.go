@@ -149,7 +149,7 @@ func newFiles(env *cliutil.Env) *cobra.Command {
 		`),
 		Example:           "rmctl debug files 3f2a\n",
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in, err := inspector(cmd, env)

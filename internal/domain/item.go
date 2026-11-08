@@ -142,6 +142,13 @@ func NewItem(rec Record, files []File, meta Metadata, tags []string) Item {
 	return item
 }
 
+// NewListedItem is an item as a listing of the library keeps it, for
+// shell completion: its identifier, name, kind, parent and whether it is in
+// the trash itself; no files, times or tags.
+func NewListedItem(id ItemID, name string, kind Kind, parent ItemID, trashed bool) Item {
+	return Item{ID: id, Name: name, Kind: kind, Parent: parent, trashedHere: trashed}
+}
+
 func kindOf(meta Metadata, item Item, hasRM bool) Kind {
 	if meta.Type() == TypeCollection {
 		return KindFolder

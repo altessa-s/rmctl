@@ -8,6 +8,7 @@ budget           512.0 MiB
 budget source    config
 blobs            120
 indexes          61
+rendered         0
 root hash        abababababababababababababababababababababababababababababababab
 root generation  42
 confirmed        2026-11-01 09:30

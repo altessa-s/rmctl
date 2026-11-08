@@ -227,14 +227,9 @@ func newPut(env *cliutil.Env) *cobra.Command {
 			rmctl put paper-v2.pdf /Papers --name Paper --content-only --dry-run
 			rmctl put paper.pdf /Papers --current-page 3 --yes
 		`),
-		Args: cliutil.Args(cobra.MinimumNArgs(1)),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
-			if len(args) == 0 {
-				return []cobra.Completion{"pdf", "epub", "md", "markdown", "txt"}, cobra.ShellCompDirectiveFilterFileExt
-			}
-			return cliutil.CompleteRemote(env, true)(cmd, args, word)
-		},
-		SilenceUsage: true,
+		Args:              cliutil.Args(cobra.MinimumNArgs(1)),
+		ValidArgsFunction: completePut(env),
+		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			files, dest := f.split(args)
 			if err := f.validate(cmd, files); err != nil {
@@ -268,6 +263,13 @@ func newPut(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().BoolVar(&f.opts.DropAnnotations, "drop-annotations", false,
 		"with --content-only, drop the annotations of pages the new PDF no longer has")
 	cmd.Flags().IntVar(&f.opts.CurrentPage, "current-page", 0, "the page a PDF opens on, from 1")
+	cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{
+		"to":    cliutil.CompleteRemote(env, true),
+		"cover": cobra.FixedCompletions([]string{"first", "last"}, cobra.ShellCompDirectiveNoFileComp),
+		"device": cobra.FixedCompletions([]string{
+			string(domain.DeviceRM2), string(domain.DevicePure), string(domain.DevicePro), string(domain.DeviceMove),
+		}, cobra.ShellCompDirectiveNoFileComp),
+	})
 	return cmd
 }
 
@@ -450,7 +452,7 @@ func newUnmark(env *cliutil.Env) *cobra.Command {
 			rmctl unmark 3f2a --page 2,5 --yes
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := cliutil.Need(cmd, env, func(s cliutil.Services) port.Pages { return s.Pages })
@@ -606,5 +608,21 @@ func notePlan(w io.Writer, p port.ContentPlan, dry bool) {
 	}
 	for _, l := range p.Lost {
 		cliutil.Notef(w, "  page %d (%s) is dropped with %d annotation files", l.Number, l.ID, l.Files)
+	}
+}
+
+// uploadable are the extensions of the files put uploads.
+var uploadable = []string{"pdf", "epub", "rmdoc", "md", "markdown", "txt"} //nolint:gochecknoglobals // a fixed list
+
+// completePut completes the files to upload first; after one, a word that
+// starts with "/" may be the library folder they go to, and anything that
+// is not one is another file.
+func completePut(env *cliutil.Env) cobra.CompletionFunc {
+	folder := cliutil.OrFiles(cliutil.CompleteRemote(env, true), uploadable...)
+	return func(cmd *cobra.Command, args []string, word string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) == 0 || !strings.HasPrefix(word, "/") || cmd.Flags().Changed("to") {
+			return uploadable, cobra.ShellCompDirectiveFilterFileExt
+		}
+		return folder(cmd, args, word)
 	}
 }

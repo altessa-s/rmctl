@@ -58,7 +58,7 @@ func newGet(env *cliutil.Env) *cobra.Command {
 			rmctl get 3f2a -o paper.pdf
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := fetcher(cmd, env)
@@ -146,7 +146,7 @@ func newMget(env *cliutil.Env) *cobra.Command {
 			rmctl mget / -o ~/remarkable --incremental --delete --jobs 8
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := fetcher(cmd, env)
@@ -164,6 +164,7 @@ func newMget(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Incremental, "incremental", false, "skip files already present")
 	cmd.Flags().BoolVar(&opts.Delete, "delete", false, "remove local files the folder no longer holds")
 	cmd.Flags().IntVarP(&opts.Jobs, "jobs", "j", 0, "transfers at a time (0: the default)")
+	cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{"output": cliutil.CompleteDirs})
 	_ = cmd.MarkFlagRequired("output") //nolint:errcheck // the flag exists
 	return cmd
 }

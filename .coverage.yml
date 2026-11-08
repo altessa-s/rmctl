@@ -37,3 +37,4 @@ packages:
   - cmd/rmctl/commands/output
   - internal/app/render
   - internal/adapter/renderer
+  - internal/adapter/opener

@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"encoding/xml"
 	"image/jpeg"
 	"image/png"
@@ -132,4 +133,63 @@ func TestE2E_RenderFolder(t *testing.T) {
 	if code, _, stderr := e.rmctl("render", "/Clients", "--page", "1"); code != 2 || !strings.Contains(stderr, "leave --page out") {
 		t.Fatalf("--page with a folder: %d %q", code, stderr)
 	}
+}
+
+// open through the whole tool: a PDF drawn into the profile's cache and
+// shown, shown again without drawing or a download while the document is
+// unchanged, counted and cleared with the cache, and drawn into the
+// temporary directory under --no-cache.
+func TestE2E_Open(t *testing.T) {
+	e := newE2E(t)
+	e.register()
+	e.cloud.Seed(t, clouddouble.Item{
+		ID: "o0000000-0000-4000-8000-0000000000e2", Name: "Notes", Kind: clouddouble.Notebook,
+		PageBodies: [][]byte{tabletPage(t, "Bold_Heading_Bullet_Normal.rm")},
+	})
+	out := e.ok("open", "/Notes", "--json")
+	var first struct {
+		Path  string `json:"path"`
+		Drawn bool   `json:"drawn"`
+		Pages int    `json:"pages"`
+	}
+	if err := json.Unmarshal([]byte(out), &first); err != nil || !first.Drawn || first.Pages != 1 {
+		t.Fatalf("%q %v", out, err)
+	}
+	cache := os.Getenv("RMCTL_CACHE_DIR")
+	if !strings.HasPrefix(first.Path, filepath.Join(cache, "default", "rendered")+string(filepath.Separator)) ||
+		filepath.Base(first.Path) != "Notes-rendered.pdf" {
+		t.Fatalf("drawn at %s", first.Path)
+	}
+	if data, err := os.ReadFile(first.Path); err != nil || !bytes.HasPrefix(data, []byte("%PDF-")) {
+		t.Fatalf("%s: %v", first.Path, err)
+	}
+	blobs := e.cloud.Hits("GET /sync/v3/files/*")
+	if again := e.ok("open", "o0", "--json"); !strings.Contains(again, `"drawn": false`) || !strings.Contains(again, first.Path) {
+		t.Fatalf("open again: %q", again)
+	}
+	if n := e.cloud.Hits("GET /sync/v3/files/*"); n != blobs {
+		t.Fatalf("a kept drawing downloaded %d files", n-blobs)
+	}
+	page := e.ok("open", "/Notes", "--page", "1")
+	if !strings.Contains(page, "Notes-p1.png") {
+		t.Fatalf("open --page: %q", page)
+	}
+	if shown := e.opener.shown(); len(shown) != 3 || shown[0] != first.Path || shown[1] != first.Path {
+		t.Fatalf("shown %v", shown)
+	}
+	if status := e.ok("debug", "cache", "status", "--json"); !strings.Contains(status, `"rendered": 2`) {
+		t.Fatalf("status: %q", status)
+	}
+	e.ok("debug", "cache", "clear", "--yes")
+	if _, err := os.Stat(first.Path); !os.IsNotExist(err) {
+		t.Fatal("clearing the cache kept the drawing")
+	}
+	var temp struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(e.ok("open", "/Notes", "--no-cache", "--json")), &temp); err != nil ||
+		strings.HasPrefix(temp.Path, cache) || filepath.Base(temp.Path) != "Notes-rendered.pdf" {
+		t.Fatalf("--no-cache drew at %s: %v", temp.Path, err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(temp.Path)) })
 }

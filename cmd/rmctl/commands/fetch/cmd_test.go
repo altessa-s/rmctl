@@ -98,3 +98,27 @@ func TestErrors(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 }
+
+func TestComplete(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"__complete", "get", "/Books/"}, "/Books/Novel\tepub\n/Books/Paper\tpdf\n:4\n"},
+		{[]string{"__complete", "get", "/Notes", ""}, ":4\n"},
+		{[]string{"__complete", "export", "/Notes", "/B"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "mget", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "mget", "/Books", "-o", ""}, ":16\n"},
+		{[]string{"__complete", "sync", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "backup", ""}, "restore\tPut the documents of a backup back into the library\n:16\n"},
+		{[]string{"__complete", "backup", "dir", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "backup", "dir", "/Books", ""}, ":4\n"},
+		{[]string{"__complete", "backup", "restore", ""}, ":16\n"},
+		{[]string{"__complete", "backup", "restore", "dir", "--to", "/"}, "/Books/\tfolder\n:6\n"},
+	} {
+		if r := run(t, &clitest.Fake{}, clitest.Options{}, tc.args...); r.Code != 0 || r.Out != tc.want {
+			t.Errorf("%v: %d %q", tc.args, r.Code, r.Out)
+		}
+	}
+}

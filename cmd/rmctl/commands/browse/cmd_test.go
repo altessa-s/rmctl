@@ -312,3 +312,29 @@ func TestColorGolden(t *testing.T) {
 		}
 	}
 }
+
+func TestComplete(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"__complete", "ls", ""}, "/Books/\tfolder\n/Notes\tnotebook\n:6\n"},
+		{[]string{"__complete", "ls", "-a", "/O"}, "/Old\tpdf, in the trash\n:4\n"},
+		{[]string{"__complete", "ls", "/O"}, ":4\n"},
+		{[]string{"__complete", "ls", "/Books", ""}, ":4\n"},
+		{[]string{"__complete", "tree", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "stat", "d-n"}, "d-novel\t/Books/Novel\nd-notes\t/Notes\n:4\n"},
+		{[]string{"__complete", "find", ""}, ":4\n"},
+		{[]string{"__complete", "find", "--under", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "du", "/"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "dupes", "/B"}, "/Books/\tfolder\n:6\n"},
+		{[]string{"__complete", "text", "/Books/P"}, "/Books/Paper\tpdf\n:4\n"},
+		{[]string{"__complete", "text", "./"}, "rmdoc\n:8\n"},
+		{[]string{"__complete", "highlights", "~/backup/"}, "rmdoc\n:8\n"},
+	} {
+		if r := run(t, &clitest.Fake{}, tc.args...); r.Code != 0 || r.Out != tc.want {
+			t.Errorf("%v: %d %q", tc.args, r.Code, r.Out)
+		}
+	}
+}

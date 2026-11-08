@@ -13,11 +13,13 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/clouddouble"
@@ -25,17 +27,38 @@ import (
 )
 
 // e2e is one emulated cloud and one isolated profile. keychain, when set,
-// stands in for the login Keychain.
+// stands in for the login Keychain; opener stands in for the system's
+// viewer, so no test starts one.
 type e2e struct {
 	t        *testing.T
 	cloud    *clouddouble.Cloud
 	keychain wiring.KeychainItems
+	opener   *viewer
 }
 
 func newE2E(t *testing.T) *e2e {
 	t.Helper()
 	isolate(t)
-	return &e2e{t: t, cloud: clouddouble.New(t)}
+	return &e2e{t: t, cloud: clouddouble.New(t), opener: &viewer{}}
+}
+
+// viewer records the files open showed.
+type viewer struct {
+	mu     sync.Mutex
+	opened []string
+}
+
+func (v *viewer) Open(_ context.Context, path string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.opened = append(v.opened, path)
+	return nil
+}
+
+func (v *viewer) shown() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return slices.Clone(v.opened)
 }
 
 // rmctl runs the tool and returns its exit code, standard output and
@@ -43,7 +66,7 @@ func newE2E(t *testing.T) *e2e {
 func (e *e2e) rmctl(args ...string) (int, string, string) {
 	e.t.Helper()
 	var out, errOut bytes.Buffer
-	code := runWith(args, nil, &out, &errOut, func(c int) { e.t.Fatalf("exit(%d) from %v", c, args) }, seams{keychain: e.keychain}, e.cloud.Options()...)
+	code := runWith(args, nil, &out, &errOut, func(c int) { e.t.Fatalf("exit(%d) from %v", c, args) }, seams{keychain: e.keychain, opener: e.opener}, e.cloud.Options()...)
 	return code, out.String(), errOut.String()
 }
 

@@ -117,3 +117,88 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 	}
 	return report, nil
 }
+
+// Previews is the previews double: drawings kept in memory by key, each
+// at "rendered/<key>/<name>". Fail fails every call.
+type Previews struct {
+	Fail error
+
+	mu    sync.Mutex
+	kept  map[string]string
+	data  map[string][]byte
+	draws int
+}
+
+var _ port.Previews = (*Previews)(nil)
+
+// Preview implements port.Previews.
+func (p *Previews) Preview(_ context.Context, key, name string, draw func(w io.Writer) error) (string, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.Fail != nil {
+		return "", false, p.Fail
+	}
+	path := "rendered/" + key + "/" + name
+	if p.kept[key] == path {
+		return path, false, nil
+	}
+	var b bytesBuffer
+	if err := draw(&b); err != nil {
+		return "", false, err
+	}
+	if p.kept == nil {
+		p.kept, p.data = map[string]string{}, map[string][]byte{}
+	}
+	p.kept[key], p.data[path] = path, b.data
+	p.draws++
+	return path, true, nil
+}
+
+// File is the drawing kept at path.
+func (p *Previews) File(path string) ([]byte, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	data, ok := p.data[path]
+	return data, ok
+}
+
+// Draws counts the drawings made.
+func (p *Previews) Draws() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.draws
+}
+
+// bytesBuffer collects what a drawing writes.
+type bytesBuffer struct{ data []byte }
+
+func (b *bytesBuffer) Write(p []byte) (int, error) {
+	b.data = append(b.data, p...)
+	return len(p), nil
+}
+
+// Opener is the opener double: it records the paths it was asked to show,
+// and fails with Fail.
+type Opener struct {
+	Fail error
+
+	mu     sync.Mutex
+	opened []string
+}
+
+var _ port.Opener = (*Opener)(nil)
+
+// Open implements port.Opener.
+func (o *Opener) Open(_ context.Context, path string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.opened = append(o.opened, path)
+	return o.Fail
+}
+
+// Opened are the paths shown, in order.
+func (o *Opener) Opened() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.opened)
+}
