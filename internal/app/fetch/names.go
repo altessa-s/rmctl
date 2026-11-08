@@ -12,35 +12,9 @@ import (
 	"github.com/altessa-s/rmctl/internal/domain"
 )
 
-// unnamed stands in for a name that sanitizes to nothing usable.
-const unnamed = "unnamed"
-
-// firstPrintable is the first character that is not a control character,
-// and del the one control character above it.
-const (
-	firstPrintable = 0x20
-	del            = 0x7f
-)
-
-// SafeName turns a visible name into one path component: '/', '\', ':',
-// control characters and DEL become '-', and an empty name, "." or ".."
-// becomes "unnamed". The cloud lets a name hold anything; a local path must
-// not be steered out of the directory it is written into.
-func SafeName(name string) string {
-	out := strings.Map(func(r rune) rune {
-		switch {
-		case r == '/', r == '\\', r == ':', r < firstPrintable, r == del:
-			return '-'
-		default:
-			return r
-		}
-	}, name)
-	switch strings.TrimSpace(out) {
-	case "", ".", "..":
-		return unnamed
-	}
-	return out
-}
+// SafeName turns a visible name into one path component: see
+// [domain.SafeName].
+func SafeName(name string) string { return domain.SafeName(name) }
 
 // FileName is the local file name of a document's original: its safe name,
 // with the extension added unless the name already ends with it.

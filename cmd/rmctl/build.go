@@ -59,6 +59,7 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		Pages:     svc.Pages,
 		Archives:  svc.Archives,
 		Rendering: svc.Rendering,
+		Notes:     svc.Notes,
 		Syncer:    svc.Syncer,
 		Cache:     svc.Cache,
 		Offline:   svc.Offline,

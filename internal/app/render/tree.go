@@ -5,18 +5,13 @@
 package render
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
-	"strings"
-	"time"
-
-	"github.com/altessa-s/go-atlas-core/runtime/concurrency"
 
 	"github.com/altessa-s/rmctl/internal/app/fetch"
+	"github.com/altessa-s/rmctl/internal/app/outdir"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -25,7 +20,7 @@ import (
 const DefaultJobs = fetch.DefaultJobs
 
 // TopDir names the directory the whole library is drawn into without one.
-const TopDir = "remarkable"
+const TopDir = outdir.TopDir
 
 // The failures of a folder drawing.
 var (
@@ -38,21 +33,7 @@ var (
 
 // Folder implements port.Rendering.
 func (s *Service) Folder(ctx context.Context, query string) (bool, error) {
-	if query == "" || query == "/" {
-		return true, nil
-	}
-	tree, _, err := s.lib.Load(ctx)
-	if err != nil {
-		return false, err
-	}
-	it, found, err := tree.Resolve(query, true)
-	switch {
-	case err != nil:
-		return false, err
-	case !found:
-		return false, fmt.Errorf("%s: %w", query, domain.ErrNotFound)
-	}
-	return it.Kind.IsFolder(), nil
+	return outdir.Folder(ctx, s.lib, query)
 }
 
 // TreeOptions is opts for drawing a folder, with the defaults filled in,
@@ -75,69 +56,18 @@ func TreeOptions(opts port.RenderOptions) (port.RenderOptions, error) {
 
 // TreeFileName is the name of a document's PDF in a folder drawn: its safe
 // name, a .pdf or .epub it ends with replaced by .pdf.
-func TreeFileName(name string) string {
-	base := fetch.SafeName(name)
-	for _, ext := range []string{".pdf", ".epub"} {
-		if cut := len(base) - len(ext); cut > 0 && strings.EqualFold(base[cut:], ext) {
-			base = base[:cut]
-			break
-		}
-	}
-	return base + ".pdf"
-}
+func TreeFileName(name string) string { return domain.DerivedFileName(name, "pdf") }
 
 // Planned is one document of a folder drawing and the PDF it becomes.
-type Planned struct {
-	Document domain.Item
-	// LibraryPath is the document's path in the library, Path its PDF's.
-	LibraryPath, Path string
-}
+type Planned = outdir.Planned
 
 // TreePlan is the documents below the folder top of tree, each with the
-// PDF it becomes under dir, in library path order. Every folder below top
-// is a directory under dir, named by its safe name. Documents and folders
-// in the trash stay out unless all, or unless top itself is in the trash.
-// Two names that collide in one directory, compared without case, are
-// told apart by identifier: in order of creation, then of identifier, the
-// first keeps its name and the later ones get " (<first 8 characters of
-// the identifier>)" before .pdf, or at the end of a folder's name.
+// PDF it becomes under dir, in library path order, laid out as
+// [outdir.Plan] lays them out: a directory per folder, names that collide
+// told apart by identifier, the trash left out unless all, or unless top
+// itself is in the trash.
 func TreePlan(tree *domain.Tree, top domain.ItemID, dir string, all bool) []Planned {
-	trash := all || (top != domain.RootID && tree.IsTrashed(top))
-	var out []Planned
-	seen := map[domain.ItemID]bool{top: true}
-	var walk func(folder domain.ItemID, local string)
-	walk = func(folder domain.ItemID, local string) {
-		children := slices.Clone(tree.Children(folder, trash))
-		slices.SortFunc(children, func(a, b domain.Item) int {
-			return cmp.Or(a.Created.Compare(b.Created), strings.Compare(string(a.ID), string(b.ID)))
-		})
-		taken := map[string]bool{}
-		for _, it := range children {
-			if seen[it.ID] {
-				continue
-			}
-			seen[it.ID] = true
-			name, ext := TreeFileName(it.Name), "pdf"
-			if it.Kind.IsFolder() {
-				name, ext = fetch.SafeName(it.Name), ""
-			}
-			if taken[strings.ToLower(name)] {
-				name = fetch.Disambiguated(name, it.ID, ext)
-			}
-			taken[strings.ToLower(name)] = true
-			path := filepath.Join(local, name)
-			if it.Kind.IsFolder() {
-				walk(it.ID, path)
-				continue
-			}
-			out = append(out, Planned{Document: it, LibraryPath: tree.Path(it.ID), Path: path})
-		}
-	}
-	walk(top, dir)
-	slices.SortFunc(out, func(a, b Planned) int {
-		return cmp.Or(strings.Compare(a.LibraryPath, b.LibraryPath), strings.Compare(string(a.Document.ID), string(b.Document.ID)))
-	})
-	return out
+	return outdir.Plan(tree, top, dir, all, "pdf")
 }
 
 // RenderTree implements port.Rendering. Each document is downloaded,
@@ -162,7 +92,7 @@ func (s *Service) RenderTree(
 	if err != nil {
 		return port.RenderTreeReport{}, err
 	}
-	top, name, err := topFolder(lib, query)
+	top, name, err := outdir.Top(lib, query, ErrNotFolder)
 	if err != nil {
 		return port.RenderTreeReport{}, err
 	}
@@ -174,41 +104,28 @@ func (s *Service) RenderTree(
 	}
 	plan := TreePlan(lib, top, dir, tree.All)
 	options := fingerprint(opts)
-	recorded, dropped := pruned(readManifest(s.files, dir), dir, plan, options)
+	recorded, dropped := outdir.Pruned(outdir.Read(s.files, dir, ManifestName), dir, plan, options)
 	if dropped {
 		if err = writeManifest(ctx, s.files, dir, recorded); err != nil {
 			return port.RenderTreeReport{}, err
 		}
 	}
-	report := port.RenderTreeReport{Dir: dir, Documents: make([]port.RenderedDocument, len(plan))}
-	done := make([]bool, len(plan))
-	indexes := make([]int, len(plan))
-	for i := range indexes {
-		indexes[i] = i
-	}
 	jobs := tree.Jobs
 	if jobs < 1 {
 		jobs = DefaultJobs
 	}
-	err = concurrency.Process(ctx, indexes, func(ctx context.Context, i int) error {
+	// An interrupted drawing reports the documents it finished.
+	finished, err := outdir.Each(ctx, len(plan), jobs, func(ctx context.Context, i int) (port.RenderedDocument, error) {
 		// What is left recorded of the plan was drawn from the document as it
 		// is now, with these options: only its PDF's time is left to check.
-		_, known := recorded[manifestKey(dir, plan[i].Path)]
+		_, known := recorded[outdir.Key(dir, plan[i].Path)]
 		d := s.renderOne(ctx, plan[i], opts, tree.Incremental && known)
 		if d.Err != nil && ctx.Err() != nil {
-			return ctx.Err()
+			return d, ctx.Err()
 		}
-		report.Documents[i], done[i] = d, true
-		return nil
-	}, concurrency.WithConcurrency[int](jobs), concurrency.WithStopOnError[int]())
-	// An interrupted drawing reports the documents it finished.
-	finished := report.Documents[:0]
-	for i, d := range report.Documents {
-		if done[i] {
-			finished = append(finished, d)
-		}
-	}
-	report.Documents = finished
+		return d, nil
+	})
+	report := port.RenderTreeReport{Dir: dir, Documents: finished}
 	if werr := s.record(ctx, dir, recorded, finished, options); werr != nil {
 		return report, errors.Join(err, werr)
 	}
@@ -227,17 +144,17 @@ func (s *Service) RenderTree(
 // document as it is, and an incremental drawing draws it again, which a
 // later rmctl may read. So the policy for such pages is no part of the
 // options recorded: it changes no PDF that is recorded.
-func (s *Service) record(ctx context.Context, dir string, recorded map[string]manifestEntry, docs []port.RenderedDocument, opts string) error {
+func (s *Service) record(ctx context.Context, dir string, recorded map[string]outdir.Entry, docs []port.RenderedDocument, opts string) error {
 	drawn := false
 	for _, d := range docs {
 		if d.Status != port.RenderRendered || d.Document.Modified.IsZero() {
 			continue
 		}
-		key := manifestKey(dir, d.Report.Path)
+		key := outdir.Key(dir, d.Report.Path)
 		if d.Report.UnreadablePages > 0 {
 			delete(recorded, key)
 		} else {
-			recorded[key] = entryOf(d.Document, opts)
+			recorded[key] = outdir.EntryOf(d.Document, opts)
 		}
 		drawn = true
 	}
@@ -245,24 +162,6 @@ func (s *Service) record(ctx context.Context, dir string, recorded map[string]ma
 		return nil
 	}
 	return writeManifest(ctx, s.files, dir, recorded)
-}
-
-// topFolder is the folder query names and the directory name it is drawn
-// into by default.
-func topFolder(tree *domain.Tree, query string) (domain.ItemID, string, error) {
-	if query == "" || query == "/" {
-		return domain.RootID, TopDir, nil
-	}
-	it, found, err := tree.Resolve(query, true)
-	switch {
-	case err != nil:
-		return "", "", err
-	case !found:
-		return "", "", fmt.Errorf("%s: %w", query, domain.ErrNotFound)
-	case !it.Kind.IsFolder():
-		return "", "", fmt.Errorf("%s: %w", it.Name, ErrNotFolder)
-	}
-	return it.ID, fetch.SafeName(it.Name), nil
 }
 
 // renderOne draws one planned document, or finds it unchanged.
@@ -278,7 +177,7 @@ func (s *Service) renderOne(ctx context.Context, p Planned, opts port.RenderOpti
 		if err != nil {
 			return fail(err)
 		}
-		if exists && sameTime(mtime, modified) {
+		if exists && outdir.SameTime(mtime, modified) {
 			d.Status = port.RenderUnchanged
 			return d
 		}
@@ -307,10 +206,4 @@ func (s *Service) renderOne(ctx context.Context, p Planned, opts port.RenderOpti
 	}
 	d.Status = port.RenderRendered
 	return d
-}
-
-// sameTime compares a file's modification time with a document's to the
-// second: the coarsest a file system the PDFs go to keeps.
-func sameTime(file, document time.Time) bool {
-	return file.Truncate(time.Second).Equal(document.Truncate(time.Second))
 }

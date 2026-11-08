@@ -35,7 +35,10 @@ type PageWriter interface {
 
 // DocumentText is the typed text of a document, page by page.
 type DocumentText struct {
-	Item  domain.Item
+	Item domain.Item
+	// Path is the document's path in the library; "" for a document of a
+	// local archive.
+	Path  string
 	Pages []domain.Page
 }
 

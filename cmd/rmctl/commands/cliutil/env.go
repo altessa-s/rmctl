@@ -43,6 +43,7 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Notes     port.Notes
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles

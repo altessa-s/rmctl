@@ -36,4 +36,6 @@ packages:
   - cmd/rmctl/commands
   - cmd/rmctl/commands/output
   - internal/app/render
+  - internal/app/outdir
+  - internal/app/notes
   - internal/adapter/renderer
