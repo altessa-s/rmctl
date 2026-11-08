@@ -28,6 +28,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/fetch"
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/notes"
 	"github.com/altessa-s/rmctl/internal/app/pages"
 	"github.com/altessa-s/rmctl/internal/app/prefetch"
 	"github.com/altessa-s/rmctl/internal/app/profile"
@@ -91,6 +92,7 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Notes     port.Notes
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
@@ -166,6 +168,7 @@ func Build(opts Options) (Services, error) {
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
 		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
+		Notes:     notes.New(lib, reader, files),
 		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
 			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),

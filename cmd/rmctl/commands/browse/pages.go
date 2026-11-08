@@ -7,7 +7,6 @@ package browse
 import (
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc"
@@ -23,6 +22,8 @@ const (
 	formatText     = "text"
 	formatMarkdown = "markdown"
 	formatJSON     = "json"
+	// formatNote is a markdown note for a notes app, highlights alone.
+	formatNote = "note"
 )
 
 func pagesService(cmd *cobra.Command, env *cliutil.Env) (port.Pages, error) {
@@ -33,11 +34,17 @@ func pagesService(cmd *cobra.Command, env *cliutil.Env) (port.Pages, error) {
 type pageFlags struct {
 	pages  []string
 	format string
+	// note says the command writes notes too: highlights does.
+	note bool
 }
 
 func (f *pageFlags) add(cmd *cobra.Command) {
 	cmd.Flags().StringArrayVar(&f.pages, "page", nil, "only this page: a number from 1 or a page id (repeat or comma-separate)")
-	cmd.Flags().StringVar(&f.format, "format", formatText, "output format: text, markdown, json")
+	formats := "text, markdown, json"
+	if f.note {
+		formats = "text, markdown, note, json"
+	}
+	cmd.Flags().StringVar(&f.format, "format", formatText, "output format: "+formats)
 }
 
 // resolved is the output format: --json, else this command's own --format,
@@ -50,9 +57,11 @@ func (f *pageFlags) resolved(cmd *cobra.Command, env *cliutil.Env) (string, erro
 	if !cmd.Flags().Changed("format") && env.JSON(cmd) {
 		return formatJSON, nil
 	}
-	switch f.format {
-	case formatText, formatMarkdown, formatJSON:
+	switch {
+	case f.format == formatText, f.format == formatMarkdown, f.format == formatJSON, f.note && f.format == formatNote:
 		return f.format, nil
+	case f.note:
+		return "", cliutil.Usagef("%s: unknown --format %q: use text, markdown, note or json", cmd.CommandPath(), f.format)
 	default:
 		return "", cliutil.Usagef("%s: unknown --format %q: use text, markdown or json", cmd.CommandPath(), f.format)
 	}
@@ -174,58 +183,6 @@ func newText(env *cliutil.Env) *cobra.Command {
 	return cmd
 }
 
-func newHighlights(env *cliutil.Env) *cobra.Command {
-	var f pageFlags
-	cmd := &cobra.Command{
-		Use:     "highlights <path|id|file.rmdoc>",
-		GroupID: GroupID,
-		Short:   "Print the highlights of a document",
-		Long: heredoc.Doc(`
-			Prints the highlights of a PDF or an EPUB, page by page, with their color
-			and the words under them as the tablet copied them out of the text layer.
-			A highlight over a page with no text layer has no words: it is listed as
-			"(no text)". --format markdown writes each page's highlights as quotes.
-			A local .rmdoc file is read offline, every document of it in turn.
-		`),
-		Example: heredoc.Doc(`
-			rmctl highlights /Books/Paper
-			rmctl highlights /Books/Paper --format markdown > notes.md
-			rmctl highlights 3f2a --json
-		`),
-		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
-		SilenceUsage:      true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			docs, format, local, err := f.load(cmd, env, args[0])
-			if err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			if format == formatJSON {
-				return writeJSON(out, docs, local, highlightsView)
-			}
-			for i, doc := range docs {
-				if HighlightCount(doc.Pages) == 0 {
-					cliutil.Notef(cmd.ErrOrStderr(), "%s has no highlights", doc.Item.Name)
-				}
-				if err := heading(out, docs, i, format); err != nil {
-					return err
-				}
-				text := HighlightsText(doc.Pages)
-				if format == formatMarkdown {
-					text = HighlightsMarkdown(doc.Pages)
-				}
-				if _, err := io.WriteString(out, text); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-	f.add(cmd)
-	return cmd
-}
-
 func hasText(doc port.DocumentText) bool {
 	for _, p := range doc.Pages {
 		for _, para := range p.Paragraphs {
@@ -235,15 +192,6 @@ func hasText(doc port.DocumentText) bool {
 		}
 	}
 	return false
-}
-
-// HighlightCount is how many highlights the pages hold.
-func HighlightCount(pages []domain.Page) int {
-	n := 0
-	for _, p := range pages {
-		n += len(p.Highlights)
-	}
-	return n
 }
 
 // StyleName is the stable name of a paragraph style in JSON.
@@ -291,22 +239,9 @@ func PlainText(pages []domain.Page) string {
 	return b.String()
 }
 
-// isListItem reports a paragraph that markdown writes as a list line, which
-// must not be cut from its neighbors by a blank line.
-func isListItem(s domain.ParagraphStyle) bool {
-	switch s {
-	case domain.StyleBullet, domain.StyleBulletNested, domain.StyleCheckbox, domain.StyleCheckboxDone,
-		domain.StyleNumbered, domain.StyleNumberedNested:
-		return true
-	default:
-		return false
-	}
-}
-
 // Markdown is the pages as markdown: a "## Page N" heading per page when
-// there are several, and each paragraph in the markdown of its style. A
-// numbered list counts from 1 again after anything that is not a numbered
-// line.
+// there are several, and each page's paragraphs as [domain.PageMarkdown]
+// writes them.
 func Markdown(pages []domain.Page) string {
 	var b strings.Builder
 	for i, p := range pages {
@@ -316,77 +251,9 @@ func Markdown(pages []domain.Page) string {
 			}
 			fmt.Fprintf(&b, "## Page %d\n\n", p.Number)
 		}
-		number, nested := 0, 0
-		prevList, written := false, false
-		for _, para := range p.Paragraphs {
-			if strings.TrimSpace(para.Text) == "" {
-				// An empty paragraph only parts what is around it.
-				number, nested, prevList = 0, 0, false
-				continue
-			}
-			list := isListItem(para.Style)
-			if written && (!list || !prevList) {
-				b.WriteByte('\n')
-			}
-			written = true
-			// A nested line does not end the numbered list it hangs from.
-			if para.Style != domain.StyleNumbered && para.Style != domain.StyleNumberedNested {
-				number = 0
-			}
-			if para.Style != domain.StyleNumberedNested {
-				nested = 0
-			}
-			switch para.Style {
-			case domain.StyleNumbered:
-				number++
-			case domain.StyleNumberedNested:
-				nested++
-			default:
-			}
-			writeMarkdownLine(&b, para, number, nested)
-			b.WriteByte('\n')
-			prevList = list
-		}
+		b.WriteString(domain.PageMarkdown(p, "#"))
 	}
 	return b.String()
-}
-
-// writeMarkdownLine writes one paragraph in the markdown of its style.
-func writeMarkdownLine(b *strings.Builder, p domain.Paragraph, number, nested int) {
-	switch p.Style {
-	case domain.StyleHeading:
-		b.WriteString("# ")
-	case domain.StyleBold:
-		b.WriteString("**")
-		b.WriteString(strings.TrimSpace(p.Text))
-		b.WriteString("**")
-		return
-	case domain.StyleBullet:
-		b.WriteString("- ")
-	case domain.StyleBulletNested:
-		b.WriteString("  - ")
-	case domain.StyleCheckbox:
-		b.WriteString("- [ ] ")
-	case domain.StyleCheckboxDone:
-		b.WriteString("- [x] ")
-	case domain.StyleNumbered:
-		b.WriteString(strconv.Itoa(number))
-		b.WriteString(". ")
-	case domain.StyleNumberedNested:
-		b.WriteString("   ")
-		b.WriteString(strconv.Itoa(nested))
-		b.WriteString(". ")
-	default:
-	}
-	b.WriteString(p.Text)
-}
-
-// highlightText is a highlight's words, or "(no text)".
-func highlightText(h domain.Highlight) string {
-	if !h.HasText || strings.TrimSpace(h.Text) == "" {
-		return "(no text)"
-	}
-	return h.Text
 }
 
 // HighlightsText is one line per highlight: page, color, words.
@@ -394,7 +261,7 @@ func HighlightsText(pages []domain.Page) string {
 	var b strings.Builder
 	for _, p := range pages {
 		for _, h := range p.Highlights {
-			fmt.Fprintf(&b, "p.%d  %s  %s\n", p.Number, colorOr(h.Color), highlightText(h))
+			fmt.Fprintf(&b, "p.%d  %s  %s\n", p.Number, colorOr(h.Color), domain.HighlightText(h))
 		}
 	}
 	return b.String()
@@ -415,7 +282,7 @@ func HighlightsMarkdown(pages []domain.Page) string {
 		first = false
 		fmt.Fprintf(&b, "## Page %d\n", p.Number)
 		for _, h := range p.Highlights {
-			fmt.Fprintf(&b, "\n> %s\n", strings.ReplaceAll(highlightText(h), "\n", "\n> "))
+			fmt.Fprintf(&b, "\n> %s\n", strings.ReplaceAll(domain.HighlightText(h), "\n", "\n> "))
 		}
 	}
 	return b.String()

@@ -38,7 +38,7 @@ func TestBuild(t *testing.T) {
 			t.Fatal(err)
 		}
 		if svc.Account == nil || svc.Browser == nil || svc.Fetcher == nil || svc.Writer == nil || svc.Watcher == nil || svc.Inspector == nil || svc.Pages == nil ||
-			svc.Archives == nil {
+			svc.Archives == nil || svc.Notes == nil {
 			t.Fatalf("cache %d: %+v", cache, svc)
 		}
 		if svc.Config.Profile != "work" || filepath.Base(svc.Config.TokenPath) != "token.json" {

@@ -21,7 +21,7 @@ The scripts were run against a test account, the writes with `--dry-run`, and pa
 
 ## Ground rules for scripts
 
-- **Parse JSON.** `--json` (or `RMCTL_FORMAT=json`) is the stable interface; `--format plain` is one TAB-separated line per record, for `cut` and `awk`. Answers go to standard output, progress and notes to standard error, so a pipe only ever sees the answer. `text` and `highlights` take their own `--format text|markdown|json`, and `render` answers in JSON with `--json`.
+- **Parse JSON.** `--json` (or `RMCTL_FORMAT=json`) is the stable interface; `--format plain` is one TAB-separated line per record, for `cut` and `awk`. Answers go to standard output, progress and notes to standard error, so a pipe only ever sees the answer. `text` and `highlights` take their own `--format text|markdown|json` (and `note` for `highlights`), and `render` and `highlights <folder>` answer in JSON with `--json`.
 - **Name items by identifier.** A path breaks when a document is renamed or moved; the `id` from `find --json` does not. Every command that takes a path takes an id or a unique prefix of one.
 - **Say `--yes`.** A writing command asks first on a terminal and, anywhere else, refuses with exit status 2 unless `--yes` is given. `put`, `backup restore` and `--content-only` also take `--dry-run`, which checks everything and changes nothing.
 - **Pick the account.** `-P name` (or `RMCTL_PROFILE`) chooses the profile; without it, `default`.
@@ -297,42 +297,39 @@ Moving a file into `sent/` is itself an event for the watcher; the scan it start
 
 ## Highlights to Markdown
 
-`highlights --format markdown` writes a document's highlights as quotes under a heading per page, the words as the tablet copied them out of the PDF's text layer. The script finds every PDF and EPUB below a folder and writes one Markdown file per document with highlights, keeping the folder tree.
+`highlights` writes a whole folder's highlights as Markdown notes by itself, one per document, keeping the folder tree, and on the next run rewrites only the notes whose document changed: no script is needed to walk the library. Each note has YAML front matter (`title`, `remarkable-id`, `remarkable-path`, `type`, `modified`, `pages`, `highlights`, `tags`), the highlights by page as quotes ending with their page and their color as a tag, and the typed text by page; the layout is in [Highlight notes](pages-and-archives.md#highlight-notes).
 
-`~/bin/rm-highlights.sh`:
+```sh
+rmctl highlights /Books -o ~/Vault/reMarkable --incremental
+```
+
+The script below keeps an Obsidian vault in step with a folder of the library: `render` draws each document as a PDF into `reMarkable/PDF`, `highlights` writes the notes into `reMarkable/Notes`, and `--pdf-link` makes each page reference open its PDF at that page — the two trees share their names, so `{path}` names both. Both runs are incremental, so a nightly run only reads and draws what changed; `--prune` moves the notes of documents deleted, moved or renamed into `reMarkable/Notes/.rmctl-removed`, which Obsidian does not show. On rmctl-lite, which has no renderer, leave out the `render` line and `--pdf-link`.
+
+`~/bin/rm-reading-vault.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# Write the highlights of every PDF and EPUB below a folder as Markdown files.
-# Usage: rm-highlights.sh /Folder outdir
+# Keep an Obsidian vault in step with a folder of the library: a PDF of each
+# document, drawn with its ink, and a note of its highlights linking to it.
+# Usage: rm-reading-vault.sh /Books ~/Vault
 set -euo pipefail
 
-folder="${1:?usage: rm-highlights.sh /Folder outdir}"
-out="${2:?usage: rm-highlights.sh /Folder outdir}"
-folder="${folder%/}"
+folder="${1:?usage: rm-reading-vault.sh /Folder vault}"
+vault="${2:?usage: rm-reading-vault.sh /Folder vault}"
 
-rmctl find --under "${folder:-/}" --json |
-  jq -r '.[] | select(.kind != "folder" and .kind != "notebook") | [.id, .path] | @tsv' |
-  while IFS=$'\t' read -r id path; do
-    if ! md=$(rmctl highlights "$id" --format markdown </dev/null 2>/dev/null); then
-      echo "skipped $path" >&2
-      continue
-    fi
-    [[ -n $md ]] || continue                     # no highlights: no file
-    file="$out/${path#"$folder"/}.md"
-    mkdir -p "$(dirname "$file")"
-    printf '# %s\n\n%s\n' "${path##*/}" "$md" >"$file"
-    echo "$file"
-  done
+rmctl render "$folder" -o "$vault/reMarkable/PDF" --incremental >/dev/null ||
+  echo "some PDFs could not be drawn; their notes still link to them" >&2
+rmctl highlights "$folder" -o "$vault/reMarkable/Notes" --incremental --prune \
+  --pdf-link '{root}../PDF/{path}.pdf#page={page}' --json |
+  jq -r '"\(.written) written, \(.unchanged) unchanged, \(.skipped) without highlights, \(.failed) failed"'
 ```
 
+Each note's page references then read `— [p. 12](<../PDF/Deep Work.pdf#page=12>) #highlight/yellow`, one `../` more for each folder the note is below. `--all-docs` writes a note for every document, highlights or not, such as notebooks of typed text. A note is rmctl's and is rewritten whenever its document changes; write your own thoughts in another note that links to it (`[[Deep Work]]`). The run fails, after its answer, when a document could not be read; the others are written. A cron line runs it nightly: `15 3 * * * $HOME/bin/rm-reading-vault.sh /Books "$HOME/Vault" >>"$HOME/.rm-vault.log" 2>&1`.
+
+For one document, `--format note` prints the same note, and `--format markdown` the quotes alone:
+
 ```console
-$ rm-highlights.sh /Clients ~/Notes/Highlights
-/Users/you/Notes/Highlights/Harbor Logistics/Contract — Signed.md
-
-$ cat "$HOME/Notes/Highlights/Harbor Logistics/Contract — Signed.md"
-# Contract — Signed
-
+$ rmctl highlights "/Clients/Harbor Logistics/Contract — Signed" --format markdown
 ## Page 1
 
 > uses
@@ -340,7 +337,7 @@ $ cat "$HOME/Notes/Highlights/Harbor Logistics/Contract — Signed.md"
 > uses for its own, and no less than reasonable care
 ```
 
-A document without highlights answers with nothing on standard output (and a note on standard error), so it gets no file. For one document, `--format json` carries the page, the color and the text of each highlight: `rmctl highlights <id> --format json | jq -r '.highlights[] | select(.color == "yellow") | .text'`. A highlight over a page without a text layer, such as a scan, has no words and is listed as `(no text)`.
+`--format json` carries the page, the color and the text of each highlight: `rmctl highlights <id> --format json | jq -r '.highlights[] | select(.color == "yellow") | .text'`. A highlight over a page without a text layer, such as a scan, has no words and is listed as `(no text)`.
 
 ## A daily journal page
 

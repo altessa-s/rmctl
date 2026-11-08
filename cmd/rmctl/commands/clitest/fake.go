@@ -86,6 +86,11 @@ type Fake struct {
 	RenderFolders []string
 	RenderedTree  port.RenderTreeReport
 	TreeErr       error
+	// NotedTree is what NotesTree answers, with the directory filled in
+	// when it has none, and NotesErr the error it answers with; Folder
+	// answers for the notes as for the rendering.
+	NotedTree port.NotesTreeReport
+	NotesErr  error
 	// ProfileList is what Profiles.List answers, ProfileInfo what Info
 	// answers (with the name asked for filled in when it has none), and
 	// ProfilesErr fails List, Info and Add. Removal is what Remove answers,
@@ -108,7 +113,7 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Rendering: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Archives: (*archivesFake)(f), Rendering: f, Notes: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
 		Profiles: (*profilesFake)(f),
 	}
 }
@@ -372,6 +377,20 @@ func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOpt
 	return r, f.TreeErr
 }
 
+// NotesTree implements port.Notes.
+func (f *Fake) NotesTree(_ context.Context, query, dir string, o port.NoteOptions, t port.NotesTreeOptions) (port.NotesTreeReport, error) {
+	args := []string{query, dir, "link=" + o.PDFLink, opt(t.All, "all"), opt(t.AllDocs, "all-docs"),
+		opt(t.Incremental, "incremental"), opt(t.Prune, "prune"), "jobs=" + strconv.Itoa(t.Jobs)}
+	if err := f.record("NotesTree", args...); err != nil {
+		return port.NotesTreeReport{}, err
+	}
+	r := f.NotedTree
+	if r.Dir == "" {
+		r.Dir = dir
+	}
+	return r, f.NotesErr
+}
+
 // renderArgs are a rendering's arguments as a call records them.
 func renderArgs(from, dest string, o port.RenderOptions) []string {
 	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
@@ -559,6 +578,7 @@ type inputPorts interface {
 	port.Watcher
 	port.Inspector
 	port.Pages
+	port.Notes
 }
 
 var _ inputPorts = (*Fake)(nil)

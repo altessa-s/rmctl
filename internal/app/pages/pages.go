@@ -86,7 +86,7 @@ func (s *Service) document(ctx context.Context, query string) (*domain.Tree, dom
 
 // Pages implements port.Pages.
 func (s *Service) Pages(ctx context.Context, query string, selected []string) (port.DocumentText, error) {
-	_, it, err := s.document(ctx, query)
+	tree, it, err := s.document(ctx, query)
 	if err != nil {
 		return port.DocumentText{}, err
 	}
@@ -94,7 +94,7 @@ func (s *Service) Pages(ctx context.Context, query string, selected []string) (p
 	if err != nil {
 		return port.DocumentText{}, err
 	}
-	return port.DocumentText{Item: it, Pages: pages}, nil
+	return port.DocumentText{Item: it, Path: tree.Path(it.ID), Pages: pages}, nil
 }
 
 // Unmark implements port.Pages: every highlight of the selected pages is

@@ -92,7 +92,9 @@ var layers = map[string]rule{
 	"internal/app/inspect":  useCase("internal/app/library"),
 	"internal/app/archives": useCase("internal/app/pages"),
 	"internal/app/secrets":  useCase(),
-	"internal/app/render":   useCase("internal/app/library", "internal/app/fetch"),
+	"internal/app/render":   useCase("internal/app/library", "internal/app/fetch", "internal/app/outdir"),
+	"internal/app/outdir":   useCase("internal/app/library", "internal/app/fetch"),
+	"internal/app/notes":    useCase("internal/app/library", "internal/app/pages", "internal/app/outdir"),
 	"internal/app/profile":  useCase("internal/app/account"),
 	"internal/app/prefetch": useCase("internal/app/library"),
 
@@ -124,7 +126,7 @@ var layers = map[string]rule{
 		"internal/adapter/pdf", "internal/adapter/blobcache", "internal/adapter/ids", "internal/adapter/clock",
 		"internal/adapter/rmpages", "internal/adapter/rmdocs", "internal/adapter/keychain", "internal/adapter/vault",
 		"internal/app/secrets", "internal/adapter/indexcache", "internal/app/render", "internal/adapter/renderer",
-		"internal/app/profile", "internal/app/prefetch",
+		"internal/app/profile", "internal/app/prefetch", "internal/app/notes",
 	}},
 
 	"internal/porttest":    {allow: []string{"internal/domain", "internal/port"}},

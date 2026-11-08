@@ -88,6 +88,37 @@ func TestIntegration_PagesOfTabletDocuments(t *testing.T) {
 	}
 }
 
+// The notes of a folder, end to end: the tablet's highlights read by the
+// page format library, written as markdown into a directory on disk, and
+// found unchanged on the next run.
+func TestIntegration_HighlightNotes(t *testing.T) {
+	t.Parallel()
+	svc, cloud := connected(t)
+	cloud.Seed(t,
+		clouddouble.Item{ID: "f0000000-0000-4000-8000-000000000001", Name: "Papers", Kind: clouddouble.Folder},
+		clouddouble.Item{ID: "p0000000-0000-4000-8000-000000000001", Name: "Wiki.pdf", Kind: clouddouble.PDF,
+			Parent: "f0000000-0000-4000-8000-000000000001", PageBodies: [][]byte{tabletPage(t, "Wikipedia_highlighted_p1.rm")}},
+	)
+	dir := filepath.Join(t.TempDir(), "vault")
+	inc := port.NotesTreeOptions{Incremental: true}
+	report, err := svc.Notes.NotesTree(t.Context(), "/Papers", dir, port.NoteOptions{}, inc)
+	if err != nil || report.Count(port.NoteWritten) != 1 || report.Documents[0].Highlights != 4 {
+		t.Fatalf("%+v %v", report, err)
+	}
+	note, err := os.ReadFile(filepath.Join(dir, "Wiki.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"title: \"Wiki\"\n", "remarkable-path: \"/Papers/Wiki.pdf\"\n", "highlights: 4\n", "### Page 1\n", "operating system"} {
+		if !strings.Contains(string(note), part) {
+			t.Fatalf("%s lacks %q", note, part)
+		}
+	}
+	if report, err = svc.Notes.NotesTree(t.Context(), "/Papers", dir, port.NoteOptions{}, inc); err != nil || report.Count(port.NoteUnchanged) != 1 {
+		t.Fatalf("%+v %v", report, err)
+	}
+}
+
 func TestIntegration_NotebookFromMarkdown(t *testing.T) {
 	t.Parallel()
 	svc, cloud := connected(t)

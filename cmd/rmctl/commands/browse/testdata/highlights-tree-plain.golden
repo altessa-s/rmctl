@@ -1,0 +1,13 @@
+written	vault/A.md	/Books/A.pdf	7	-
+unchanged	vault/B.md	/Books/B	-	-
+skipped	vault/C.md	/Books/C	-	-
+failed	vault/Sub/D.md	/Books/Sub/D	-	page 2: bad
+
+dir	remarkable
+documents	4
+written	1
+unchanged	1
+skipped	1
+failed	1
+moved	1
+left	1
