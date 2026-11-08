@@ -54,7 +54,7 @@ func (c *Cache) Preview(ctx context.Context, key, name string, draw func(w io.Wr
 		return "", false, err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	f, err := os.OpenFile(filepath.Join(stage, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
+	f, err := os.OpenFile(filepath.Join(stage, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode) // #nosec G304 -- a plain file name, checked above
 	if err != nil {
 		return "", false, err
 	}

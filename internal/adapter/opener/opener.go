@@ -31,7 +31,7 @@ var _ port.Opener = Command{}
 // program.
 func (c Command) Open(ctx context.Context, path string) error {
 	args := append(slices.Clone(c.Args), path)
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), c.Name, args...) //nolint:gosec // the system's opener, given a file
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), c.Name, args...) // #nosec G204 -- the system's opener, given a file as one argument, no shell
 	cmd.SysProcAttr = detached()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open %s with %s: %w", path, c.Name, err)
