@@ -12,10 +12,12 @@ import (
 
 	"github.com/altessa-s/go-atlas-core/runtime/appinfo"
 
+	"github.com/altessa-s/rmctl/internal/adapter/autostart"
 	"github.com/altessa-s/rmctl/internal/adapter/blobcache"
 	"github.com/altessa-s/rmctl/internal/adapter/clock"
 	"github.com/altessa-s/rmctl/internal/adapter/cloud"
 	"github.com/altessa-s/rmctl/internal/adapter/config"
+	"github.com/altessa-s/rmctl/internal/adapter/fswatch"
 	"github.com/altessa-s/rmctl/internal/adapter/ids"
 	"github.com/altessa-s/rmctl/internal/adapter/indexcache"
 	"github.com/altessa-s/rmctl/internal/adapter/keychain"
@@ -31,6 +33,7 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/fetch"
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/mirror"
 	"github.com/altessa-s/rmctl/internal/app/notes"
 	"github.com/altessa-s/rmctl/internal/app/pages"
 	"github.com/altessa-s/rmctl/internal/app/prefetch"
@@ -82,7 +85,16 @@ type Options struct {
 	// Opener shows what "rmctl open" drew; nil is the system's viewer. A
 	// test keeps viewers from starting with it.
 	Opener Opener
+	// ServiceRunner runs launchctl, systemctl and schtasks for the mirror
+	// service, and ServiceHome stands for the home directory its definition
+	// goes under; nil and "" are the system's. A test keeps the user's
+	// service manager out of reach with them.
+	ServiceRunner ServiceRunner
+	ServiceHome   string
 }
+
+// ServiceRunner runs the system's service tools.
+type ServiceRunner = autostart.Runner
 
 // Opener shows a file in a viewer.
 type Opener = port.Opener
@@ -106,6 +118,11 @@ type Services struct {
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
+	// Mirrors defines and runs the mirrors, MirrorEngine keeps the
+	// profile's in step, and MirrorService is their autostart service.
+	Mirrors       port.Mirrors
+	MirrorEngine  port.MirrorEngine
+	MirrorService port.MirrorService
 	// Cache reports and clears the caches on disk.
 	Cache port.Cache
 	// Offline says this run never reaches the cloud.
@@ -168,12 +185,19 @@ func Build(opts Options) (Services, error) {
 	reader := pages.NewReader(lib, rm)
 	newIDs := ids.New()
 	rendering := render.New(lib, st.blobs, files, docs, docs, renderer.New())
+	writer := write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk)
+	fetcher := fetch.New(lib, st.blobs, files, docs, clk)
+	engine := mirror.NewEngine(mirror.Deps{
+		Library: lib, Writer: writer, Rendering: rendering, Fetcher: fetcher, Files: files, Disk: files,
+		Notifier: remote, Dirs: fswatch.New(), Timer: clk, Renders: Renders(),
+	})
+	cfgWriter := config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}
 
 	return Services{
 		Account:   account.New(indexcache.NewRegistry(remote, st.profile)),
 		Browser:   browse.New(lib, reader),
-		Fetcher:   fetch.New(lib, st.blobs, files, docs, clk),
-		Writer:    write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk),
+		Fetcher:   fetcher,
+		Writer:    writer,
 		Watcher:   watch.New(remote),
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
@@ -183,7 +207,11 @@ func Build(opts Options) (Services, error) {
 		Viewing:   render.NewViewer(rendering, st.previews(), openerOf(opts), appinfo.Version),
 		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
-			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
+			[]port.SecretVault{fileVault, keyVault}, cfgWriter),
+		Mirrors: mirror.NewService(mirrorConfig{writer: cfgWriter}, engines{opts: opts, profile: cfg.Profile, own: engine},
+			files, files, clk),
+		MirrorEngine:  engine,
+		MirrorService: mirrorService(cfg, opts, clk),
 		Profiles: profile.New(newProfileStore(cfg, opts, read), indexcache.NewCaches(profiles{st.root}, opts.Logger),
 			registries{opts: opts, read: read, root: st.root}, cfg.Profile, st.offline),
 		Cache:   st.admin,

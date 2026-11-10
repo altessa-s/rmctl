@@ -16,10 +16,15 @@ import (
 )
 
 // seams are the parts of the machine a test replaces: keychain, when set,
-// stands in for the login Keychain, and opener for the system's viewer.
+// stands in for the login Keychain, opener for the system's viewer, and
+// service and home for the service manager of the mirror service.
 type seams struct {
 	keychain wiring.KeychainItems
 	opener   wiring.Opener
+	// service and home stand for the system's service tools and the home
+	// directory the mirror service is defined under.
+	service wiring.ServiceRunner
+	home    string
 }
 
 // build is the composition root's entry: the services req asks for, with a
@@ -54,6 +59,9 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		ReadOnly: req.ReadOnly,
 		Keychain: s.keychain,
 		Opener:   s.opener,
+
+		ServiceRunner: s.service,
+		ServiceHome:   s.home,
 	})
 	if err != nil {
 		return commands.Services{}, nil, err
@@ -75,5 +83,8 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		Cache:     svc.Cache,
 		Viewing:   svc.Viewing,
 		Offline:   svc.Offline,
+
+		Mirrors:       svc.Mirrors,
+		MirrorService: svc.MirrorService,
 	}, svc.Close, nil
 }

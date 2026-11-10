@@ -79,8 +79,12 @@ linters:
             # Only cmd/rmctl/commands/output.
             - github.com/mattn/go-runewidth
             # Advisory file locks for editing config.toml (internal/adapter/config),
+            # renames that never replace a file (internal/adapter/localfs),
             # and ANSI color on the Windows console (cmd/rmctl).
             - golang.org/x/sys
+            # Unicode normalization of file names: macOS and its shares give
+            # names in NFD, the tablet writes NFC (the mirror).
+            - golang.org/x/text/unicode/norm
             # Counting the pages of an uploaded PDF. Only internal/adapter/pdf.
             - github.com/pdfcpu/pdfcpu
             # The .rm page format, through cgo. Only internal/adapter/rmpages.
@@ -95,6 +99,9 @@ linters:
             - github.com/keybase/go-keychain
             # The configuration file. Only internal/adapter/config.
             - github.com/pelletier/go-toml/v2
+            # Hearing of a mirrored directory's changes at once. Only
+            # internal/adapter/fswatch.
+            - github.com/fsnotify/fsnotify
             # The notification socket of the emulated cloud. Only
             # internal/clouddouble, which only tests import.
             - github.com/coder/websocket
@@ -155,6 +162,15 @@ linters:
           deny:
             - pkg: github.com/keybase/go-keychain
               desc: only internal/adapter/keychain/system calls the Keychain
+        # The file watcher is one adapter's business: a mirror reaches it
+        # through port.DirWatcher.
+        file-watcher-only-in-fswatch:
+          files:
+            - $all
+            - "!**/internal/adapter/fswatch/*.go"
+          deny:
+            - pkg: github.com/fsnotify/fsnotify
+              desc: only internal/adapter/fswatch imports the file watcher
         # The TOML parser reads the configuration file and nothing else.
         toml-only-in-config:
           files:

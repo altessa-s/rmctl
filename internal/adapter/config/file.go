@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/altessa-s/rmctl/internal/adapter/flock"
 )
 
 // The configuration file and the environment that override it.
@@ -105,6 +107,8 @@ type File struct {
 	Secrets  fileSecrets            `toml:"secrets"`
 	Cache    fileCache              `toml:"cache"`
 	Profiles map[string]fileProfile `toml:"profiles"`
+	// Mirrors are the [[mirror]] tables, in file order.
+	Mirrors []Mirror `toml:"mirror"`
 }
 
 // ParseFile decodes a configuration file strictly: a key rmctl does not
@@ -130,6 +134,9 @@ func ParseFile(data []byte) (File, error) {
 		return File{}, err
 	}
 	if _, err := parseBudget("cache.budget", f.Cache.Budget); err != nil {
+		return File{}, err
+	}
+	if err := checkMirrors(f.Mirrors); err != nil {
 		return File{}, err
 	}
 	names := make([]string, 0, len(f.Profiles))
@@ -307,13 +314,13 @@ func lockFile(path string) (func(), error) {
 	}
 	deadline := time.Now().Add(lockWait) //nolint:forbidigo // a lock's wait is wall time, not the library's clock
 	for {
-		busy, err := tryLock(f)
+		busy, err := flock.TryLock(f)
 		switch {
 		case err != nil:
 			_ = f.Close()
 			return nil, fmt.Errorf("lock %s: %w", lock, err)
 		case !busy:
-			return func() { _ = unlock(f); _ = f.Close() }, nil
+			return func() { _ = flock.Unlock(f); _ = f.Close() }, nil
 		case time.Now().After(deadline): //nolint:forbidigo // see above
 			_ = f.Close()
 			return nil, fmt.Errorf("%s: %w", path, ErrConfigBusy)

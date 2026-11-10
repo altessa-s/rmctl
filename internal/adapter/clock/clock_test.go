@@ -33,3 +33,13 @@ func TestNewNeedsAClock(t *testing.T) {
 	}()
 	clock.New(nil)
 }
+
+func TestSleepIsTheClocks(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	fake := coreclock.NewFake(at)
+	c := clock.New(fake)
+	if err := c.Sleep(t.Context(), time.Minute); err != nil || !c.Now().Equal(at.Add(time.Minute)) {
+		t.Fatalf("%v %v", c.Now(), err)
+	}
+}
