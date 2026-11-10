@@ -61,6 +61,8 @@ Older versions kept one blob directory for every profile; it is removed on first
 | Log level | warnings | `--verbose/-v` |
 | Output format | `table` on a terminal, `plain` elsewhere | `--format`, `--json`, `RMCTL_FORMAT=table\|plain\|json` |
 | Color | on a color terminal | `--color`, `NO_COLOR`, `TERM=dumb` |
+| Mirrors | none | `config.toml` `[[mirror]]`, `rmctl mirror add`, `rmctl mirror rm` |
+| Mirror service log | `<user config dir>/rmctl/logs/mirror.log` | `RMCTL_CONFIG_DIR` |
 
 Profiles keep several accounts apart: each has its own token and its own cache.
 
@@ -83,7 +85,7 @@ rmctl profile del work               # remove it entirely, after a question
 
 ### config.toml
 
-`<user config dir>/rmctl/config.toml` (or `RMCTL_CONFIG_FILE`; with `RMCTL_CONFIG_DIR` it moves along with the profiles) chooses where tokens are kept. It is read strictly: a key rmctl does not know is an error that names it. A missing file is the defaults.
+`<user config dir>/rmctl/config.toml` (or `RMCTL_CONFIG_FILE`; with `RMCTL_CONFIG_DIR` it moves along with the profiles) chooses where tokens are kept, sets the cache, and defines the [mirrors](#mirrors). It is read strictly: a key rmctl does not know is an error that names it. A missing file is the defaults.
 
 ```toml
 # Every profile keeps its tokens in a file of mode 0600 ...
@@ -116,6 +118,27 @@ offline = true      # this profile reads from the cache unless --offline=false
 ```
 
 A profile's table overrides `[cache]` key by key: above, `travel` keeps the 2 GiB budget and the 5-minute TTL. `RMCTL_CACHE_TTL` overrides `ttl`, and `RMCTL_CACHE_BUDGET` overrides `budget`, both for every profile; `--offline` and `--offline=false` override `offline`. A budget is a string: a size such as `"512MiB"`, `"4GiB"` or `"1.5GB"` (binary `KiB`, `MiB`, `GiB`, `TiB`, decimal `KB`, `MB`, `GB`, `TB`, or bytes without a unit) of at least `1MiB`, or `"0"` (in any unit) for no limit. A size between 0 and 1 MiB is refused with an error that names the setting: a cache that small keeps nothing worth keeping. `--no-cache`, not a budget of 0, turns the cache off.
+
+### Mirrors
+
+Each `[[mirror]]` table defines a [mirror](mirror.md): a local directory kept in step with a cloud folder. `rmctl mirror add` appends one and `rmctl mirror rm` takes it out, leaving every other line as it is; a table may also be written by hand.
+
+```toml
+[[mirror]]
+name = "papers"            # 1-64 characters of a-z, 0-9, _ and -
+dir = "/Users/me/Papers"   # an absolute path
+folder = "/Papers"         # a path from the top; "/" is the whole library
+
+[[mirror]]
+name = "contracts"
+dir = "/Users/me/Work/Contracts"
+folder = "/Clients/Contracts"
+profile = "work"           # the profile whose library it is; without it, the run's
+pull_new = true            # draw the documents created on the tablet into _annotated/ too
+no_delete = true           # carry no deletion from one side to the other
+```
+
+A name used twice, a relative `dir`, a `folder` that does not start with `/`, or a `profile` that is no profile's name is an error that names the mirror. `mirror rm` takes out only a `[[mirror]]` table of its own: a mirror given as an inline array (`mirror = [{...}]`) is refused with a request to edit the file by hand. The mirror service reads the file again every 30 seconds.
 
 ### The macOS Keychain
 
