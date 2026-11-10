@@ -23,7 +23,10 @@
 # formula conflicts with the other.
 #
 # Both install the completion scripts of bash, zsh and fish, which the
-# installed binary writes with "rmctl completion <shell>".
+# installed binary writes with "rmctl completion <shell>", and define the
+# mirror service, so "brew services start rmctl" keeps every mirror of
+# config.toml in step: it runs "rmctl mirror run --service", which writes its
+# own log; brew's log file catches what it writes before that log opens.
 set -euo pipefail
 
 lite=0
@@ -110,6 +113,13 @@ ${linux_deps}    on_arm do
 ${install}
     generate_completions_from_executable(bin/"rmctl", "completion")
     doc.install "licenses" if File.directory?("licenses")
+  end
+
+  service do
+    run [opt_bin/"rmctl", "mirror", "run", "--service"]
+    keep_alive successful_exit: false
+    log_path var/"log/rmctl-mirror.log"
+    error_log_path var/"log/rmctl-mirror.log"
   end
 
   test do
