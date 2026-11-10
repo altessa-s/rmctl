@@ -88,20 +88,26 @@ func SystemdUnit(spec port.ServiceSpec) []byte {
 	}
 	b.WriteString("ExecStart=" + strings.Join(args, " ") + "\n")
 	for _, k := range slices.Sorted(maps.Keys(spec.Env)) {
-		b.WriteString("Environment=" + systemdQuote(k+"="+spec.Env[k]) + "\n")
+		b.WriteString("Environment=" + systemdEnv(k, spec.Env[k]) + "\n")
 	}
 	fmt.Fprintf(&b, "Restart=on-failure\nRestartSec=%d\n\n", throttle)
 	b.WriteString("[Install]\nWantedBy=default.target\n")
 	return []byte(b.String())
 }
 
+// systemdEscaper escapes a quoted systemd value: quotes and backslashes,
+// a line end, and % doubled so that no specifier is expanded in it.
+var systemdEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "\n", `\n`) //nolint:gochecknoglobals // a fixed table
+
 // systemdQuote is s as one word of a systemd command line: in double
-// quotes, with quotes and backslashes escaped, and % and $ doubled so that
-// systemd expands neither a specifier nor a variable in it.
+// quotes, escaped, and $ doubled so that no variable is expanded in it.
 func systemdQuote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$", "\n", `\n`)
-	return `"` + r.Replace(s) + `"`
+	return `"` + systemdEscaper.Replace(strings.ReplaceAll(s, "$", "$$")) + `"`
 }
+
+// systemdEnv is the assignment k=v as Environment= takes it: in double
+// quotes and escaped. Environment= expands no variable, so a $ stays one.
+func systemdEnv(k, v string) string { return `"` + systemdEscaper.Replace(k+"="+v) + `"` }
 
 // headless is how the task starts rmctl without a console window: rmctl is
 // a console program, and Task Scheduler would open a window for it at

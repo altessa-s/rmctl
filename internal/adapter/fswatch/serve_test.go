@@ -127,3 +127,33 @@ func TestAdd(t *testing.T) {
 		t.Fatal("an unreadable directory was watched")
 	}
 }
+
+// A watcher that holds a descriptor per file (kqueue) watches no more than
+// its budget: a tree past it, or files made past it, end the watch, and
+// the mirror falls back to polling rather than run out of descriptors.
+func TestBudget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, name := range []string{"a.pdf", "b.pdf", "c.pdf"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (tree{w: &adds{}, dir: dir, budget: 3, used: new(int)}).add(dir); !errors.Is(err, ErrTooMany) {
+		t.Fatal(err)
+	}
+	within := tree{w: &adds{}, dir: dir, budget: 5, used: new(int)}
+	if err := within.add(dir); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan fsnotify.Event, 2)
+	events <- fsnotify.Event{Name: filepath.Join(dir, "d.pdf"), Op: fsnotify.Create}
+	events <- fsnotify.Event{Name: filepath.Join(dir, "e.pdf"), Op: fsnotify.Create}
+	changes := 0
+	if err := within.serve(t.Context(), events, make(chan error), func() { changes++ }); !errors.Is(err, ErrTooMany) || changes != 1 {
+		t.Fatal(err, changes)
+	}
+	if handleBudget() < 0 {
+		t.Fatal(handleBudget())
+	}
+}

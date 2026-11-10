@@ -17,8 +17,14 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// ErrLost means the system dropped events: what changed is not known.
-var ErrLost = errors.New("the file watcher lost events")
+// The failures of a watch.
+var (
+	// ErrLost means the system dropped events: what changed is not known.
+	ErrLost = errors.New("the file watcher lost events")
+	// ErrTooMany means the directory holds more than the watcher can watch
+	// and leave the process the descriptors it needs.
+	ErrTooMany = errors.New("too many files for the system's file watcher")
+)
 
 // Watcher implements port.DirWatcher over fsnotify: inotify on Linux,
 // kqueue on macOS and the BSDs, ReadDirectoryChangesW on Windows.
@@ -45,7 +51,7 @@ func (Watcher) Watch(ctx context.Context, dir string, skip func(string) bool, re
 		return fmt.Errorf("watch %s: %w", dir, err)
 	}
 	defer func() { _ = w.Close() }()
-	t := tree{w: w, dir: dir, skip: skip}
+	t := tree{w: w, dir: dir, skip: skip, budget: handleBudget(), used: new(int)}
 	if err = t.add(dir); err != nil {
 		return err
 	}
@@ -81,6 +87,9 @@ func (t tree) serve(ctx context.Context, events <-chan fsnotify.Event, errs <-ch
 					if err := t.add(ev.Name); err != nil {
 						return err
 					}
+				} else if err := t.spend(); err != nil {
+					// kqueue watches each file made in a directory it watches.
+					return err
 				}
 			}
 			changed()
@@ -93,6 +102,22 @@ type tree struct {
 	w    adder
 	dir  string
 	skip func(string) bool
+	// budget is how many directories and files the watcher may watch, 0
+	// for no limit, and used how many it watches: kqueue holds a
+	// descriptor open for each, of the few the process has.
+	budget int
+	used   *int
+}
+
+// spend counts one more directory or file watched, or is ErrTooMany.
+func (t tree) spend() error {
+	if t.budget <= 0 {
+		return nil
+	}
+	if *t.used++; *t.used > t.budget {
+		return fmt.Errorf("watch %s: %w (more than %d)", t.dir, ErrTooMany, t.budget)
+	}
+	return nil
 }
 
 // adder is what tree needs of the watcher: fsnotify's, or a test's.
@@ -127,10 +152,13 @@ func (t tree) add(root string) error {
 		case err != nil:
 			return err
 		case !d.IsDir():
-			return nil
+			return t.spend()
 		}
 		if _, skipped := t.rel(p); skipped {
 			return filepath.SkipDir
+		}
+		if err = t.spend(); err != nil {
+			return err
 		}
 		if err = t.w.Add(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("watch %s: %w", p, err)

@@ -99,7 +99,13 @@ func (l *RotatingLog) rotate() error {
 		_ = os.Rename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
 	}
 	if err := os.Rename(l.path, l.path+".1"); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		// The log goes on in its file, past its size, rather than stop for
+		// good: a later write rotates it (Windows refuses to rename a file
+		// another process has open).
+		if oerr := l.open(); oerr != nil {
+			return errors.Join(err, oerr)
+		}
+		return nil
 	}
 	return l.open()
 }
@@ -116,14 +122,16 @@ func (l *RotatingLog) Close() error {
 	return err
 }
 
-// Tail is the last n lines of the log at path, oldest first, reaching into
-// the newest rotated log when the current one holds fewer, and the size of
-// the current one. A log not written yet has no lines.
+// Tail is the last n whole lines of the log at path, oldest first,
+// reaching into the newest rotated log when the current one holds fewer,
+// and the offset of the end of the last of them, for From: a line half
+// written comes whole from there. A log not written yet has no lines.
 func Tail(path string, n int) ([]string, int64, error) {
 	current, err := readFile(path)
 	if err != nil {
 		return nil, 0, err
 	}
+	current = current[:bytes.LastIndexByte(current, '\n')+1]
 	lines := splitLines(current)
 	if len(lines) < n {
 		older, rerr := readFile(path + ".1")

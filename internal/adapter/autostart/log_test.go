@@ -63,6 +63,29 @@ func TestRotatingLog(t *testing.T) {
 	}
 }
 
+// A rotation that fails keeps the log open: the lines go on into it.
+func TestRotatingLogRotationFails(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "mirror.log")
+	// A directory that is not empty stands where the rotated log goes.
+	if err := os.MkdirAll(filepath.Join(path+".1", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := autostart.OpenLog(path, 6, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"aaaa\n", "bbbb\n", "cccc\n"} {
+		if _, err = l.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = l.Close()
+	if got, _ := os.ReadFile(path); string(got) != "aaaa\nbbbb\ncccc\n" {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestOpenLogRefused(t *testing.T) {
 	t.Parallel()
 	file := filepath.Join(t.TempDir(), "file")
@@ -104,6 +127,10 @@ func TestTailAndFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lines, end, err = autostart.From(path, 11); err != nil || strings.Join(lines, ",") != "five" || end != 16 {
+		t.Fatal(lines, end, err)
+	}
+	// A line half written is not tailed: it comes whole from the offset.
+	if lines, end, err = autostart.Tail(path, 2); err != nil || strings.Join(lines, ",") != "four,five" || end != 16 {
 		t.Fatal(lines, end, err)
 	}
 	if lines, end, err = autostart.From(path, end); err != nil || lines != nil || end != 16 {

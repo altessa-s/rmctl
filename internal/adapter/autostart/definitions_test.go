@@ -69,8 +69,12 @@ func TestSystemdUnit(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, text)
 		}
 	}
-	odd := string(autostart.SystemdUnit(port.ServiceSpec{Program: `/a"b\c$d`}))
+	odd := string(autostart.SystemdUnit(port.ServiceSpec{Program: `/a"b\c$d`, Env: map[string]string{"RMCTL_CONFIG_DIR": `/x$y"z`}}))
 	if !strings.Contains(odd, `ExecStart="/a\"b\\c$$d"`) {
+		t.Error(odd)
+	}
+	// Environment= expands no variable: a $ doubled there would stay two.
+	if !strings.Contains(odd, `Environment="RMCTL_CONFIG_DIR=/x$y\"z"`) {
 		t.Error(odd)
 	}
 }
