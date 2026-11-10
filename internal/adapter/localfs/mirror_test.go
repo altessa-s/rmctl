@@ -9,11 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
 	"github.com/altessa-s/rmctl/internal/port"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Scan lists the regular files below a directory with their sizes and
@@ -101,5 +104,63 @@ func TestLock(t *testing.T) {
 	_ = again()
 	if _, err = fs.Lock(filepath.Join(path, "below", "a file")); err == nil {
 		t.Fatal("a lock in no directory")
+	}
+}
+
+// Move never replaces a file, makes the directories it needs, and renames
+// a file to its own name in another case or Unicode form, which a file
+// system that ignores them (macOS, Windows) takes for a file already there.
+func TestMove(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fsys := localfs.New()
+	write := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	a, b := write("a.pdf", "a"), write("b.pdf", "b")
+	if err := fsys.Move(a, b); !errors.Is(err, os.ErrExist) {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(b); string(got) != "b" {
+		t.Fatalf("replaced: %q", got)
+	}
+	lower := filepath.Join(dir, "sub", "paper.pdf")
+	if err := fsys.Move(a, lower); err != nil {
+		t.Fatal(err)
+	}
+	upper := filepath.Join(dir, "sub", "Paper.pdf")
+	if err := fsys.Move(lower, upper); err != nil {
+		t.Fatal(err)
+	}
+	nfd := write("Café.pdf", "c")
+	nfc := filepath.Join(dir, "Café.pdf")
+	if err := fsys.Move(nfd, nfc); err != nil {
+		t.Fatal(err)
+	}
+	for sub, want := range map[string]string{"sub": "Paper.pdf", ".": "Café.pdf b.pdf"} {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				names = append(names, norm.NFC.String(e.Name()))
+			}
+		}
+		if strings.Join(names, " ") != want {
+			t.Errorf("%s: %v, want %s", sub, names, want)
+		}
+	}
+	if err := fsys.Move(filepath.Join(dir, "missing.pdf"), filepath.Join(dir, "x.pdf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := fsys.Move(b, filepath.Join(b, "below", "x.pdf")); err == nil {
+		t.Fatal("moved below a file")
 	}
 }

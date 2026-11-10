@@ -6,6 +6,7 @@ package porttest
 
 import (
 	"context"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -77,6 +78,20 @@ func pruned(rel string, prune func(string) bool) bool {
 		}
 	}
 	return false
+}
+
+// Move implements port.MirrorFiles: a file at to is fs.ErrExist.
+func (d *MirrorDisk) Move(from, to string) error {
+	if err := d.fail("Move"); err != nil {
+		return err
+	}
+	if _, _, exists, _ := d.Files.Stat(to); exists { //nolint:errcheck // see Scan
+		return &fs.PathError{Op: "rename", Path: to, Err: fs.ErrExist}
+	}
+	if err := d.Files.MkdirAll(filepath.Dir(to)); err != nil {
+		return err
+	}
+	return d.Files.Rename(from, to)
 }
 
 // Lock implements port.MirrorFiles: a path held is ErrMirrorBusy until

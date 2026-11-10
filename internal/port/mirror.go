@@ -188,6 +188,12 @@ type MirrorFiles interface {
 	// path relative to dir with slashes, is not entered. A missing dir is
 	// an error.
 	Scan(dir string, prune func(rel string) bool) ([]LocalEntry, error)
+	// Move renames the file at from to to, creating the directories to
+	// needs. It never replaces a file: one at to, even one written there a
+	// moment before, is an error matching fs.ErrExist; unless it is from
+	// itself, under another case or Unicode form a file system that ignores
+	// them takes for the same name.
+	Move(from, to string) error
 	// Lock takes the lock file at path, or ErrMirrorBusy when another
 	// process holds it; release lets it go.
 	Lock(path string) (release func() error, err error)
