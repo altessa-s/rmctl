@@ -40,3 +40,7 @@ packages:
   - internal/app/notes
   - internal/adapter/renderer
   - internal/adapter/opener
+  - internal/app/mirror
+  - internal/adapter/autostart
+  - cmd/rmctl/commands/mirror
+  - internal/adapter/fswatch

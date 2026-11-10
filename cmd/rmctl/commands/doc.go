@@ -13,6 +13,7 @@
 //	├── mkdir, put, mv, trash, restore, rm,  writing (asks first, or --yes)
 //	│   mput
 //	├── watch                                live notifications
+//	├── mirror add|ls|rm|run|service         local folders kept in step
 //	├── debug root|blob|files|hashes|        protocol diagnostics
 //	│         checkfiles|sweep
 //	├── version

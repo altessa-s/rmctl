@@ -95,6 +95,9 @@ linters:
             - github.com/keybase/go-keychain
             # The configuration file. Only internal/adapter/config.
             - github.com/pelletier/go-toml/v2
+            # Hearing of a mirrored directory's changes at once. Only
+            # internal/adapter/fswatch.
+            - github.com/fsnotify/fsnotify
             # The notification socket of the emulated cloud. Only
             # internal/clouddouble, which only tests import.
             - github.com/coder/websocket
@@ -155,6 +158,15 @@ linters:
           deny:
             - pkg: github.com/keybase/go-keychain
               desc: only internal/adapter/keychain/system calls the Keychain
+        # The file watcher is one adapter's business: a mirror reaches it
+        # through port.DirWatcher.
+        file-watcher-only-in-fswatch:
+          files:
+            - $all
+            - "!**/internal/adapter/fswatch/*.go"
+          deny:
+            - pkg: github.com/fsnotify/fsnotify
+              desc: only internal/adapter/fswatch imports the file watcher
         # The TOML parser reads the configuration file and nothing else.
         toml-only-in-config:
           files:

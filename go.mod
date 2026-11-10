@@ -13,6 +13,7 @@ require (
 	github.com/altessa-s/rmlines-go v1.1.2
 	github.com/altessa-s/rmrender-go v1.4.2-0.20261108032415-0eb9209172e2
 	github.com/coder/websocket v1.8.15
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/keybase/go-keychain v0.0.1
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/pdfcpu/pdfcpu v0.16.4

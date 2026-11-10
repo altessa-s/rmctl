@@ -53,6 +53,10 @@ type Services struct {
 	// it alone when the request is for completion.
 	Completion port.Completion
 	Viewing    port.Viewing
+	// Mirrors defines and runs the mirrors, and MirrorService is their
+	// autostart service.
+	Mirrors       port.Mirrors
+	MirrorService port.MirrorService
 	// Offline says the services never reach the cloud: --offline, or the
 	// profile's configuration.
 	Offline bool

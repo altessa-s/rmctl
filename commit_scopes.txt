@@ -24,6 +24,7 @@ browse                      # ls, tree, stat, find
 fetch                       # get, export, mget
 write                       # mkdir, put, mv, trash, restore, rm, mput
 watch                       # Live notifications
+mirror                      # Local folders kept in step with cloud folders, and the mirror service (mirror, autostart)
 archives                    # Local .rmdoc archives, offline
 inspect                     # Protocol diagnostics (rmctl debug ...)
 pages                       # Page text, highlights, unmark and notebooks from text

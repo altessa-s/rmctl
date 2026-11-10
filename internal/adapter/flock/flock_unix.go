@@ -4,7 +4,7 @@
 // Use of this source code is governed by the MIT license that can be found in
 // the LICENSE file.
 
-package config
+package flock
 
 import (
 	"os"
@@ -12,9 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// tryLock takes an exclusive advisory lock on f without waiting; busy is
+// TryLock takes an exclusive advisory lock on f without waiting; busy is
 // true when another process holds it.
-func tryLock(f *os.File) (busy bool, err error) {
+func TryLock(f *os.File) (busy bool, err error) {
 	err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) //nolint:gosec // a descriptor fits an int
 	if err == unix.EWOULDBLOCK {
 		return true, nil
@@ -22,6 +22,7 @@ func tryLock(f *os.File) (busy bool, err error) {
 	return false, err
 }
 
-func unlock(f *os.File) error {
+// Unlock lets the lock on f go.
+func Unlock(f *os.File) error {
 	return unix.Flock(int(f.Fd()), unix.LOCK_UN) //nolint:gosec // a descriptor fits an int
 }
