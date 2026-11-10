@@ -65,7 +65,9 @@ type Services struct {
 // a table; OutColor whether that terminal shows ANSI color; Width is its
 // width in columns, 0 when unknown. Getenv reads the environment; nil is the
 // process's. Now is the wall clock a progress bar measures its rate by;
-// nil is the machine's. Renders says this build draws documents, which
+// nil is the machine's. After calls f once d has passed unless stop is
+// called first, for the line that waits before it shows; nil is the
+// machine's timer. Renders says this build draws documents, which
 // "version --full" reports: false in rmctl-lite and in a build without cgo;
 // the composition root asks the renderer.
 type Streams struct {
@@ -77,6 +79,7 @@ type Streams struct {
 	Width       int
 	Getenv      func(string) string
 	Now         func() time.Time
+	After       func(d time.Duration, f func()) (stop func())
 	Renders     bool
 }
 

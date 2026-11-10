@@ -34,6 +34,7 @@ type Library struct {
 
 	cache       port.BlobCache
 	listings    port.ListingCache
+	loads       port.LoadObserver
 	log         *slog.Logger
 	concurrency int
 	attempts    int
@@ -67,6 +68,14 @@ func WithCache(cache port.BlobCache) Option {
 // listings, for shell completion.
 func WithListings(listings port.ListingCache) Option {
 	return func(l *Library) { l.listings = listings }
+}
+
+// WithLoadObserver tells loads how every load that reads an item goes. A
+// load whose items were all read before, as the one of a commit usually is,
+// costs no request and tells it nothing. How long a load may run before a
+// person is told is the observer's business: the library keeps no time.
+func WithLoadObserver(loads port.LoadObserver) Option {
+	return func(l *Library) { l.loads = loads }
 }
 
 // WithLogger logs what the loader skips.
@@ -145,8 +154,16 @@ func (l *Library) listCommitted(ctx context.Context, root port.RootState) {
 // Build builds the tree of a root already read. Items whose record hash was
 // loaded before cost no call.
 func (l *Library) Build(ctx context.Context, state port.RootState) (*domain.Tree, error) {
+	step, end := l.follow(state.Records)
+	defer end()
 	results, err := concurrency.ProcessCollect(ctx, state.Records,
-		func(ctx context.Context, rec domain.Record) (loaded, error) { return l.item(ctx, rec) },
+		func(ctx context.Context, rec domain.Record) (loaded, error) {
+			got, err := l.item(ctx, rec)
+			if err == nil {
+				step()
+			}
+			return got, err
+		},
 		concurrency.WithConcurrency[domain.Record](l.concurrency),
 		concurrency.WithStopOnError[domain.Record](),
 	)
@@ -160,6 +177,37 @@ func (l *Library) Build(ctx context.Context, state port.RootState) (*domain.Tree
 		}
 	}
 	return domain.NewTree(state.Generation, items), nil
+}
+
+// follow tells the observer how the load of records goes, when there is one
+// and the load reads an item: step counts one record done, and end ends the
+// load. Every record counts, so the count reaches the size of the root, but
+// a load of items all read before says nothing at all.
+func (l *Library) follow(records []domain.Record) (step, end func()) {
+	if l.loads == nil || l.memoized(records) {
+		return func() {}, func() {}
+	}
+	var mu sync.Mutex
+	done, total := 0, len(records)
+	l.loads.LoadProgress(done, total)
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		done++
+		l.loads.LoadProgress(done, total)
+	}, l.loads.LoadDone
+}
+
+// memoized reports whether every one of records was loaded before.
+func (l *Library) memoized(records []domain.Record) bool {
+	l.memoMu.Lock()
+	defer l.memoMu.Unlock()
+	for _, rec := range records {
+		if _, ok := l.memo[rec.Hash]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *Library) item(ctx context.Context, rec domain.Record) (loaded, error) {

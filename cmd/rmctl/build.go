@@ -16,16 +16,21 @@ import (
 )
 
 // seams are the parts of the machine a test replaces: keychain, when set,
-// stands in for the login Keychain, and opener for the system's viewer.
+// stands in for the login Keychain, opener for the system's viewer, and
+// streams changes what is known of the terminal and its timer.
 type seams struct {
 	keychain wiring.KeychainItems
 	opener   wiring.Opener
+	streams  func(*commands.Streams)
 }
 
 // build is the composition root's entry: the services req asks for, with a
-// logger on errOut at Debug when verbose and Warn otherwise. extra are
-// transport options a test uses to reach an emulated cloud.
-func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, extra ...rmcloud.Option) (commands.Services, func() error, error) {
+// logger on errOut at Debug when verbose and Warn otherwise. loads, when
+// set, follows the loads of the library. extra are transport options a test
+// uses to reach an emulated cloud.
+func build(
+	_ context.Context, req commands.Request, errOut io.Writer, loads wiring.LoadObserver, s seams, extra ...rmcloud.Option,
+) (commands.Services, func() error, error) {
 	logger, err := newLogger(errOut, req.Verbose)
 	if err != nil {
 		return commands.Services{}, nil, err
@@ -54,6 +59,7 @@ func build(_ context.Context, req commands.Request, errOut io.Writer, s seams, e
 		ReadOnly: req.ReadOnly,
 		Keychain: s.keychain,
 		Opener:   s.opener,
+		Loads:    loads,
 	})
 	if err != nil {
 		return commands.Services{}, nil, err

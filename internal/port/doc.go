@@ -8,7 +8,8 @@
 // Registry, Notifier, LocalFiles, PDFInspector, PageReader, PageEditor,
 // PageWriter, ArchiveReader, ArchiveWriter, Renderer, Previews, Opener, IDs,
 // Clock, BlobCache, SyncCache, ListingCache) are what the use cases ask of the outside world; adapters
-// implement them. The input ports (Account, Browser, Fetcher, Writer,
+// implement them, and LoadObserver, which the command line implements, is
+// what the library tells of a load. The input ports (Account, Browser, Fetcher, Writer,
 // Watcher, Inspector, Pages, Archives, Rendering, Viewing, Syncer, and
 // Completion and Cache, which the cache adapter implements) are what the
 // command line asks of the use cases. The package holds no implementation and imports nothing from this

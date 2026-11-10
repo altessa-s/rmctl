@@ -46,9 +46,21 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// A test says what the terminal is before anything is built from it.
+func TestRunWithStreams(t *testing.T) {
+	isolate(t)
+	var out, errOut bytes.Buffer
+	var seen *commands.Streams
+	s := seams{streams: func(st *commands.Streams) { st.IsTerminal = true; seen = st }}
+	code := runWith([]string{"version"}, nil, &out, &errOut, func(int) { t.Error("exited") }, s)
+	if code != 0 || seen == nil || seen.Err != &errOut || errOut.Len() != 0 {
+		t.Fatalf("code %d, streams %+v, stderr %q", code, seen, errOut.String())
+	}
+}
+
 func TestBuild(t *testing.T) {
 	isolate(t)
-	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Verbose: true}, &bytes.Buffer{}, seams{})
+	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Verbose: true}, &bytes.Buffer{}, nil, seams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,10 +75,10 @@ func TestBuild(t *testing.T) {
 	if err != nil || info.Registered {
 		t.Fatalf("a fresh profile is registered: %+v %v", info, err)
 	}
-	if _, _, err := build(context.Background(), commands.Request{}, nil, seams{}); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{}, nil, nil, seams{}); err == nil {
 		t.Fatal("a nil log writer was accepted")
 	}
-	if _, _, err := build(context.Background(), commands.Request{Profile: "../escape"}, &bytes.Buffer{}, seams{}); err == nil {
+	if _, _, err := build(context.Background(), commands.Request{Profile: "../escape"}, &bytes.Buffer{}, nil, seams{}); err == nil {
 		t.Fatal("an unsafe profile name was accepted")
 	}
 }
@@ -75,14 +87,14 @@ func TestBuild(t *testing.T) {
 // reach the cloud or read a token.
 func TestBuildForCompletion(t *testing.T) {
 	isolate(t)
-	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Completion: true}, &bytes.Buffer{}, seams{})
+	svc, closeFn, err := build(context.Background(), commands.Request{Profile: "work", Completion: true}, &bytes.Buffer{}, nil, seams{})
 	if err != nil || svc.Completion == nil || svc.Browser != nil || svc.Account != nil || svc.Viewing != nil {
 		t.Fatalf("%+v %v", svc, err)
 	}
 	if err = closeFn(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = build(context.Background(), commands.Request{Profile: "../escape", Completion: true}, &bytes.Buffer{}, seams{}); err == nil {
+	if _, _, err = build(context.Background(), commands.Request{Profile: "../escape", Completion: true}, &bytes.Buffer{}, nil, seams{}); err == nil {
 		t.Fatal("an unsafe profile name was accepted")
 	}
 	var out, errOut bytes.Buffer

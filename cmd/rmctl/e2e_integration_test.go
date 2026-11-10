@@ -22,18 +22,21 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/altessa-s/rmctl/cmd/rmctl/commands"
 	"github.com/altessa-s/rmctl/internal/clouddouble"
 	"github.com/altessa-s/rmctl/internal/wiring"
 )
 
 // e2e is one emulated cloud and one isolated profile. keychain, when set,
 // stands in for the login Keychain; opener stands in for the system's
-// viewer, so no test starts one.
+// viewer, so no test starts one; streams, when set, says what the terminal
+// is.
 type e2e struct {
 	t        *testing.T
 	cloud    *clouddouble.Cloud
 	keychain wiring.KeychainItems
 	opener   *viewer
+	streams  func(*commands.Streams)
 }
 
 func newE2E(t *testing.T) *e2e {
@@ -66,7 +69,7 @@ func (v *viewer) shown() []string {
 func (e *e2e) rmctl(args ...string) (int, string, string) {
 	e.t.Helper()
 	var out, errOut bytes.Buffer
-	code := runWith(args, nil, &out, &errOut, func(c int) { e.t.Fatalf("exit(%d) from %v", c, args) }, seams{keychain: e.keychain, opener: e.opener}, e.cloud.Options()...)
+	code := runWith(args, nil, &out, &errOut, func(c int) { e.t.Fatalf("exit(%d) from %v", c, args) }, seams{keychain: e.keychain, opener: e.opener, streams: e.streams}, e.cloud.Options()...)
 	return code, out.String(), errOut.String()
 }
 

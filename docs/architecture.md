@@ -13,7 +13,7 @@ The domain, the ports, the use cases and the command packages under `cmd/rmctl/c
 
 **Use cases**
 
-- `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict.
+- `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict. It tells a `port.LoadObserver` how each load that reads items goes; the command line implements it as the line of a slow load (`cliutil.Loading`), `internal/wiring` passes it on, and the library keeps no time itself.
 - `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render`, `notes`, `profile`, `prefetch` — one input port each; `pages.Reader` is shared with `browse` and `notes`, `render` downloads a document through `fetch.Pack`, as `export` does, and its `Viewer` (`rmctl open`) draws into `port.Previews` and shows the file through `port.Opener`; `render` and `notes` lay a folder out as a directory tree and record what they wrote through `outdir`, which is no input port itself; `library` keeps the tree of every root it loads or commits in `port.ListingCache`, `profile` registers, revokes and reads the account of any profile through the `account` use case, and `prefetch` (`rmctl sync`) fills the profile's cache through `port.SyncCache`.
 
 **Adapters** (`internal/adapter/…`)
