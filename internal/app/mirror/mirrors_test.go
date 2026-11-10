@@ -85,14 +85,16 @@ func (e *engine) Watch(ctx context.Context, spec port.MirrorSpec, _ port.MirrorR
 	return nil
 }
 
-// engines opens an engine per profile, failing for the profile "bad".
+// engines opens an engine per profile, failing for the profile "bad",
+// and for any the first failOpens times.
 type engines struct {
-	mu       sync.Mutex
-	open     map[string]*engine
-	released int
-	fail     map[string]error
-	watched  chan string
-	stopped  chan string
+	mu        sync.Mutex
+	open      map[string]*engine
+	released  int
+	fail      map[string]error
+	failOpens int
+	watched   chan string
+	stopped   chan string
 }
 
 func newEngines() *engines {
@@ -103,6 +105,10 @@ func (e *engines) Open(profile string) (port.MirrorEngine, func() error, error) 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if profile == "bad" {
+		return nil, nil, errBoom
+	}
+	if e.failOpens > 0 {
+		e.failOpens--
 		return nil, nil, errBoom
 	}
 	eng := &engine{profile: profile, fail: e.fail, watched: e.watched, stopped: e.stopped}
@@ -340,9 +346,10 @@ func TestRunWatchesEveryMirror(t *testing.T) {
 	if strings.Join(got, " ") != "a@/A b@/B" {
 		t.Fatal(got)
 	}
-	// b changes its folder, a goes, c comes.
+	// b changes its folder, a goes, c comes; bad, which waits to try its
+	// engine again, goes too.
 	s.config.set(port.MirrorSpec{Name: "b", Dir: "/b", Folder: "/B2"}, port.MirrorSpec{Name: "c", Dir: "/c", Folder: "/C"})
-	if !s.timer.WaitSleepers(ctx, 1) {
+	if !s.timer.WaitSleepers(ctx, 2) {
 		t.Fatal("no sleeper")
 	}
 	s.timer.Wake()
@@ -362,8 +369,12 @@ func TestRunWatchesEveryMirror(t *testing.T) {
 		t.Fatal("no sleeper")
 	}
 	s.timer.Wake()
-	if got := recv(t, failed); got != "config.toml" {
-		t.Fatal(got)
+	got1 := recv(t, failed)
+	for got1 == "bad" {
+		got1 = recv(t, failed)
+	}
+	if got1 != "config.toml" {
+		t.Fatal(got1)
 	}
 	cancel()
 	if err := <-done; err != nil {

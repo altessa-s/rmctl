@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
 	"github.com/altessa-s/rmctl/internal/domain"
@@ -145,6 +146,23 @@ type run struct {
 	// outputs are the drawings claimed in this pass, by path, so two
 	// documents never draw into one file.
 	outputs map[string]domain.ItemID
+	// saved is when the journal was last written in this pass.
+	saved time.Time
+}
+
+// checkpointEvery is how often a pass records in the journal what it has
+// changed in the cloud so far. A pass cut short by a crash, the journal of
+// its end never written, finds the uploads of its last moments only by
+// their names; it repeats nothing older.
+const checkpointEvery = 10 * time.Second
+
+// checkpoint writes the journal when it was last written checkpointEvery
+// ago or more.
+func (r *run) checkpoint(ctx context.Context) {
+	if now := r.e.timer.Now(); now.Sub(r.saved) >= checkpointEvery {
+		r.saved = now
+		_ = r.j.write(ctx, r.e.files, r.spec.Dir) //nolint:errcheck // the pass writes it again at its end, and reports a failure then
+	}
 }
 
 // pass makes one pass, the lock taken: it reads the journal, the cloud
@@ -152,6 +170,7 @@ type run struct {
 // and draws, and writes the journal.
 func (e *Engine) pass(ctx context.Context, spec port.MirrorSpec, opts port.MirrorRunOptions) port.MirrorPass {
 	r := &run{e: e, spec: spec, opts: opts, pass: e.started(spec, opts), outputs: map[string]domain.ItemID{}}
+	r.saved = r.pass.Started
 	j, err := readJournal(e.files, spec.Dir)
 	if err != nil {
 		return e.failed(r.pass, err)

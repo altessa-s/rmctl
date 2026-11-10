@@ -29,8 +29,9 @@
 //     .rmdoc in a build that draws nothing; with PullNew the documents
 //     created on the tablet are drawn too.
 //
-// The journal is written whole after every pass, so each pass starts from
-// what was in step: the mirror's own changes come back as nothing to do.
+// The journal is written whole after every pass, and every few seconds of
+// a long one, so each pass starts from what was in step: the mirror's own
+// changes come back as nothing to do.
 // A watch holds the directory's lock, hears of local changes through
 // port.DirWatcher (polling the directory's listing while that cannot
 // watch) and follows the notification socket, and makes a full pass on start, after a

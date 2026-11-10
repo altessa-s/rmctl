@@ -79,8 +79,12 @@ linters:
             # Only cmd/rmctl/commands/output.
             - github.com/mattn/go-runewidth
             # Advisory file locks for editing config.toml (internal/adapter/config),
+            # renames that never replace a file (internal/adapter/localfs),
             # and ANSI color on the Windows console (cmd/rmctl).
             - golang.org/x/sys
+            # Unicode normalization of file names: macOS and its shares give
+            # names in NFD, the tablet writes NFC (the mirror).
+            - golang.org/x/text/unicode/norm
             # Counting the pages of an uploaded PDF. Only internal/adapter/pdf.
             - github.com/pdfcpu/pdfcpu
             # The .rm page format, through cgo. Only internal/adapter/rmpages.

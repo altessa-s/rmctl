@@ -282,3 +282,19 @@ func TestWatchFallsBackToPolling(t *testing.T) {
 		}
 	}
 }
+
+// A file still being written when a pass looked is taken by another pass
+// once it has settled, though nothing changes after: the watcher said all
+// it had to say while it was being written.
+func TestWatchTakesAFileOnceSettled(t *testing.T) {
+	t.Parallel()
+	f := setup(t, true)
+	f.pdfFile("New.pdf", "%PDF new", 1, now)
+	dirs := porttest.NewDirWatcher(true)
+	w := watchWith(t, f, port.MirrorRunOptions{Watch: true}, dirs)
+	want(t, w.next(t), "skip New.pdf")
+	// The poll and the wait for the file to settle; no change comes.
+	w.sleepers(t, 2)
+	w.timer.Wake()
+	want(t, w.next(t), "upload New.pdf")
+}

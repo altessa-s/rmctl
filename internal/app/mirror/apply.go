@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"path"
 	"path/filepath"
@@ -92,11 +93,31 @@ func (r *run) apply(ctx context.Context, s step) bool {
 		return true
 	default:
 	}
+	if s.kind == stepTrash && !r.opts.DryRun && r.exists(s.path) {
+		// An application that saves by deleting the file and writing it anew
+		// leaves it missing for a moment: the listing saw that moment.
+		r.record(port.MirrorAction{Kind: port.MirrorSkip, Path: s.path, Document: s.id, Detail: "back since the directory was listed: not deleted"})
+		return false
+	}
 	if !r.opts.DryRun {
 		a.Err = r.carry(ctx, s, &a)
+		if a.Err == nil && s.changesCloud() {
+			r.checkpoint(ctx)
+		}
 	}
 	r.record(a)
 	return a.Err == nil
+}
+
+// changesCloud reports whether the step changes the cloud: what a pass cut
+// short must find in the journal, not do again.
+func (s step) changesCloud() bool {
+	switch s.kind {
+	case stepUpload, stepUpdate, stepMoveCloud, stepTrash:
+		return true
+	default:
+		return false
+	}
 }
 
 // bookkeep records a step that changes nothing but the journal.
@@ -251,15 +272,14 @@ func (r *run) aside(rel string) (string, error) {
 }
 
 // move renames the file at rel to to, both relative to the directory,
-// creating the directories to needs; it never replaces a file.
+// creating the directories to needs; it never replaces a file, not even
+// one written there since the directory was listed.
 func (r *run) move(rel, to string) error {
-	if r.exists(to) {
+	err := r.e.disk.Move(abs(r.spec.Dir, rel), abs(r.spec.Dir, to))
+	if errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("%s: %w", to, errTaken)
 	}
-	if err := r.e.files.MkdirAll(filepath.Dir(abs(r.spec.Dir, to))); err != nil {
-		return err
-	}
-	return r.e.files.Rename(abs(r.spec.Dir, rel), abs(r.spec.Dir, to))
+	return err
 }
 
 // maxAside bounds the numbers tried for a name taken in the removed

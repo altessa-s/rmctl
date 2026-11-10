@@ -7,6 +7,7 @@ package mirror
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,9 @@ const (
 	// jumpSlack is how much later than due a look at the directory must
 	// come for the machine to have slept in between.
 	jumpSlack = 30 * time.Second
+	// maxQuiet is the longest changes that never stop hold a pass back: a
+	// file written to all the time keeps nothing else waiting.
+	maxQuiet = 30 * time.Second
 )
 
 // timing is opts with the defaults filled in.
@@ -57,14 +61,15 @@ func timing(opts port.MirrorRunOptions) (poll, debounce, rescan time.Duration) {
 // Watch implements port.MirrorEngine. It holds the directory's lock the
 // whole time, waiting for it, and for the directory to be there, as long
 // as it must. A pass follows every change the notification socket
-// announces and every change of the local files, once they settle: the
-// system's file watcher hears of them at once, and while it cannot watch
-// the directory, a look at it every poll interval does. A full pass
-// follows a reconnection of the socket, a watcher that stopped watching, a
-// wake from sleep (a look at the clock much later than due) and every
-// rescan interval. A pass that
-// fails as a whole is tried again after a wait that doubles up to five
-// minutes; a step that fails waits for the next pass.
+// announces and every change of the local files, once they settle (or
+// after maxQuiet of changes that do not): the system's file watcher hears
+// of them at once, and while it cannot watch the directory, a look at it
+// every poll interval does. A file a pass found still being written is
+// taken by another pass once it has settled. A full pass follows a
+// reconnection of the socket, a watcher that stopped watching, a wake from
+// sleep (a look at the clock much later than due) and every rescan
+// interval. A pass that fails as a whole is tried again after a wait that
+// doubles up to five minutes; a step that fails waits for the next pass.
 func (e *Engine) Watch(ctx context.Context, spec port.MirrorSpec, opts port.MirrorRunOptions, on func(port.MirrorPass)) error {
 	if on == nil {
 		on = func(port.MirrorPass) {}
@@ -105,20 +110,34 @@ func (e *Engine) Watch(ctx context.Context, spec port.MirrorSpec, opts port.Mirr
 			continue
 		}
 		backoff = 0
+		if writing(p) {
+			// A file still being written when the pass looked makes no change
+			// once it is done: another pass takes it once it has settled.
+			if e.timer.Sleep(ctx, settle) != nil {
+				return nil
+			}
+			continue
+		}
 		if !e.settle(ctx, wake, debounce) {
 			return nil
 		}
 	}
 }
 
+// writing reports whether the pass skipped a file still being written.
+func writing(p port.MirrorPass) bool {
+	return slices.ContainsFunc(p.Actions, func(a port.MirrorAction) bool { return a.Kind == port.MirrorSkip && a.Detail == stillWriting })
+}
+
 // settle waits for a change, then for the changes to stop coming for
-// debounce; false is ctx ended.
+// debounce, or maxQuiet at the most; false is ctx ended.
 func (e *Engine) settle(ctx context.Context, wake <-chan struct{}, debounce time.Duration) bool {
 	select {
 	case <-ctx.Done():
 		return false
 	case <-wake:
 	}
+	first := e.timer.Now()
 	for {
 		if e.timer.Sleep(ctx, debounce) != nil {
 			return false
@@ -126,6 +145,9 @@ func (e *Engine) settle(ctx context.Context, wake <-chan struct{}, debounce time
 		select {
 		case <-wake:
 		default:
+			return true
+		}
+		if e.timer.Now().Sub(first) >= maxQuiet {
 			return true
 		}
 	}

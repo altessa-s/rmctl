@@ -81,16 +81,28 @@ func (s *Service) Add(_ context.Context, spec port.MirrorSpec) (port.MirrorSpec,
 		return spec, err
 	}
 	for _, m := range existing {
-		switch {
-		case m.Name == spec.Name:
+		if m.Name == spec.Name {
 			return spec, fmt.Errorf("%w: %s", port.ErrMirrorExists, m.Name)
-		case nested(m.Dir, spec.Dir, filepath.Separator):
-			return spec, fmt.Errorf("%w: %s mirrors %s, which overlaps %s", port.ErrMirrorExists, m.Name, m.Dir, spec.Dir)
-		case m.Profile == spec.Profile && nested(m.Folder, spec.Folder, '/'):
-			return spec, fmt.Errorf("%w: %s mirrors the folder %s, which overlaps %s", port.ErrMirrorExists, m.Name, m.Folder, spec.Folder)
+		}
+		if err = overlap(m, spec); err != nil {
+			return spec, err
 		}
 	}
 	return spec, s.config.AddMirror(spec)
+}
+
+// overlap is why spec cannot be mirrored beside m, or nil: a directory
+// that contains the other one or lies inside it, or a folder of the same
+// profile that does.
+func overlap(m, spec port.MirrorSpec) error {
+	switch {
+	case nested(m.Dir, spec.Dir, filepath.Separator):
+		return fmt.Errorf("%w: %s mirrors %s, which overlaps %s", port.ErrMirrorExists, m.Name, m.Dir, spec.Dir)
+	case m.Profile == spec.Profile && nested(m.Folder, spec.Folder, '/'):
+		return fmt.Errorf("%w: %s mirrors the folder %s, which overlaps %s", port.ErrMirrorExists, m.Name, m.Folder, spec.Folder)
+	default:
+		return nil
+	}
 }
 
 // nested reports whether a and b are the same path or one lies inside the
@@ -138,8 +150,11 @@ func (s *Service) state(spec port.MirrorSpec) port.MirrorState {
 		if e.Path == "" || e.Detached {
 			continue
 		}
-		known[e.Path] = true
-		if f, ok := files.files[e.Path]; !ok || !f.sameStat(e) {
+		f, ok := files.find(e.Path)
+		if ok {
+			known[f.Path] = true
+		}
+		if !ok || !f.sameStat(e) {
 			st.LocalChanges++
 		}
 	}
@@ -199,7 +214,31 @@ func (s *Service) selected(sel port.MirrorSelection) ([]port.MirrorSpec, error) 
 	return out, nil
 }
 
-// Run implements port.Mirrors. on hears every pass, one at a time.
+// refusal is a mirror a run leaves out, and why.
+type refusal struct {
+	spec port.MirrorSpec
+	err  error
+}
+
+// disjoint are the specs that overlap none before them, and the others
+// refused: config.toml edited by hand can define two mirrors over one
+// directory or one folder, which Add refuses.
+func disjoint(specs []port.MirrorSpec) (ok []port.MirrorSpec, refused []refusal) {
+next:
+	for _, spec := range specs {
+		for _, m := range ok {
+			if err := overlap(m, spec); err != nil {
+				refused = append(refused, refusal{spec: spec, err: fmt.Errorf("%w; it is not run", err)})
+				continue next
+			}
+		}
+		ok = append(ok, spec)
+	}
+	return ok, refused
+}
+
+// Run implements port.Mirrors. on hears every pass, one at a time. Of two
+// mirrors that overlap, the one defined later is not run.
 func (s *Service) Run(ctx context.Context, sel port.MirrorSelection, opts port.MirrorRunOptions, on func(port.MirrorPass)) error {
 	specs, err := s.selected(sel)
 	if err != nil {
@@ -218,7 +257,12 @@ func (s *Service) Run(ctx context.Context, sel port.MirrorSelection, opts port.M
 	defer engines.release()
 	if !opts.Watch {
 		var errs []error
-		for _, spec := range specs {
+		run, refused := disjoint(specs)
+		for _, r := range refused {
+			report(failedPass(r.spec, opts, s.timer.Now(), r.err))
+			errs = append(errs, fmt.Errorf("%s: %w", label(r.spec), r.err))
+		}
+		for _, spec := range run {
 			if err = ctx.Err(); err != nil {
 				return errors.Join(append(errs, err)...)
 			}
@@ -280,9 +324,18 @@ func (s *Service) supervise(
 			stop(w)
 		}
 	}()
+	said := map[string]bool{}
 	for {
+		run, refused := disjoint(specs)
+		for _, r := range refused {
+			// Said once, not at every reading of config.toml.
+			if key := label(r.spec) + "\x00" + r.err.Error(); !said[key] {
+				said[key] = true
+				report(failedPass(r.spec, opts, s.timer.Now(), r.err))
+			}
+		}
 		wanted := map[string]port.MirrorSpec{}
-		for _, spec := range specs {
+		for _, spec := range run {
 			wanted[label(spec)] = spec
 		}
 		for key, w := range active {
@@ -319,12 +372,21 @@ func (s *Service) start(
 	w := &watching{spec: spec, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
-		eng, err := engines.get(spec.Profile)
-		if err == nil {
-			err = eng.Watch(ctx, spec, opts, report)
-		}
-		if err != nil && ctx.Err() == nil {
+		// An engine that cannot open yet (the keychain locked at login, a
+		// profile not signed in) is tried again with the growing wait.
+		for backoff := time.Duration(0); ; {
+			eng, err := engines.get(spec.Profile)
+			if err == nil {
+				err = eng.Watch(ctx, spec, opts, report)
+			}
+			if err == nil || ctx.Err() != nil {
+				return
+			}
 			report(failedPass(spec, opts, s.timer.Now(), err))
+			backoff = min(max(backoff*backoffGrowth, firstBackoff), maxBackoff)
+			if s.timer.Sleep(ctx, backoff) != nil {
+				return
+			}
 		}
 	}()
 	return w

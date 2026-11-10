@@ -19,6 +19,8 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/fetch"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // cloudDoc is a document below the mirrored folder and the local directory
@@ -66,10 +68,10 @@ func snapshotOf(tree *domain.Tree, top domain.ItemID) *snapshot {
 				continue
 			}
 			name := domain.SafeName(it.Name)
-			if taken[strings.ToLower(name)] {
+			if taken[foldName(name)] {
 				name = fetch.Disambiguated(name, it.ID, "")
 			}
-			taken[strings.ToLower(name)] = true
+			taken[foldName(name)] = true
 			sub := path.Join(dir, name)
 			s.folders[sub] = it.ID
 			s.paths[sub] = tree.Path(it.ID)
@@ -137,10 +139,34 @@ func (f *localFile) sameStat(e entry) bool {
 // upload.
 type local struct {
 	files map[string]*localFile
+	// forms are the paths of files by their NFC form, "" for a form two
+	// paths share.
+	forms map[string]string
 	// all counts every file below the directory but those of the mirror
 	// itself: a directory with none is taken for one not mounted.
 	all int
 }
+
+// find is the file at rel, or else the one file whose path is rel in
+// another Unicode form: a name written in one form comes back in the other
+// from some file systems (HFS+, a share of macOS), and is the same name.
+func (l local) find(rel string) (*localFile, bool) {
+	if f, ok := l.files[rel]; ok {
+		return f, true
+	}
+	if p := l.forms[norm.NFC.String(rel)]; p != "" {
+		return l.files[p], true
+	}
+	return nil, false
+}
+
+// sameName reports whether two names are one but for their Unicode form:
+// the tablet writes NFC, macOS often NFD.
+func sameName(a, b string) bool { return a == b || norm.NFC.String(a) == norm.NFC.String(b) }
+
+// foldName is a name as a file system that ignores case and Unicode form
+// compares it: two names of one key are one file on macOS and Windows.
+func foldName(name string) string { return strings.ToLower(norm.NFC.String(name)) }
 
 // scan lists the files of dir: those the mirror uploads, outside what it
 // ignores.
@@ -149,7 +175,7 @@ func scan(disk port.MirrorFiles, dir string) (local, error) {
 	if err != nil {
 		return local{}, err
 	}
-	out := local{files: map[string]*localFile{}}
+	out := local{files: map[string]*localFile{}, forms: map[string]string{}}
 	for _, e := range entries {
 		if e.Path == domain.MirrorJournalName || e.Path == domain.MirrorLockName ||
 			strings.HasPrefix(e.Path, domain.MirrorAnnotatedDir+"/") || strings.HasPrefix(e.Path, domain.MirrorRemovedDir+"/") {
@@ -160,6 +186,12 @@ func scan(disk port.MirrorFiles, dir string) (local, error) {
 			continue
 		}
 		out.files[e.Path] = &localFile{LocalEntry: e}
+		form := norm.NFC.String(e.Path)
+		if _, shared := out.forms[form]; shared {
+			out.forms[form] = ""
+		} else {
+			out.forms[form] = e.Path
+		}
 	}
 	return out, nil
 }

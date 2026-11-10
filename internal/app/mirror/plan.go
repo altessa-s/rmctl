@@ -64,6 +64,9 @@ func (s step) deletion() (deletes, down bool) {
 	}
 }
 
+// stillWriting is why a file written less than settle ago is skipped.
+const stillWriting = "still being written"
+
 // planner works out the steps of one pass from the journal, the cloud and
 // the local files.
 type planner struct {
@@ -107,7 +110,7 @@ func (p *planner) tracked(id domain.ItemID) (missing bool) {
 	p.claimedCloud[id] = true
 	c, inCloud := p.snap.docs[id]
 	if e.Detached {
-		f, inLocal := p.local.files[e.Path]
+		f, inLocal := p.local.find(e.Path)
 		if inLocal {
 			p.claimedLocal[f.Path] = true
 		}
@@ -123,13 +126,14 @@ func (p *planner) tracked(id domain.ItemID) (missing bool) {
 		return false
 	}
 	cur := e.Path
-	f, inLocal := p.local.files[cur]
+	f, inLocal := p.local.find(cur)
 	if inLocal {
+		cur = f.Path
 		p.claimedLocal[cur] = true
 	}
-	if inLocal && inCloud && (c.item.Name != e.Name || c.item.Parent != e.Parent) {
+	if inLocal && inCloud && (!sameName(c.item.Name, e.Name) || c.item.Parent != e.Parent) {
 		want := c.localPath(strings.TrimPrefix(path.Ext(cur), "."))
-		if want != cur && !p.claimedLocal[want] && p.local.files[want] == nil {
+		if _, taken := p.local.find(want); !sameName(want, cur) && !p.claimedLocal[want] && !taken {
 			p.add(step{kind: stepMoveLocal, id: id, path: cur, to: want, file: f, doc: c})
 			p.claimedLocal[want] = true
 			cur = want
@@ -160,7 +164,7 @@ func (p *planner) changed(id domain.ItemID, e entry, cur string, f *localFile, c
 		return
 	}
 	if !f.settled(p.now) {
-		p.add(step{kind: stepSkip, id: id, path: cur, detail: "still being written"})
+		p.add(step{kind: stepSkip, id: id, path: cur, detail: stillWriting})
 		return
 	}
 	sum, err := p.hash(f)
@@ -228,7 +232,7 @@ func (p *planner) newFiles() {
 		if p.claimedCloud[id] || ext == "" {
 			continue
 		}
-		key := strings.ToLower(c.localPath(ext))
+		key := foldName(c.localPath(ext))
 		if _, taken := byPath[key]; !taken {
 			byPath[key] = id
 		}
@@ -239,14 +243,14 @@ func (p *planner) newFiles() {
 		}
 		f := p.local.files[rel]
 		if !f.settled(p.now) {
-			p.add(step{kind: stepSkip, path: rel, detail: "still being written"})
+			p.add(step{kind: stepSkip, path: rel, detail: stillWriting})
 			continue
 		}
 		if _, err := p.hash(f); err != nil {
 			p.add(step{kind: stepSkip, path: rel, detail: "cannot be read: " + err.Error()})
 			continue
 		}
-		if id, ok := byPath[strings.ToLower(rel)]; ok && !p.claimedCloud[id] {
+		if id, ok := byPath[foldName(rel)]; ok && !p.claimedCloud[id] {
 			p.claimedCloud[id] = true
 			p.add(step{kind: stepAdopt, id: id, path: rel, file: f, doc: p.snap.docs[id]})
 			continue
