@@ -152,3 +152,31 @@ func TestSyncEdgesThroughTheClient(t *testing.T) {
 		t.Fatal("a new store holds a token")
 	}
 }
+
+// Replace swaps entries in place and adds the new ones; Remove takes them
+// out; each is one root write.
+func TestReplaceAndRemove(t *testing.T) {
+	t.Parallel()
+	c := clouddouble.New(t)
+	c.Seed(t, clouddouble.Item{ID: "a", Name: "A", Kind: clouddouble.PDF}, clouddouble.Item{ID: "b", Name: "B", Kind: clouddouble.PDF})
+	_, before := c.Root()
+	c.Replace(t, clouddouble.Item{ID: "a", Name: "A2", Kind: clouddouble.PDF}, clouddouble.Item{ID: "c", Name: "C", Kind: clouddouble.Notebook, Pages: 1})
+	if _, after := c.Root(); after != before+1 {
+		t.Fatalf("%d → %d", before, after)
+	}
+	records := c.Records(t)
+	if len(records) != 3 || records[0].DocumentID != "a" || c.Metadata(t, "a")["visibleName"] != "A2" || records[2].DocumentID != "c" {
+		t.Fatalf("%+v", records)
+	}
+	// The same item seeded again is the same bytes.
+	files := len(c.Files(t, "c"))
+	hash := records[2].Hash
+	c.Replace(t, clouddouble.Item{ID: "c", Name: "C", Kind: clouddouble.Notebook, Pages: 1})
+	if got := c.Records(t)[2]; got.Hash != hash || len(c.Files(t, "c")) != files {
+		t.Fatalf("%+v", got)
+	}
+	c.Remove(t, "a", "c")
+	if records = c.Records(t); len(records) != 1 || records[0].DocumentID != "b" {
+		t.Fatalf("%+v", records)
+	}
+}

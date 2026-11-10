@@ -7,6 +7,7 @@ package clouddouble
 import (
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -184,7 +185,9 @@ func metadata(tb testing.TB, it Item) []byte {
 		m["synced"] = true
 		m["metadatamodified"] = false
 	}
-	out, err := json.Marshal(m)
+	// Deterministic: an item seeded again unchanged has the same bytes, as
+	// the tablet writes them.
+	out, err := json.Marshal(m, json.Deterministic(true))
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -211,7 +214,7 @@ func content(tb testing.TB, it Item) []byte {
 		"pageCount":     it.Pages,
 		"pages":         pages,
 		"tags":          tags,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -281,4 +284,53 @@ func (c *Cloud) Metadata(tb testing.TB, id string) map[string]any {
 		tb.Fatalf("clouddouble: the metadata of %s does not decode: %v", id, err)
 	}
 	return m
+}
+
+// Replace puts items in the place of the root entries with their
+// identifiers, in one root write, as a change synced from the tablet does;
+// an item the root does not hold is added.
+func (c *Cloud) Replace(tb testing.TB, items ...Item) {
+	tb.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	root, err := rmcloud.Parse(string(c.blobs[c.rootHash]))
+	if err != nil {
+		tb.Fatalf("clouddouble: the root does not parse: %v", err)
+	}
+	entries := root.Entries
+	for _, it := range items {
+		it.Pages = max(it.Pages, len(it.PageBodies))
+		entry := c.seedItem(tb, it)
+		found := false
+		for i := range entries {
+			if entries[i].DocumentID == it.ID {
+				entries[i], found = entry, true
+			}
+		}
+		if !found {
+			entries = append(entries, entry)
+		}
+	}
+	c.rootHash = c.put([]byte(rmcloud.SerializeRoot(entries)))
+	c.generation++
+}
+
+// Remove takes the items ids out of the root, in one root write, as a
+// deletion on the tablet does.
+func (c *Cloud) Remove(tb testing.TB, ids ...string) {
+	tb.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	root, err := rmcloud.Parse(string(c.blobs[c.rootHash]))
+	if err != nil {
+		tb.Fatalf("clouddouble: the root does not parse: %v", err)
+	}
+	entries := root.Entries[:0:0]
+	for _, e := range root.Entries {
+		if !slices.Contains(ids, e.DocumentID) {
+			entries = append(entries, e)
+		}
+	}
+	c.rootHash = c.put([]byte(rmcloud.SerializeRoot(entries)))
+	c.generation++
 }
