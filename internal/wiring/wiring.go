@@ -91,6 +91,11 @@ type Options struct {
 	// service manager out of reach with them.
 	ServiceRunner ServiceRunner
 	ServiceHome   string
+	// Loads, when set, is told how every load of the library that reads
+	// items goes, so the command line can show a person that a slow one is
+	// alive. An offline run reads the cache alone and tells it nothing, and
+	// Completion builds no library to tell of.
+	Loads LoadObserver
 }
 
 // ServiceRunner runs the system's service tools.
@@ -98,6 +103,9 @@ type ServiceRunner = autostart.Runner
 
 // Opener shows a file in a viewer.
 type Opener = port.Opener
+
+// LoadObserver follows the loads of the library.
+type LoadObserver = port.LoadObserver
 
 // KeychainItems are the Keychain as the keychain adapter needs it.
 type KeychainItems = keychain.Items
@@ -176,6 +184,9 @@ func Build(opts Options) (Services, error) {
 		return Services{}, err
 	}
 	libOpts := []library.Option{library.WithLogger(opts.Logger)}
+	if !st.offline {
+		libOpts = append(libOpts, library.WithLoadObserver(opts.Loads))
+	}
 	if st.blobCache != nil {
 		libOpts = append(libOpts, library.WithCache(st.blobCache), library.WithListings(indexcache.NewListings(st.profile, opts.Logger)))
 	}

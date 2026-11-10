@@ -37,25 +37,75 @@ func Transfer(streams Streams, label string) (update func(port.SyncProgress), do
 	if !streams.IsTerminal {
 		return nil, func() {}
 	}
-	now := streams.Now
-	if now == nil {
-		now = time.Now //nolint:forbidigo // a progress bar's rate is wall time, not the library's clock
-	}
-	t := &transfer{w: streams.Err, label: label, now: now, dumb: streams.getenv("TERM") == "dumb"}
+	t := &transfer{line: newStatusLine(streams), label: label, now: streams.clock()}
 	return t.update, t.done
 }
 
+// clock is the wall clock of the progress lines: Now, or the machine's.
+func (s Streams) clock() func() time.Time {
+	if s.Now != nil {
+		return s.Now
+	}
+	return time.Now //nolint:forbidigo // a progress line's time is wall time, not the library's clock
+}
+
 type transfer struct {
-	mu     sync.Mutex
+	mu    sync.Mutex
+	line  statusLine
+	label string
+	now   func() time.Time
+	start time.Time
+	drawn time.Time
+	last  port.SyncProgress
+}
+
+// statusLine is one line of the error stream rewritten in place. On a
+// terminal that takes no escape sequences (TERM=dumb) it is padded with
+// spaces instead of cleared.
+type statusLine struct {
 	w      io.Writer
-	label  string
-	now    func() time.Time
 	dumb   bool
-	start  time.Time
-	drawn  time.Time
-	last   port.SyncProgress
 	width  int
 	inLine bool
+}
+
+func newStatusLine(streams Streams) statusLine {
+	return statusLine{w: streams.Err, dumb: streams.getenv("TERM") == "dumb"}
+}
+
+// draw writes text over what the line showed.
+func (l *statusLine) draw(text string) {
+	if l.dumb {
+		pad := max(l.width-len(text), 0)
+		_, _ = fmt.Fprintf(l.w, "\r%s%s", text, strings.Repeat(" ", pad)) //nolint:errcheck // progress
+	} else {
+		_, _ = fmt.Fprintf(l.w, "\r\x1b[K%s", text) //nolint:errcheck // progress
+	}
+	l.width = len(text)
+	l.inLine = true
+}
+
+// finish keeps what the line shows and moves to the next one.
+func (l *statusLine) finish() {
+	if l.inLine {
+		_, _ = fmt.Fprintln(l.w) //nolint:errcheck // progress
+		l.inLine = false
+	}
+}
+
+// erase takes what the line shows away and leaves the cursor at its start,
+// so what is written next stands where the line was.
+func (l *statusLine) erase() {
+	if !l.inLine {
+		return
+	}
+	if l.dumb {
+		_, _ = fmt.Fprintf(l.w, "\r%s\r", strings.Repeat(" ", l.width)) //nolint:errcheck // progress
+	} else {
+		_, _ = fmt.Fprint(l.w, "\r\x1b[K") //nolint:errcheck // progress
+	}
+	l.width = 0
+	l.inLine = false
 }
 
 func (t *transfer) update(p port.SyncProgress) {
@@ -67,31 +117,17 @@ func (t *transfer) update(p port.SyncProgress) {
 	}
 	t.last = p
 	finished := p.FilesTotal > 0 && p.Files >= p.FilesTotal
-	if !finished && t.inLine && now.Sub(t.drawn) < redraw {
+	if !finished && t.line.inLine && now.Sub(t.drawn) < redraw {
 		return
 	}
 	t.drawn = now
-	t.draw(TransferLine(t.label, p, now.Sub(t.start)))
-}
-
-func (t *transfer) draw(line string) {
-	if t.dumb {
-		pad := max(t.width-len(line), 0)
-		_, _ = fmt.Fprintf(t.w, "\r%s%s", line, strings.Repeat(" ", pad)) //nolint:errcheck // progress
-	} else {
-		_, _ = fmt.Fprintf(t.w, "\r\x1b[K%s", line) //nolint:errcheck // progress
-	}
-	t.width = len(line)
-	t.inLine = true
+	t.line.draw(TransferLine(t.label, p, now.Sub(t.start)))
 }
 
 func (t *transfer) done() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.inLine {
-		_, _ = fmt.Fprintln(t.w) //nolint:errcheck // progress
-		t.inLine = false
-	}
+	t.line.finish()
 }
 
 // TransferLine is one line of a transfer's progress after elapsed:

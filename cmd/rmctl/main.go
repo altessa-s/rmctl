@@ -67,8 +67,14 @@ func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), 
 			streams.Width = w
 		}
 	}
+	if s.streams != nil {
+		s.streams(&streams)
+	}
+	// One line for the whole run: every command that loads the library
+	// shows a slow load the same way, and none of them asks for it.
+	loads := cliutil.Loading(streams)
 	factory := func(ctx context.Context, req commands.Request) (commands.Services, func() error, error) {
-		return build(ctx, req, errOut, s, extra...)
+		return build(ctx, req, errOut, loads, s, extra...)
 	}
 	err := commands.Run(ctx, args, streams, factory)
 	if err != nil {

@@ -7,8 +7,11 @@ package library_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
@@ -350,6 +353,176 @@ func TestListings(t *testing.T) {
 		kept := &listings{}
 		if _, _, err := newLib(c, library.WithListings(kept)).Load(t.Context()); err == nil || len(kept.hashes) != 0 {
 			t.Fatalf("%v %+v", err, kept.hashes)
+		}
+	})
+}
+
+// loads records what a library tells of its loads, and whether two calls
+// ever ran at once.
+type loads struct {
+	mu      sync.Mutex
+	inside  atomic.Int32
+	overlap atomic.Bool
+	calls   [][2]int
+	ended   int
+}
+
+func (l *loads) LoadProgress(done, total int) {
+	if l.inside.Add(1) != 1 {
+		l.overlap.Store(true)
+	}
+	defer l.inside.Add(-1)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, [2]int{done, total})
+}
+
+func (l *loads) LoadDone() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ended++
+}
+
+// take returns the calls since the last take and how many loads ended.
+func (l *loads) take() ([][2]int, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	calls, ended := l.calls, l.ended
+	l.calls, l.ended = nil, 0
+	return calls, ended
+}
+
+// counted says calls are one load of total records from 0 up to last, one
+// record at a time.
+func counted(calls [][2]int, total, last int) bool {
+	if len(calls) != last+1 {
+		return false
+	}
+	for i, c := range calls {
+		if c != [2]int{i, total} {
+			return false
+		}
+	}
+	return true
+}
+
+func TestLoadObserver(t *testing.T) {
+	t.Parallel()
+	t.Run("a load that reads counts every record", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		seen := &loads{}
+		lib := newLib(c, library.WithLoadObserver(seen))
+		if _, _, err := lib.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		// Templates and records that are no item are records all the same.
+		if calls, ended := seen.take(); !counted(calls, 8, 8) || ended != 1 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+		// Every item is known now: the next load says nothing.
+		if _, _, err := lib.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if calls, ended := seen.take(); len(calls) != 0 || ended != 0 {
+			t.Fatalf("a load of known items told %v, %d ended", calls, ended)
+		}
+		// One new record makes it a load again, known items counted too.
+		c.Add(porttest.Doc{ID: "d9", Name: "Late", Ext: "pdf"})
+		if _, _, err := lib.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if calls, ended := seen.take(); !counted(calls, 9, 9) || ended != 1 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+	})
+	t.Run("an empty library and no observer say nothing", func(t *testing.T) {
+		t.Parallel()
+		seen := &loads{}
+		if _, _, err := newLib(porttest.NewCloud(), library.WithLoadObserver(seen)).Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if calls, ended := seen.take(); len(calls) != 0 || ended != 0 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+		c := porttest.NewCloud()
+		sample(c)
+		if _, _, err := newLib(c, library.WithLoadObserver(nil)).Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a load that fails ends short of the total", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		c.Fail["Files"] = errBoom
+		seen := &loads{}
+		if _, _, err := newLib(c, library.WithLoadObserver(seen)).Load(t.Context()); !errors.Is(err, errBoom) {
+			t.Fatalf("got %v", err)
+		}
+		if calls, ended := seen.take(); !counted(calls, 8, 0) || ended != 1 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+	})
+	t.Run("a root that fails is no load", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		c.Fail["Root"] = errBoom
+		seen := &loads{}
+		if _, _, err := newLib(c, library.WithLoadObserver(seen)).Load(t.Context()); !errors.Is(err, errBoom) {
+			t.Fatalf("got %v", err)
+		}
+		if calls, ended := seen.take(); len(calls) != 0 || ended != 0 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+	})
+	t.Run("the calls of many loaders come one at a time and in order", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		const n = 200
+		for i := range n {
+			c.Add(porttest.Doc{ID: domain.ItemID(fmt.Sprintf("d%03d", i)), Name: fmt.Sprintf("Doc %d", i), Ext: "pdf"})
+		}
+		seen := &loads{}
+		if _, _, err := newLib(c, library.WithLoadObserver(seen), library.WithConcurrency(16)).Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if calls, ended := seen.take(); !counted(calls, n, n) || ended != 1 || seen.overlap.Load() {
+			t.Fatalf("%d calls, %d ended, overlap %v", len(calls), ended, seen.overlap.Load())
+		}
+	})
+	t.Run("a commit after a load tells only of what it wrote", func(t *testing.T) {
+		t.Parallel()
+		c := porttest.NewCloud()
+		sample(c)
+		seen := &loads{}
+		lib := newLib(c, library.WithLoadObserver(seen), library.WithListings(&listings{}))
+		if _, _, err := lib.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		seen.take()
+		// The load of the commit knows every item; the listing of the root
+		// it wrote reads the one new record.
+		if _, err := lib.Commit(t.Context(), appendFolder(c)); err != nil {
+			t.Fatal(err)
+		}
+		if calls, ended := seen.take(); !counted(calls, 9, 9) || ended != 1 {
+			t.Fatalf("%v, %d ended", calls, ended)
+		}
+		// Without listings a commit over known items says nothing.
+		quiet := &loads{}
+		plain := newLib(c, library.WithLoadObserver(quiet))
+		if _, _, err := plain.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		quiet.take()
+		_, err := plain.Commit(t.Context(), func(_ context.Context, _ *domain.Tree, s port.RootState) ([]domain.Record, error) {
+			return s.Records[1:], nil
+		})
+		if calls, ended := quiet.take(); err != nil || len(calls) != 0 || ended != 0 {
+			t.Fatalf("%v: %v, %d ended", err, calls, ended)
 		}
 	})
 }
