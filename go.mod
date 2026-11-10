@@ -8,7 +8,7 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/altessa-s/go-atlas-core v0.3.1
 	github.com/altessa-s/go-slogx v0.1.1
-	github.com/altessa-s/rmcloud-go v1.0.0
+	github.com/altessa-s/rmcloud-go v1.0.1
 	github.com/altessa-s/rmdoc-go v1.1.0
 	github.com/altessa-s/rmlines-go v1.1.2
 	github.com/altessa-s/rmrender-go v1.4.2-0.20261108032415-0eb9209172e2
