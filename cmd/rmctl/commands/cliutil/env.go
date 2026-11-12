@@ -100,6 +100,9 @@ type Request struct {
 	// ReadOnly says the command changes nothing, so a root confirmed within
 	// the profile's TTL may answer it.
 	ReadOnly bool
+	// JSON says the answer is JSON: a program reads it, and the line of a
+	// slow load is not drawn for one, even at a terminal.
+	JSON bool
 	// Completion asks for Services.Completion alone, for shell completion:
 	// nothing that reaches the cloud, reads a token or writes the cache.
 	Completion bool
@@ -146,7 +149,7 @@ func (e *Env) Services(cmd *cobra.Command) (Services, error) {
 	}
 	e.built = true
 	access := AccessOf(cmd)
-	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive}
+	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive, JSON: e.JSON(cmd)}
 	req.Verbose, _ = cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
 	req.NoCache, _ = cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // the flag is persistent on the root
 	if f := cmd.Flags().Lookup(FlagOffline); f != nil && f.Changed {
