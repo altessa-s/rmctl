@@ -28,7 +28,8 @@ func atATerminal(s *commands.Streams) {
 // A person at a terminal sees the line of a load that reads the cloud, and
 // it is erased before the answer: standard output is the same with it and
 // without, and standard error keeps no line. A run that is not at a
-// terminal, an offline one and shell completion print none.
+// terminal, one that answers in JSON, an offline one and shell completion
+// print none.
 func TestE2E_LoadingLine(t *testing.T) {
 	e := newE2E(t)
 	e.register()
@@ -51,11 +52,12 @@ func TestE2E_LoadingLine(t *testing.T) {
 			t.Fatalf("%v: stderr %q", args, errOut)
 		}
 	}
-	// --json changes the answer, not the line, and the line stays off
-	// standard output.
-	code, out, errOut := e.rmctl("ls", "--json", "--no-cache")
-	if code != 0 || !strings.HasPrefix(out, "[") || strings.Contains(out, "reading") || !strings.Contains(errOut, "reading the library") {
-		t.Fatalf("ls --json: exit %d, stdout %q, stderr %q", code, out, errOut)
+	// A JSON answer is read by a program: no line, on either stream.
+	for _, args := range [][]string{{"ls", "--json", "--no-cache"}, {"ls", "--format", "json", "--no-cache"}} {
+		code, out, errOut := e.rmctl(args...)
+		if code != 0 || !strings.HasPrefix(out, "[") || strings.Contains(out, "reading") || errOut != "" {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %q", args, code, out, errOut)
+		}
 	}
 
 	for _, args := range [][]string{{"ls", "--offline"}, {"__complete", "ls", "/"}} {

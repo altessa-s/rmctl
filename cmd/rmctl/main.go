@@ -74,7 +74,12 @@ func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), 
 	// shows a slow load the same way, and none of them asks for it.
 	loads := cliutil.Loading(streams)
 	factory := func(ctx context.Context, req commands.Request) (commands.Services, func() error, error) {
-		return build(ctx, req, errOut, loads, s, extra...)
+		observer := loads
+		if req.JSON {
+			// A JSON answer is for a program, whatever it is run from.
+			observer = nil
+		}
+		return build(ctx, req, errOut, observer, s, extra...)
 	}
 	err := commands.Run(ctx, args, streams, factory)
 	if err != nil {
