@@ -31,10 +31,30 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
 
+      - name: Restore the PDFium SDK
+        # setup-render-*.sh keeps the SDK here under its checksum and fetches
+        # it only on a miss, so a failing release download fails fewer runs.
+        id: pdfium
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pdfium-cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+          restore-keys: pdfium-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Set up the renderer's Linux build
         # rmrender-go draws with Cairo, Pango and PDFium here and is C23 that
         # needs clang 19: the script installs them and points cgo at them.
+        env:
+          PDFIUM_CACHE: ${{ runner.temp }}/pdfium-cache
         run: bash .github/scripts/setup-render-linux.sh
+
+      - name: Save the PDFium SDK
+        # Right after the fetch, so a run whose tests fail still keeps it.
+        if: steps.pdfium.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pdfium-cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
 
       - name: Compare benchmarks against the base branch
         env:

@@ -8,6 +8,7 @@ package renderer
 
 import (
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/domain"
@@ -21,7 +22,7 @@ func TestLiteAnswersLite(t *testing.T) {
 	if err := r.Available(); !errors.Is(err, domain.ErrRenderLite) {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}); !errors.Is(err, domain.ErrRenderLite) {
+	if _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}, io.Discard); !errors.Is(err, domain.ErrRenderLite) {
 		t.Fatal(err)
 	}
 }

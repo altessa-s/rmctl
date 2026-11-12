@@ -19,8 +19,9 @@ import (
 
 // The kinds of cache entry the report counts.
 const (
-	entryBlobs   = "blobs"
-	entryIndexes = "indexes"
+	entryBlobs    = "blobs"
+	entryIndexes  = "indexes"
+	entryRendered = "rendered"
 )
 
 func newCache(env *cliutil.Env) *cobra.Command {
@@ -29,8 +30,8 @@ func newCache(env *cliutil.Env) *cobra.Command {
 		Short: "What the cache on disk holds, and clearing it",
 		Long: heredoc.Doc(`
 			Every profile keeps its own cache: the indexes of its library by hash,
-			its .metadata and .content files, and its last known root with the time
-			the cloud confirmed it. status reports the current profile's, or every
+			its .metadata and .content files, the drawings "rmctl open" showed, and
+			its last known root with the time the cloud confirmed it. status reports the current profile's, or every
 			profile's with --all, each with its own budget and what set it (env,
 			profile, config or default); clear empties it, or every profile's with
 			--all.
@@ -130,6 +131,7 @@ func cacheResult(r port.CacheReport, all bool) output.Result {
 			output.Field{Key: "budget_source", Value: output.Text(p.BudgetSource)},
 			output.Field{Key: entryBlobs, Value: output.Count(p.Entries[entryBlobs])},
 			output.Field{Key: entryIndexes, Value: output.Count(p.Entries[entryIndexes])},
+			output.Field{Key: entryRendered, Value: output.Count(p.Entries[entryRendered])},
 			output.Field{Key: "root_hash", Value: output.ID(p.RootHash)},
 			output.Field{Key: "root_generation", Value: generationCell(p)},
 			output.Field{Key: "confirmed", Value: output.Time(p.Confirmed)},

@@ -1,0 +1,44 @@
+{
+  "dir": "vault",
+  "documents": [
+    {
+      "path": "vault/A.md",
+      "document": "/Books/A.pdf",
+      "id": "d1",
+      "status": "written",
+      "highlights": 7
+    },
+    {
+      "path": "vault/B.md",
+      "document": "/Books/B",
+      "id": "d2",
+      "status": "unchanged",
+      "highlights": 0
+    },
+    {
+      "path": "vault/C.md",
+      "document": "/Books/C",
+      "id": "d3",
+      "status": "skipped",
+      "highlights": 0
+    },
+    {
+      "path": "vault/Sub/D.md",
+      "document": "/Books/Sub/D",
+      "id": "d4",
+      "status": "failed",
+      "highlights": 0,
+      "error": "page 2: bad"
+    }
+  ],
+  "written": 1,
+  "unchanged": 1,
+  "skipped": 1,
+  "failed": 1,
+  "moved": [
+    "vault/.rmctl-removed/Old.md"
+  ],
+  "left": [
+    "vault/Gone.md"
+  ]
+}

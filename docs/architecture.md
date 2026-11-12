@@ -13,18 +13,22 @@ The domain, the ports, the use cases and the command packages under `cmd/rmctl/c
 
 **Use cases**
 
-- `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict.
-- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render`, `profile`, `prefetch` — one input port each; `pages.Reader` is shared with `browse`, `render` downloads a document through `fetch.Pack`, as `export` does, `profile` registers, revokes and reads the account of any profile through the `account` use case, and `prefetch` (`rmctl sync`) fills the profile's cache through `port.SyncCache`.
+- `internal/app/library` — loads the tree and commits a change to the root, replaying it on a conflict. It tells a `port.LoadObserver` how each load that reads items goes; the command line implements it as the line of a slow load (`cliutil.Loading`), `internal/wiring` passes it on, and the library keeps no time itself.
+- `internal/app/account`, `browse`, `fetch`, `write`, `watch`, `inspect`, `pages`, `archives`, `secrets`, `render`, `notes`, `profile`, `prefetch`, `mirror` — one input port each (`mirror` three: `Mirrors`, `MirrorEngine` and `MirrorService`); `pages.Reader` is shared with `browse` and `notes`, `render` downloads a document through `fetch.Pack`, as `export` does, and its `Viewer` (`rmctl open`) draws into `port.Previews` and shows the file through `port.Opener`; `render` and `notes` lay a folder out as a directory tree and record what they wrote through `outdir`, which is no input port itself; `library` keeps the tree of every root it loads or commits in `port.ListingCache`, `profile` registers, revokes and reads the account of any profile through the `account` use case, and `prefetch` (`rmctl sync`) fills the profile's cache through `port.SyncCache`. `mirror` keeps a directory and a cloud folder in step: it plans each pass from the directory's journal, the library and the files (`port.MirrorFiles`), uploads, moves and trashes through the `write` use case's input port, draws through `render`'s and, in rmctl-lite, exports through `fetch`'s; it follows `port.Notifier` and `port.DirWatcher` and waits on `port.Timer`. Its engine is per profile, and `wiring` opens the engine of another profile (`port.MirrorEngines`) as a run of `rmctl -P <profile>` would build it; the definitions come from config.toml through `port.MirrorConfig`, and the service from `port.Autostart`.
 
 **Adapters** (`internal/adapter/…`)
 
 - `cloud` — the cloud ports over the rmcloud-go client.
 - `secretfile`, `keychain`, `vault` — token storage in a file or the macOS Keychain, and `vault`, which presents either to the secrets port.
-- `localfs`, `blobcache`, `pdf` — the local file system, the cache on disk (one directory per profile, one budget each), and a PDF's page count through pdfcpu.
-- `indexcache` — decorators of the root, document, blob and registry ports that keep the library's indexes in the profile's cache, serve every file read from the cache first, serve `--offline` and the TTL, implement `port.SyncCache` with the record of the last complete sync, and report, clear and remove the caches of every profile.
+- `localfs`, `blobcache`, `pdf` — the local file system (with what a mirror needs of it: a listing with sizes and times, and the directory's lock), the cache on disk (one directory per profile, one budget each, the drawings of `open` among what it bounds), and a PDF's page count through pdfcpu.
+- `opener` — `port.Opener`: `open` on macOS, `ShellExecute` on Windows, `xdg-open` elsewhere, never waiting for the viewer.
+- `indexcache` — decorators of the root, document, blob and registry ports that keep the library's indexes in the profile's cache, serve every file read from the cache first, serve `--offline` and the TTL, keep the listing of the library (`port.ListingCache`) and read it back for shell completion (`port.Completion`, which, like `port.Cache`, has no rule of its own and is implemented here; `wiring.Completion` builds it alone, with no transport and nothing that writes), implement `port.SyncCache` with the record of the last complete sync, and report, clear and remove the caches of every profile.
 - `rmpages`, `rmdocs` — `.rm` pages through rmlines-go and `.rmdoc` archives through rmdoc-go; nothing else imports those two.
 - `renderer` — drawing through rmrender-go on macOS, Linux and Windows with cgo, and a stub that says rendering is not available everywhere else, and in rmctl-lite (the `norender` build tag), where it names the full build; nothing else imports rmrender-go.
-- `config`, `ids`, `clock` — profile resolution from config.toml, the profile directories and the edits of config.toml, random v4 UUIDs, and time over go-atlas-core.
+- `config`, `ids`, `clock` — profile resolution from config.toml, the profile directories and the edits of config.toml (its `[[mirror]]` tables among them), random v4 UUIDs, and time over go-atlas-core.
+- `fswatch` — `port.DirWatcher` over fsnotify, the one package that imports it: a mirrored directory watched directory by directory.
+- `flock` — the system's advisory file locks (flock, LockFileEx), which `config` takes on config.toml and `localfs` on a mirrored directory.
+- `autostart` — `port.Autostart`: the mirror service as a launchd agent, a systemd user unit or a Task Scheduler task, written by pure functions and loaded through the system's tools behind a runner a test replaces, and the service's rotating log.
 
 **Composition root and command line**
 

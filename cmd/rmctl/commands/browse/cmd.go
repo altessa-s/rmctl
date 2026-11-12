@@ -53,7 +53,7 @@ func newLs(env *cliutil.Env) *cobra.Command {
 			rmctl ls --all --json /
 		`),
 		Args:              cliutil.Args(cobra.MaximumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, err := browser(cmd, env)
@@ -96,7 +96,7 @@ func newTree(env *cliutil.Env) *cobra.Command {
 			rmctl tree /Books --all
 		`),
 		Args:              cliutil.Args(cobra.MaximumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, err := browser(cmd, env)
@@ -148,7 +148,7 @@ func newStat(env *cliutil.Env) *cobra.Command {
 			rmctl stat 3f2a --json
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, err := browser(cmd, env)
@@ -257,6 +257,8 @@ func newFind(env *cliutil.Env) *cobra.Command {
 	cmd.Flags().StringVar(&q.Under, "under", "", "lies below this folder")
 	cmd.Flags().BoolVarP(&q.All, "all", "a", false, "include the trash")
 	cmd.Flags().StringVar(&q.Text, "text", "", "typed or highlighted text holds this, ignoring case")
+	cmd.ValidArgsFunction = cobra.NoFileCompletions
+	cliutil.CompleteFlags(cmd, map[string]cobra.CompletionFunc{"under": cliutil.CompleteRemote(env, true)})
 	return cmd
 }
 

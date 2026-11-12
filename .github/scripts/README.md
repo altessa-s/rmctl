@@ -70,6 +70,15 @@ and the Cairo stack's development packages, fetches the PDFium build rmrender-li
 the binary finds `libpdfium.so` on: PDFium's own directory by default, for tests run in place; the release passes `'$ORIGIN'` and puts the
 library beside the binary in its archive. Every Linux job that compiles the module with cgo runs it after setting up Go.
 
+## Fetching PDFium
+
+Both setup scripts fetch PDFium through `fetch-pdfium.sh PYTHON FETCH_SCRIPT PLATFORM FALLBACK_DIR`, which prints the SDK's directory.
+GitHub's release downloads fail now and then with a 5xx, so it tries a download five times, waiting 15, 30, 45 and 60 seconds between
+attempts. With `PDFIUM_CACHE` set it keeps the SDK there under its checksum from `fetch-pdfium.py`, so a cache restored for another pin is
+never used, and a hit downloads nothing. CI, CodeQL, bench and fuzz restore `$RUNNER_TEMP/pdfium-cache` with `actions/cache/restore`
+before the setup step and save it with `actions/cache/save` right after it, so a run whose tests fail still keeps the SDK. The release
+fetches afresh, without the cache.
+
 ## Rendering on Windows
 
 `setup-render-windows.sh [PLATFORM]` prepares a Windows runner to build rmctl with rendering, as rmrender-go's Windows CI builds it, on x64
@@ -105,7 +114,7 @@ rmctl-lite is rmctl built with `-tags norender`: the renderer adapter is its stu
 
 ## macOS release
 
-The release workflow builds and publishes the Linux and Windows archives. The macOS archives are built on a Mac, so they carry the Developer ID signature of Altessa Solutions Inc without the certificate leaving its keychain: once the release is published, `release-macos.sh TAG` checks the tag out into a temporary worktree, builds `darwin/arm64` and `darwin/amd64` with cgo, each as rmctl and as rmctl-lite, signs each of the four binaries with the hardened runtime and a secure timestamp, notarizes them in one submission, renders a sample with the rmctl of the Mac's own architecture and runs `smoke-lite.sh` on its rmctl-lite, packs `rmctl_<version>_darwin_<arch>.zip` and `rmctl-lite_<version>_darwin_<arch>.zip` with `ditto`, uploads them to the release, puts their lines into `checksums.txt` and starts [`homebrew.yml`](../workflows/homebrew.yml), which writes both formulas from the release's macOS and Linux archives: `homebrew-formula.sh VERSION CHECKSUMS` writes `rmctl.rb` (class `Rmctl`) and `homebrew-formula.sh --lite VERSION CHECKSUMS` writes `rmctl-lite.rb` (class `RmctlLite`, no Linux dependencies); each `conflicts_with` the other, as both install `rmctl`. A bare binary cannot be stapled, so Gatekeeper looks its ticket up online. `UPLOAD=0` stops after packing and leaves the archives in `dist/`.
+The release workflow builds and publishes the Linux and Windows archives. The macOS archives are built on a Mac, so they carry the Developer ID signature of Altessa Solutions Inc without the certificate leaving its keychain: once the release is published, `release-macos.sh TAG` checks the tag out into a temporary worktree, builds `darwin/arm64` and `darwin/amd64` with cgo, each as rmctl and as rmctl-lite, signs each of the four binaries with the hardened runtime and a secure timestamp, notarizes them in one submission, renders a sample with the rmctl of the Mac's own architecture and runs `smoke-lite.sh` on its rmctl-lite, packs `rmctl_<version>_darwin_<arch>.zip` and `rmctl-lite_<version>_darwin_<arch>.zip` with `ditto`, uploads them to the release, puts their lines into `checksums.txt` and starts [`homebrew.yml`](../workflows/homebrew.yml), which writes both formulas from the release's macOS and Linux archives: `homebrew-formula.sh VERSION CHECKSUMS` writes `rmctl.rb` (class `Rmctl`) and `homebrew-formula.sh --lite VERSION CHECKSUMS` writes `rmctl-lite.rb` (class `RmctlLite`, no Linux dependencies); each `conflicts_with` the other, as both install `rmctl`, and both install the bash, zsh and fish completion scripts the binary writes (`generate_completions_from_executable`), and both define the mirror service (`service do`, running `rmctl mirror run --service`), which `brew services start rmctl` starts. A bare binary cannot be stapled, so Gatekeeper looks its ticket up online. `UPLOAD=0` stops after packing and leaves the archives in `dist/`.
 
 It needs the certificate in the login keychain, Go, Apple's clang, `gh` signed in with write access to the repository, `jq`, and a notarytool profile, `rmctl-notary` unless `NOTARY_PROFILE` names another, stored once:
 

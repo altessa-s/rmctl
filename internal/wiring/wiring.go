@@ -10,14 +10,19 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/altessa-s/go-atlas-core/runtime/appinfo"
+
+	"github.com/altessa-s/rmctl/internal/adapter/autostart"
 	"github.com/altessa-s/rmctl/internal/adapter/blobcache"
 	"github.com/altessa-s/rmctl/internal/adapter/clock"
 	"github.com/altessa-s/rmctl/internal/adapter/cloud"
 	"github.com/altessa-s/rmctl/internal/adapter/config"
+	"github.com/altessa-s/rmctl/internal/adapter/fswatch"
 	"github.com/altessa-s/rmctl/internal/adapter/ids"
 	"github.com/altessa-s/rmctl/internal/adapter/indexcache"
 	"github.com/altessa-s/rmctl/internal/adapter/keychain"
 	"github.com/altessa-s/rmctl/internal/adapter/localfs"
+	"github.com/altessa-s/rmctl/internal/adapter/opener"
 	"github.com/altessa-s/rmctl/internal/adapter/pdf"
 	"github.com/altessa-s/rmctl/internal/adapter/renderer"
 	"github.com/altessa-s/rmctl/internal/adapter/rmdocs"
@@ -28,6 +33,8 @@ import (
 	"github.com/altessa-s/rmctl/internal/app/fetch"
 	"github.com/altessa-s/rmctl/internal/app/inspect"
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/mirror"
+	"github.com/altessa-s/rmctl/internal/app/notes"
 	"github.com/altessa-s/rmctl/internal/app/pages"
 	"github.com/altessa-s/rmctl/internal/app/prefetch"
 	"github.com/altessa-s/rmctl/internal/app/profile"
@@ -75,7 +82,30 @@ type Options struct {
 	// is the login Keychain. A test keeps the user's Keychain out of reach
 	// with it.
 	Keychain KeychainItems
+	// Opener shows what "rmctl open" drew; nil is the system's viewer. A
+	// test keeps viewers from starting with it.
+	Opener Opener
+	// ServiceRunner runs launchctl, systemctl and schtasks for the mirror
+	// service, and ServiceHome stands for the home directory its definition
+	// goes under; nil and "" are the system's. A test keeps the user's
+	// service manager out of reach with them.
+	ServiceRunner ServiceRunner
+	ServiceHome   string
+	// Loads, when set, is told how every load of the library that reads
+	// items goes, so the command line can show a person that a slow one is
+	// alive. An offline run reads the cache alone and tells it nothing, and
+	// Completion builds no library to tell of.
+	Loads LoadObserver
 }
+
+// ServiceRunner runs the system's service tools.
+type ServiceRunner = autostart.Runner
+
+// Opener shows a file in a viewer.
+type Opener = port.Opener
+
+// LoadObserver follows the loads of the library.
+type LoadObserver = port.LoadObserver
 
 // KeychainItems are the Keychain as the keychain adapter needs it.
 type KeychainItems = keychain.Items
@@ -91,9 +121,16 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Notes     port.Notes
+	Viewing   port.Viewing
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
+	// Mirrors defines and runs the mirrors, MirrorEngine keeps the
+	// profile's in step, and MirrorService is their autostart service.
+	Mirrors       port.Mirrors
+	MirrorEngine  port.MirrorEngine
+	MirrorService port.MirrorService
 	// Cache reports and clears the caches on disk.
 	Cache port.Cache
 	// Offline says this run never reaches the cloud.
@@ -147,28 +184,45 @@ func Build(opts Options) (Services, error) {
 		return Services{}, err
 	}
 	libOpts := []library.Option{library.WithLogger(opts.Logger)}
+	if !st.offline {
+		libOpts = append(libOpts, library.WithLoadObserver(opts.Loads))
+	}
 	if st.blobCache != nil {
-		libOpts = append(libOpts, library.WithCache(st.blobCache))
+		libOpts = append(libOpts, library.WithCache(st.blobCache), library.WithListings(indexcache.NewListings(st.profile, opts.Logger)))
 	}
 	lib := library.New(st.roots, st.docs, st.blobs, libOpts...)
 	rm := rmpages.New(opts.Logger)
 	docs := rmdocs.New()
 	reader := pages.NewReader(lib, rm)
 	newIDs := ids.New()
+	rendering := render.New(lib, st.blobs, files, docs, docs, renderer.New())
+	writer := write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk)
+	fetcher := fetch.New(lib, st.blobs, files, docs, clk)
+	engine := mirror.NewEngine(mirror.Deps{
+		Library: lib, Writer: writer, Rendering: rendering, Fetcher: fetcher, Files: files, Disk: files,
+		Notifier: remote, Dirs: fswatch.New(), Timer: clk, Renders: Renders(),
+	})
+	cfgWriter := config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}
 
 	return Services{
 		Account:   account.New(indexcache.NewRegistry(remote, st.profile)),
 		Browser:   browse.New(lib, reader),
-		Fetcher:   fetch.New(lib, st.blobs, files, docs, clk),
-		Writer:    write.New(lib, st.docs, st.blobs, files, pdf.New(), docs, newIDs, clk),
+		Fetcher:   fetcher,
+		Writer:    writer,
 		Watcher:   watch.New(remote),
 		Inspector: inspect.New(lib, remote, remote, st.blobs, files),
 		Pages:     pages.New(lib, reader, rm, rm, st.docs, st.blobs, files, newIDs, clk),
 		Archives:  archives.New(docs, rm),
-		Rendering: render.New(lib, st.blobs, files, docs, docs, renderer.New()),
+		Rendering: rendering,
+		Notes:     notes.New(lib, reader, files),
+		Viewing:   render.NewViewer(rendering, st.previews(), openerOf(opts), appinfo.Version),
 		Syncer:    st.syncer(lib, remote, clk),
 		Secrets: secrets.New(cfg.Profile, cfg.SecretsSource, cfg.ConfigFile, current,
-			[]port.SecretVault{fileVault, keyVault}, config.Writer{Path: cfg.ConfigFile, Read: read, Env: opts.Env}),
+			[]port.SecretVault{fileVault, keyVault}, cfgWriter),
+		Mirrors: mirror.NewService(mirrorConfig{writer: cfgWriter}, engines{opts: opts, profile: cfg.Profile, own: engine},
+			files, files, clk),
+		MirrorEngine:  engine,
+		MirrorService: mirrorService(cfg, opts, clk),
 		Profiles: profile.New(newProfileStore(cfg, opts, read), indexcache.NewCaches(profiles{st.root}, opts.Logger),
 			registries{opts: opts, read: read, root: st.root}, cfg.Profile, st.offline),
 		Cache:   st.admin,
@@ -176,6 +230,30 @@ func Build(opts Options) (Services, error) {
 		Config:  cfg,
 		Close:   client.Close,
 	}, nil
+}
+
+// Completion is the library as the profile's cache last listed it, for
+// shell completion. It reads config.toml and the environment for the
+// profile and the cache directory, and then one file of the cache: nothing
+// it builds reaches the cloud, reads a token, writes or evicts anything.
+// With the cache off (NoCache, or a negative CacheBytes) it lists nothing.
+func Completion(opts Options) (port.Completion, error) {
+	read := opts.ReadConfig
+	if read == nil {
+		read = config.ReadFile
+	}
+	cfg, err := config.LoadFrom(opts.Env, opts.Profile, opts.Dirs, read)
+	if err != nil {
+		return nil, err
+	}
+	if opts.NoCache || opts.CacheBytes < 0 {
+		return indexcache.NewCompletion(nil), nil
+	}
+	store, err := blobcache.NewRoot(cfg.CacheDir, blobcache.Fixed(0), clock.Real(), opts.Logger).Peek(cfg.Profile)
+	if err != nil {
+		return nil, err
+	}
+	return indexcache.NewCompletion(store), nil
 }
 
 // built are the stores the use cases read and write through: the cloud,
@@ -207,6 +285,23 @@ func (b built) syncer(lib *library.Library, remote port.BlobStore, clk port.Cloc
 	default:
 		return prefetch.New(b.live, lib, remote, b.syncs, clk)
 	}
+}
+
+// previews keep what "rmctl open" draws in the profile's cache, counted
+// against its budget, or in the temporary directory when the cache is off.
+func (b built) previews() port.Previews {
+	if b.blobCache == nil {
+		return localfs.TempPreviews{}
+	}
+	return b.profile
+}
+
+// openerOf is the opener opts names, else the system's.
+func openerOf(opts Options) port.Opener {
+	if opts.Opener != nil {
+		return opts.Opener
+	}
+	return opener.New()
 }
 
 // refusal is a Syncer that cannot run in this configuration.

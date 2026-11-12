@@ -39,7 +39,7 @@ func newPage(env *cliutil.Env) *cobra.Command {
 			rmctl debug page 3f2a --page 1 --json
 		`),
 		Args:              cliutil.Args(cobra.ExactArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, false),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, false)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := cliutil.Need(cmd, env, func(s cliutil.Services) port.Pages { return s.Pages })

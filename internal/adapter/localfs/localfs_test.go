@@ -305,3 +305,30 @@ func TestModTime(t *testing.T) {
 		t.Fatal("set the time of a missing file")
 	}
 }
+
+func TestTempPreviews(t *testing.T) {
+	t.Parallel()
+	p := localfs.TempPreviews{}
+	draw := func(w io.Writer) error { _, err := io.WriteString(w, "pdf"); return err }
+	first, drawn, err := p.Preview(t.Context(), "key", "Paper-rendered.pdf", draw)
+	if err != nil || !drawn || filepath.Base(first) != "Paper-rendered.pdf" {
+		t.Fatalf("%v %v %s", err, drawn, first)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(first)) })
+	if data, err := os.ReadFile(first); err != nil || string(data) != "pdf" {
+		t.Fatalf("%q %v", data, err)
+	}
+	second, drawn, err := p.Preview(t.Context(), "key", "Paper-rendered.pdf", draw)
+	if err != nil || !drawn || second == first {
+		t.Fatalf("a drawing was kept without a cache: %v %s", err, second)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(second)) })
+	if _, _, err = p.Preview(t.Context(), "key", "../x.pdf", draw); err == nil {
+		t.Fatal("a path was taken as a name")
+	}
+	boom := errors.New("boom")
+	failed, _, err := p.Preview(t.Context(), "key", "x.pdf", func(io.Writer) error { return boom })
+	if !errors.Is(err, boom) || failed != "" {
+		t.Fatalf("%v %q", err, failed)
+	}
+}

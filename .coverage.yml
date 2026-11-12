@@ -36,4 +36,11 @@ packages:
   - cmd/rmctl/commands
   - cmd/rmctl/commands/output
   - internal/app/render
+  - internal/app/outdir
+  - internal/app/notes
   - internal/adapter/renderer
+  - internal/adapter/opener
+  - internal/app/mirror
+  - internal/adapter/autostart
+  - cmd/rmctl/commands/mirror
+  - internal/adapter/fswatch

@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"io"
 
 	"github.com/altessa-s/rmctl/internal/domain"
 )
@@ -26,6 +27,42 @@ const (
 	// PDFRecomposed writes a new PDF from the imported one's objects,
 	// keeping forms and annotations; signatures stop verifying.
 	PDFRecomposed PDFMode = "recomposed"
+)
+
+// PDFGrain is how a PDF draws grained ink: pencils, brushes and
+// ballpoints. The grains differ only on Linux and Windows; macOS draws
+// both the same.
+type PDFGrain string
+
+// The PDF grains.
+const (
+	// PDFGrainMask draws opaque ink's grain straight onto the page: about
+	// half the bytes of PDFGrainGroup, with the edges macOS draws.
+	PDFGrainMask PDFGrain = "mask"
+	// PDFGrainGroup draws each grained stroke in a transparency group of
+	// its own, as Linux and Windows did before: twice the bytes, and edges
+	// most viewers draw lighter.
+	PDFGrainGroup PDFGrain = "group"
+)
+
+// Unreadable is what a rendering does with an unreadable page: one whose .rm
+// file is in the document but does not parse, because it is truncated,
+// malformed or of a version this build does not read. A page without a .rm
+// file is not one: the tablet writes none for a page nobody wrote on, and
+// it is drawn as an empty page on its template.
+type Unreadable string
+
+// The ways of drawing an unreadable page.
+const (
+	// UnreadablePlaceholder draws "Rendering error" in the middle of the
+	// page: on a plain sheet in a notebook, over the original page in a
+	// document made from a PDF.
+	UnreadablePlaceholder Unreadable = "placeholder"
+	// UnreadableBlank draws the page as one nobody wrote on: an empty page
+	// on its template, or the original page without marks.
+	UnreadableBlank Unreadable = "blank"
+	// UnreadableStrict fails the rendering, naming the page.
+	UnreadableStrict Unreadable = "strict"
 )
 
 // Format is what a rendering is drawn as: the whole document as a PDF, or
@@ -66,6 +103,8 @@ type RenderOptions struct {
 	Format Format
 	// Mode is the PDF mode; empty is PDFFresh.
 	Mode PDFMode
+	// Grain is how a PDF draws grained ink; empty is PDFGrainMask.
+	Grain PDFGrain
 	// Paper is the sheet; empty is PaperA4.
 	Paper Paper
 	// Scale is a PNG's or a JPEG's pixels per .rm unit; 0 is the default,
@@ -75,6 +114,9 @@ type RenderOptions struct {
 	Quality int
 	// NoTemplates draws the pages without their templates.
 	NoTemplates bool
+	// Unreadable is what an unreadable page becomes; empty is
+	// UnreadablePlaceholder.
+	Unreadable Unreadable
 	// Document names the document of a local archive that holds several:
 	// an identifier or a unique prefix of one.
 	Document string
@@ -88,8 +130,9 @@ type RenderReport struct {
 	// SkippedBlocks counts the blocks of pages that did not parse and were
 	// left out; RefusedPages the pages naming a page the imported PDF does
 	// not have; LinksDropped the links of an imported PDF a fresh PDF could
-	// not carry over.
-	SkippedBlocks, RefusedPages, LinksDropped int
+	// not carry over; UnreadablePages the pages that did not parse at all,
+	// drawn as RenderOptions.Unreadable says.
+	SkippedBlocks, RefusedPages, LinksDropped, UnreadablePages int
 }
 
 // Renderer draws documents packed as .rmdoc archives. A build without the
@@ -99,11 +142,14 @@ type Renderer interface {
 	// nothing, so a caller fails before downloading anything.
 	Available() error
 	// Render draws the document id of the archive (the first one when id
-	// is empty), which the caller has found in it: the page opts.Page as
-	// the image opts.Format names, or the whole document as a PDF. Format,
-	// Mode, Paper and Scale are set. A page beyond the document's is
-	// domain.ErrNoSuchPage.
-	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions) ([]byte, RenderReport, error)
+	// is empty), which the caller has found in it, into w: the page
+	// opts.Page as the image opts.Format names, or the whole document as a
+	// PDF, written as it is produced. Format, Mode, Grain, Paper, Scale and
+	// Unreadable are set. A page beyond the document's is
+	// domain.ErrNoSuchPage; an unreadable page under UnreadableStrict is
+	// domain.ErrUnreadablePage. On failure w may have received part of the
+	// drawing, which the caller discards.
+	Render(ctx context.Context, archive []byte, id domain.ItemID, opts RenderOptions, w io.Writer) (RenderReport, error)
 }
 
 // RenderTreeOptions shape the drawing of every document below a folder.
@@ -184,4 +230,44 @@ type Rendering interface {
 	// RenderFile draws a document of the local .rmdoc archive at path, as
 	// Render does, without the cloud.
 	RenderFile(ctx context.Context, path, dest string, opts RenderOptions) (RenderReport, error)
+}
+
+// Previews keeps the drawings "rmctl open" shows, so a document opened
+// again unchanged with the same options is shown at once rather than drawn
+// again.
+type Previews interface {
+	// Preview is the path of the drawing kept under key, a file named
+	// name. When none is kept, draw produces it into a staging file, which
+	// takes its place only once draw succeeds; drawn says it was drawn now.
+	// key is a sha256 in hex of everything the drawing depends on.
+	Preview(ctx context.Context, key, name string, draw func(w io.Writer) error) (path string, drawn bool, err error)
+}
+
+// Opener shows a file in the viewer the system picks for it. It returns
+// once the viewer is asked to start, without waiting for it to close.
+type Opener interface {
+	Open(ctx context.Context, path string) error
+}
+
+// OpenReport is what "rmctl open" showed: the drawing, and whether it was
+// drawn now or kept from an earlier open. A kept drawing reports its Path
+// alone.
+type OpenReport struct {
+	RenderReport
+	Drawn bool
+}
+
+// Viewing is the input port of "rmctl open": a document drawn as
+// [Rendering] draws it, into the profile's previews, then shown in the
+// system's viewer.
+type Viewing interface {
+	// Open draws the document query names, unless the previews keep its
+	// drawing with opts from this very version of it, and shows the file.
+	// A drawing that could not be shown still reports its path, with the
+	// error.
+	Open(ctx context.Context, query string, opts RenderOptions) (OpenReport, error)
+	// OpenFile does the same for a document of the local .rmdoc archive at
+	// path, without the cloud; the archive's size and modification time
+	// stand for its version.
+	OpenFile(ctx context.Context, path string, opts RenderOptions) (OpenReport, error)
 }

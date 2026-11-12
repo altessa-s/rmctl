@@ -53,6 +53,20 @@ func TestE2E_PagesRead(t *testing.T) {
 	if !strings.Contains(hl, "p.1") {
 		t.Fatalf("highlights:\n%s", hl)
 	}
+	if note := e.ok("highlights", "/Article", "--format", "note"); !strings.Contains(note, "remarkable-path: \"/Article\"\n") ||
+		!strings.Contains(note, "\n## Highlights\n\n### Page 1\n") {
+		t.Fatalf("highlights --format note:\n%s", note)
+	}
+	// The whole library as notes: the notebook has no highlights; the
+	// next run finds the article's note unchanged.
+	vault := filepath.Join(t.TempDir(), "vault")
+	if out := e.ok("highlights", "/", "-o", vault, "--incremental"); !strings.Contains(out, "written\t"+filepath.Join(vault, "Article.md")) ||
+		!strings.Contains(out, "skipped\t"+filepath.Join(vault, "Notes.md")) {
+		t.Fatalf("highlights /:\n%s", out)
+	}
+	if out := e.ok("highlights", "/", "-o", vault, "--incremental"); !strings.Contains(out, "unchanged\t"+filepath.Join(vault, "Article.md")) {
+		t.Fatalf("highlights / again:\n%s", out)
+	}
 	if page := e.ok("debug", "page", "/Article"); !strings.Contains(page, "highlight") {
 		t.Fatalf("debug page:\n%s", page)
 	}

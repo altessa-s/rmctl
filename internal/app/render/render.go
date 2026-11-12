@@ -75,19 +75,18 @@ func New(
 }
 
 // Normalized is opts with the defaults filled in, or ErrBadOptions: a
-// page below 0, a format, mode or paper not known, a PDF of one page or an
-// image of the whole document, a scale out of (0, MaxScale] or asked of
-// anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or asked
-// of anything but a JPEG, or a mode asked of an image.
+// page below 0, a format, mode, grain, paper or unreadable page policy not
+// known, a PDF of one page
+// or an image of the whole document, a scale out of (0, MaxScale] or asked
+// of anything but a PNG or a JPEG, a quality out of [0, MaxQuality] or
+// asked of anything but a JPEG, or a mode or a grain asked of an image.
 func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	if opts.Page < 0 {
 		return opts, fmt.Errorf("%w: page %d: pages count from 1", ErrBadOptions, opts.Page)
 	}
-	if opts.Paper == "" {
-		opts.Paper = port.PaperA4
-	}
-	if !slices.Contains([]port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}, opts.Paper) {
-		return opts, fmt.Errorf("%w: unknown paper %q", ErrBadOptions, opts.Paper)
+	opts, err := pageOptions(opts)
+	if err != nil {
+		return opts, err
 	}
 	opts.Format = format(opts)
 	if !slices.Contains([]port.Format{port.FormatPDF, port.FormatPNG, port.FormatJPEG, port.FormatSVG}, opts.Format) {
@@ -112,6 +111,12 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 		if !slices.Contains([]port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed}, opts.Mode) {
 			return opts, fmt.Errorf("%w: unknown PDF mode %q", ErrBadOptions, opts.Mode)
 		}
+		if opts.Grain == "" {
+			opts.Grain = port.PDFGrainMask
+		}
+		if !slices.Contains([]port.PDFGrain{port.PDFGrainMask, port.PDFGrainGroup}, opts.Grain) {
+			return opts, fmt.Errorf("%w: unknown PDF grain %q", ErrBadOptions, opts.Grain)
+		}
 		return opts, nil
 	}
 	if opts.Page == 0 {
@@ -119,6 +124,9 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	}
 	if opts.Mode != "" {
 		return opts, fmt.Errorf("%w: a PDF mode is for a whole document drawn as a PDF", ErrBadOptions)
+	}
+	if opts.Grain != "" {
+		return opts, fmt.Errorf("%w: a PDF grain is for a whole document drawn as a PDF", ErrBadOptions)
 	}
 	if opts.Format == port.FormatSVG {
 		if opts.Scale != 0 {
@@ -131,6 +139,25 @@ func Normalized(opts port.RenderOptions) (port.RenderOptions, error) {
 	}
 	if opts.Scale < 0 || opts.Scale > MaxScale {
 		return opts, fmt.Errorf("%w: scale %g is outside (0, %g]", ErrBadOptions, opts.Scale, MaxScale)
+	}
+	return opts, nil
+}
+
+// pageOptions is opts with the defaults of what every format draws its pages
+// with filled in, the paper and the policy for unreadable pages, or
+// ErrBadOptions for one not known.
+func pageOptions(opts port.RenderOptions) (port.RenderOptions, error) {
+	if opts.Paper == "" {
+		opts.Paper = port.PaperA4
+	}
+	if !slices.Contains([]port.Paper{port.PaperA4, port.PaperLetter, port.PaperTablet}, opts.Paper) {
+		return opts, fmt.Errorf("%w: unknown paper %q", ErrBadOptions, opts.Paper)
+	}
+	if opts.Unreadable == "" {
+		opts.Unreadable = port.UnreadablePlaceholder
+	}
+	if !slices.Contains([]port.Unreadable{port.UnreadablePlaceholder, port.UnreadableBlank, port.UnreadableStrict}, opts.Unreadable) {
+		return opts, fmt.Errorf("%w: unknown unreadable page policy %q", ErrBadOptions, opts.Unreadable)
 	}
 	return opts, nil
 }
@@ -224,16 +251,17 @@ func (s *Service) ready(opts port.RenderOptions) (port.RenderOptions, error) {
 	return opts, s.renderer.Available()
 }
 
-// draw renders the document it of archive and writes the result to path,
-// whole or not at all.
+// draw renders the document it of archive into path as it is drawn, whole
+// or not at all: the drawing goes to the file Produce stages beside path,
+// which takes its place only once the drawing has succeeded.
 func (s *Service) draw(ctx context.Context, archive []byte, it domain.Item, path string, opts port.RenderOptions) (port.RenderReport, error) {
-	out, report, err := s.renderer.Render(ctx, archive, it.ID, opts)
-	if err != nil {
-		return port.RenderReport{}, fmt.Errorf("%s: %w", it.Name, err)
-	}
-	err = s.files.Produce(ctx, path, func(w io.Writer) error {
-		_, werr := w.Write(out)
-		return werr
+	var report port.RenderReport
+	err := s.files.Produce(ctx, path, func(w io.Writer) error {
+		var rerr error
+		if report, rerr = s.renderer.Render(ctx, archive, it.ID, opts, w); rerr != nil {
+			return fmt.Errorf("%s: %w", it.Name, rerr)
+		}
+		return nil
 	})
 	if err != nil {
 		return port.RenderReport{}, err

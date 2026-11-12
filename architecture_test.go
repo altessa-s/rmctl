@@ -35,6 +35,9 @@ const archiveFormat = "github.com/altessa-s/rmdoc-go"
 // its bundled fonts below it.
 const renderLib = "github.com/altessa-s/rmrender-go"
 
+// fileWatcher is the file watcher only the fswatch adapter may import.
+const fileWatcher = "github.com/fsnotify/fsnotify"
+
 // keychainLib is the Keychain binding only keychain/system may import, and
 // configFormat the TOML parser only the config adapter may.
 const (
@@ -53,7 +56,7 @@ type rule struct {
 func useCase(allow ...string) rule {
 	return rule{
 		allow:  append([]string{"internal/domain", "internal/port"}, allow...),
-		forbid: []string{"os", "net/http", "github.com/spf13/cobra", transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat},
+		forbid: []string{"os", "net/http", "github.com/spf13/cobra", transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat, fileWatcher},
 	}
 }
 
@@ -61,7 +64,7 @@ func useCase(allow ...string) rule {
 // stands on, and none of the others ("" for none).
 func adapter(own string) rule {
 	r := rule{allow: []string{"internal/domain", "internal/port"}, forbid: []string{"github.com/spf13/cobra"}}
-	for _, framework := range []string{transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat} {
+	for _, framework := range []string{transport, pageFormat, archiveFormat, renderLib, keychainLib, configFormat, fileWatcher} {
 		if framework != own {
 			r.forbid = append(r.forbid, framework)
 		}
@@ -92,14 +95,24 @@ var layers = map[string]rule{
 	"internal/app/inspect":  useCase("internal/app/library"),
 	"internal/app/archives": useCase("internal/app/pages"),
 	"internal/app/secrets":  useCase(),
-	"internal/app/render":   useCase("internal/app/library", "internal/app/fetch"),
+	"internal/app/render":   useCase("internal/app/library", "internal/app/fetch", "internal/app/outdir"),
+	"internal/app/outdir":   useCase("internal/app/library", "internal/app/fetch"),
+	"internal/app/notes":    useCase("internal/app/library", "internal/app/pages", "internal/app/outdir"),
 	"internal/app/profile":  useCase("internal/app/account"),
 	"internal/app/prefetch": useCase("internal/app/library"),
+	"internal/app/mirror":   useCase("internal/app/library", "internal/app/fetch"),
 
 	"internal/adapter/cloud":      adapter(transport),
-	"internal/adapter/config":     {allow: []string{"internal/domain"}, forbid: []string{keychainLib}},
+	"internal/adapter/config":     {allow: []string{"internal/domain", "internal/adapter/flock"}, forbid: []string{keychainLib}},
 	"internal/adapter/secretfile": adapter(transport),
-	"internal/adapter/localfs":    adapter(""),
+	"internal/adapter/localfs": func() rule {
+		r := adapter("")
+		r.allow = append(r.allow, "internal/adapter/flock")
+		return r
+	}(),
+	"internal/adapter/flock":      adapter(""),
+	"internal/adapter/autostart":  adapter(""),
+	"internal/adapter/fswatch":    adapter(fileWatcher),
 	"internal/adapter/pdf":        adapter(""),
 	"internal/adapter/blobcache":  adapter(""),
 	"internal/adapter/ids":        adapter(""),
@@ -109,6 +122,7 @@ var layers = map[string]rule{
 	"internal/adapter/renderer":   adapter(renderLib),
 	"internal/adapter/vault":      adapter(transport),
 	"internal/adapter/indexcache": adapter(""),
+	"internal/adapter/opener":     adapter(""),
 	"internal/adapter/keychain": func() rule {
 		r := adapter(transport)
 		r.allow = append(r.allow, "internal/adapter/keychain/system")
@@ -124,7 +138,8 @@ var layers = map[string]rule{
 		"internal/adapter/pdf", "internal/adapter/blobcache", "internal/adapter/ids", "internal/adapter/clock",
 		"internal/adapter/rmpages", "internal/adapter/rmdocs", "internal/adapter/keychain", "internal/adapter/vault",
 		"internal/app/secrets", "internal/adapter/indexcache", "internal/app/render", "internal/adapter/renderer",
-		"internal/app/profile", "internal/app/prefetch",
+		"internal/app/profile", "internal/app/prefetch", "internal/app/notes", "internal/adapter/opener",
+		"internal/app/mirror", "internal/adapter/autostart", "internal/adapter/fswatch",
 	}},
 
 	"internal/porttest":    {allow: []string{"internal/domain", "internal/port"}},
@@ -137,7 +152,7 @@ var layers = map[string]rule{
 		"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/account",
 		"cmd/rmctl/commands/browse", "cmd/rmctl/commands/fetch", "cmd/rmctl/commands/write",
 		"cmd/rmctl/commands/watch", "cmd/rmctl/commands/debug", "cmd/rmctl/commands/version",
-		"cmd/rmctl/commands/rmdoc", "cmd/rmctl/commands/render",
+		"cmd/rmctl/commands/rmdoc", "cmd/rmctl/commands/render", "cmd/rmctl/commands/mirror",
 	}, forbid: []string{transport, pageFormat, archiveFormat, renderLib}},
 	"cmd/rmctl/commands/cliutil": {
 		allow:  []string{"internal/domain", "internal/port", "cmd/rmctl/commands/output"},
@@ -155,6 +170,7 @@ var layers = map[string]rule{
 	"cmd/rmctl/commands/version": command(),
 	"cmd/rmctl/commands/rmdoc":   command(),
 	"cmd/rmctl/commands/render":  command(),
+	"cmd/rmctl/commands/mirror":  command(),
 	"cmd/rmctl/commands/clitest": {allow: []string{"internal/domain", "internal/port", "cmd/rmctl/commands/cliutil", "cmd/rmctl/commands/output"}},
 }
 

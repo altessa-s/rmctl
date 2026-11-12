@@ -6,6 +6,7 @@ package clitest
 
 import (
 	"context"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -86,6 +87,11 @@ type Fake struct {
 	RenderFolders []string
 	RenderedTree  port.RenderTreeReport
 	TreeErr       error
+	// NotedTree is what NotesTree answers, with the directory filled in
+	// when it has none, and NotesErr the error it answers with; Folder
+	// answers for the notes as for the rendering.
+	NotedTree port.NotesTreeReport
+	NotesErr  error
 	// ProfileList is what Profiles.List answers, ProfileInfo what Info
 	// answers (with the name asked for filled in when it has none), and
 	// ProfilesErr fails List, Info and Add. Removal is what Remove answers,
@@ -99,6 +105,14 @@ type Fake struct {
 	// progress it was given.
 	Synced    port.SyncReport
 	SyncSteps []port.SyncProgress
+	// NoListing makes Completion answer port.ErrNoListing, as a cache
+	// nothing listed the library into; otherwise it lists Library.
+	NoListing bool
+	// Opened is what Open and OpenFile answer, with the path filled in
+	// when it has none; RenderErr fails them before anything is drawn, and
+	// OpenErr after, as a viewer that would not start.
+	Opened  port.OpenReport
+	OpenErr error
 
 	mu    sync.Mutex
 	calls []string
@@ -108,8 +122,8 @@ type Fake struct {
 func (f *Fake) Services() cliutil.Services {
 	return cliutil.Services{
 		Account: f, Browser: f, Fetcher: f, Writer: f, Watcher: f, Inspector: f, Pages: f,
-		Archives: (*archivesFake)(f), Rendering: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
-		Profiles: (*profilesFake)(f),
+		Archives: (*archivesFake)(f), Rendering: f, Notes: f, Syncer: f, Secrets: (*secretsFake)(f), Cache: (*cacheFake)(f), Offline: f.Offline,
+		Profiles: (*profilesFake)(f), Completion: (*listingFake)(f), Viewing: (*viewingFake)(f),
 	}
 }
 
@@ -372,12 +386,29 @@ func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOpt
 	return r, f.TreeErr
 }
 
+// NotesTree implements port.Notes.
+func (f *Fake) NotesTree(_ context.Context, query, dir string, o port.NoteOptions, t port.NotesTreeOptions) (port.NotesTreeReport, error) {
+	args := []string{query, dir, "link=" + o.PDFLink, opt(t.All, "all"), opt(t.AllDocs, "all-docs"),
+		opt(t.Incremental, "incremental"), opt(t.Prune, "prune"), "jobs=" + strconv.Itoa(t.Jobs)}
+	if err := f.record("NotesTree", args...); err != nil {
+		return port.NotesTreeReport{}, err
+	}
+	r := f.NotedTree
+	if r.Dir == "" {
+		r.Dir = dir
+	}
+	return r, f.NotesErr
+}
+
 // renderArgs are a rendering's arguments as a call records them.
 func renderArgs(from, dest string, o port.RenderOptions) []string {
 	args := []string{from, dest, "format=" + string(o.Format), "page=" + strconv.Itoa(o.Page), "mode=" + string(o.Mode),
-		"paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
+		"grain=" + string(o.Grain), "paper=" + string(o.Paper), "scale=" + strconv.FormatFloat(o.Scale, 'g', -1, 64), "quality=" + strconv.Itoa(o.Quality)}
 	if o.NoTemplates {
 		args = append(args, "no-template")
+	}
+	if o.Unreadable != "" && o.Unreadable != port.UnreadablePlaceholder {
+		args = append(args, "unreadable="+string(o.Unreadable))
 	}
 	if o.Document != "" {
 		args = append(args, "id="+o.Document)
@@ -556,6 +587,7 @@ type inputPorts interface {
 	port.Watcher
 	port.Inspector
 	port.Pages
+	port.Notes
 }
 
 var _ inputPorts = (*Fake)(nil)
@@ -708,4 +740,47 @@ func (p *profilesFake) Remove(_ context.Context, name string, o port.RemoveProfi
 		return port.ProfileRemoval{}, err
 	}
 	return f.Removal, f.RemoveErr
+}
+
+// listingFake is the Fake's port.Completion.
+type listingFake Fake
+
+var _ port.Completion = (*listingFake)(nil)
+
+// Listing implements port.Completion; it records no call.
+func (l *listingFake) Listing(context.Context) (*domain.Tree, error) {
+	f := (*Fake)(l)
+	if f.NoListing {
+		return nil, port.ErrNoListing
+	}
+	return f.tree(), nil
+}
+
+// viewingFake is the Fake's port.Viewing.
+type viewingFake Fake
+
+var _ port.Viewing = (*viewingFake)(nil)
+
+// Open implements port.Viewing.
+func (v *viewingFake) Open(_ context.Context, query string, o port.RenderOptions) (port.OpenReport, error) {
+	return (*Fake)(v).opened("Open", query, o)
+}
+
+// OpenFile implements port.Viewing.
+func (v *viewingFake) OpenFile(_ context.Context, path string, o port.RenderOptions) (port.OpenReport, error) {
+	return (*Fake)(v).opened("OpenFile", path, o)
+}
+
+func (f *Fake) opened(method, from string, o port.RenderOptions) (port.OpenReport, error) {
+	if err := f.record(method, renderArgs(from, "", o)...); err != nil {
+		return port.OpenReport{}, err
+	}
+	if f.RenderErr != nil {
+		return port.OpenReport{}, f.RenderErr
+	}
+	r := f.Opened
+	if r.Path == "" {
+		r.Path = "rendered/" + path.Base(from) + ".pdf"
+	}
+	return r, f.OpenErr
 }

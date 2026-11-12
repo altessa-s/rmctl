@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
@@ -43,10 +44,19 @@ type Services struct {
 	Pages     port.Pages
 	Archives  port.Archives
 	Rendering port.Rendering
+	Notes     port.Notes
 	Syncer    port.Syncer
 	Secrets   port.Secrets
 	Profiles  port.Profiles
 	Cache     port.Cache
+	// Completion lists the library for shell completion. A factory fills
+	// it alone when the request is for completion.
+	Completion port.Completion
+	Viewing    port.Viewing
+	// Mirrors defines and runs the mirrors, and MirrorService is their
+	// autostart service.
+	Mirrors       port.Mirrors
+	MirrorService port.MirrorService
 	// Offline says the services never reach the cloud: --offline, or the
 	// profile's configuration.
 	Offline bool
@@ -59,7 +69,9 @@ type Services struct {
 // a table; OutColor whether that terminal shows ANSI color; Width is its
 // width in columns, 0 when unknown. Getenv reads the environment; nil is the
 // process's. Now is the wall clock a progress bar measures its rate by;
-// nil is the machine's. Renders says this build draws documents, which
+// nil is the machine's. After calls f once d has passed unless stop is
+// called first, for the line that waits before it shows; nil is the
+// machine's timer. Renders says this build draws documents, which
 // "version --full" reports: false in rmctl-lite and in a build without cgo;
 // the composition root asks the renderer.
 type Streams struct {
@@ -71,6 +83,7 @@ type Streams struct {
 	Width       int
 	Getenv      func(string) string
 	Now         func() time.Time
+	After       func(d time.Duration, f func()) (stop func())
 	Renders     bool
 }
 
@@ -87,6 +100,12 @@ type Request struct {
 	// ReadOnly says the command changes nothing, so a root confirmed within
 	// the profile's TTL may answer it.
 	ReadOnly bool
+	// JSON says the answer is JSON: a program reads it, and the line of a
+	// slow load is not drawn for one, even at a terminal.
+	JSON bool
+	// Completion asks for Services.Completion alone, for shell completion:
+	// nothing that reaches the cloud, reads a token or writes the cache.
+	Completion bool
 }
 
 // Factory builds the services once the flags are parsed. The returned
@@ -103,6 +122,10 @@ type Env struct {
 	services Services
 	closer   func() error
 	err      error
+
+	listed     bool
+	listing    port.Completion
+	listCloser func() error
 }
 
 // NewEnv returns an environment that builds its services with factory.
@@ -126,7 +149,7 @@ func (e *Env) Services(cmd *cobra.Command) (Services, error) {
 	}
 	e.built = true
 	access := AccessOf(cmd)
-	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive}
+	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive, JSON: e.JSON(cmd)}
 	req.Verbose, _ = cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
 	req.NoCache, _ = cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // the flag is persistent on the root
 	if f := cmd.Flags().Lookup(FlagOffline); f != nil && f.Changed {
@@ -140,14 +163,42 @@ func (e *Env) Services(cmd *cobra.Command) (Services, error) {
 	return e.services, e.err
 }
 
-// Close releases the services if they were built.
-func (e *Env) Close() error {
-	if e.closer == nil {
+// Listing is the library as the profile's cache last listed it, for
+// shell completion, with the profile and --no-cache of cmd; nil when there
+// is none. The factory is asked for the completion services alone, once,
+// and whatever fails is nil: completion says nothing.
+func (e *Env) Listing(cmd *cobra.Command) *domain.Tree {
+	if !e.listed {
+		e.listed = true
+		req := Request{Profile: Profile(cmd), ReadOnly: true, Completion: true}
+		req.NoCache, _ = cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // the flag is persistent on the root
+		svc, closer, err := e.factory(cmd.Context(), req)
+		if err == nil {
+			e.listing, e.listCloser = svc.Completion, closer
+		}
+	}
+	if e.listing == nil {
 		return nil
 	}
-	closer := e.closer
-	e.closer = nil
-	return closer()
+	tree, err := e.listing.Listing(cmd.Context())
+	if err != nil {
+		return nil
+	}
+	return tree
+}
+
+// Close releases the services if they were built.
+func (e *Env) Close() error {
+	var errs []error
+	for _, c := range []*func() error{&e.listCloser, &e.closer} {
+		if *c == nil {
+			continue
+		}
+		closer := *c
+		*c = nil
+		errs = append(errs, closer())
+	}
+	return errors.Join(errs...)
 }
 
 // Profile is --profile, else $RMCTL_PROFILE, else "".

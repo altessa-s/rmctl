@@ -29,7 +29,7 @@ func TestFakeRendering(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	f := &Fake{Rendered: port.RenderReport{Pages: 4}, RenderFolders: []string{"/Books"}, RenderedTree: port.RenderTreeReport{Documents: make([]port.RenderedDocument, 2)}}
-	o := port.RenderOptions{Format: port.FormatPNG, Page: 2, Mode: "pages", Paper: "a4", Scale: 1.5, Quality: 90, NoTemplates: true, Document: "d1"}
+	o := port.RenderOptions{Format: port.FormatPNG, Page: 2, Mode: "pages", Grain: "group", Paper: "a4", Scale: 1.5, Quality: 90, NoTemplates: true, Document: "d1"}
 	r, err := f.Render(ctx, "/Books/Paper", "out.png", o)
 	if err != nil || r.Path != "out.png" || r.Pages != 4 {
 		t.Fatalf("Render %+v %v", r, err)
@@ -43,15 +43,15 @@ func TestFakeRendering(t *testing.T) {
 			t.Errorf("Folder %s: %v %v", query, got, err)
 		}
 	}
-	tree, err := f.RenderTree(ctx, "/Books", "dir", port.RenderOptions{Format: port.FormatPDF},
+	tree, err := f.RenderTree(ctx, "/Books", "dir", port.RenderOptions{Format: port.FormatPDF, Unreadable: port.UnreadableBlank},
 		port.RenderTreeOptions{All: true, Incremental: true, Jobs: 3})
 	if err != nil || tree.Dir != "dir" || len(tree.Documents) != 2 {
 		t.Fatalf("RenderTree %+v %v", tree, err)
 	}
 	expectCalls(t, f,
-		"Render /Books/Paper out.png format=png page=2 mode=pages paper=a4 scale=1.5 quality=90 no-template id=d1",
-		"RenderFile a.rmdoc out.pdf format= page=0 mode= paper= scale=0 quality=0",
-		"RenderTree /Books dir format=pdf page=0 mode= paper= scale=0 quality=0 all incremental jobs=3")
+		"Render /Books/Paper out.png format=png page=2 mode=pages grain=group paper=a4 scale=1.5 quality=90 no-template id=d1",
+		"RenderFile a.rmdoc out.pdf format= page=0 mode= grain= paper= scale=0 quality=0",
+		"RenderTree /Books dir format=pdf page=0 mode= grain= paper= scale=0 quality=0 unreadable=blank all incremental jobs=3")
 
 	f = &Fake{RenderErr: errFake, TreeErr: errFake}
 	if _, err := f.Render(ctx, "x", "y", port.RenderOptions{}); !errors.Is(err, errFake) {

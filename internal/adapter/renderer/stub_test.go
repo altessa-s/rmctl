@@ -8,6 +8,7 @@ package renderer
 
 import (
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/altessa-s/rmctl/internal/domain"
@@ -20,7 +21,7 @@ func TestStubAnswersUnsupported(t *testing.T) {
 	if err := r.Available(); !errors.Is(err, domain.ErrRenderUnsupported) || !errors.Is(err, errNoRender) {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}); !errors.Is(err, domain.ErrRenderUnsupported) || !errors.Is(err, errNoRender) {
+	if _, err := r.Render(t.Context(), nil, "", port.RenderOptions{}, io.Discard); !errors.Is(err, domain.ErrRenderUnsupported) || !errors.Is(err, errNoRender) {
 		t.Fatal(err)
 	}
 }

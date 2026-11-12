@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/altessa-s/rmctl/internal/domain"
 )
 
 // ErrOffline means a read under --offline needed something the cache does
@@ -69,4 +71,26 @@ type Cache interface {
 	// Clear removes the current profile's cache, or every profile's with
 	// all, and names the profiles it cleared.
 	Clear(ctx context.Context, all bool) ([]string, error)
+}
+
+// ErrNoListing means the profile's cache holds no listing of the library:
+// no command has read the library into it yet, or the cache is off.
+var ErrNoListing = errors.New("the cache holds no listing of the library")
+
+// ListingCache keeps the library as the last command that read it saw
+// it, for shell completion: the tree of the root hash names, replacing
+// the listing kept before. It never fails a command.
+type ListingCache interface {
+	PutListing(hash string, tree *domain.Tree)
+}
+
+// Completion is the input port of shell completion. Completion runs on
+// every Tab, so it has no rule of its own to apply and asks nothing of the
+// cloud: the cache adapter implements it directly over what
+// [ListingCache] kept.
+type Completion interface {
+	// Listing is the library as the profile's cache last kept it, or
+	// [ErrNoListing]. It never reaches the cloud, asks for credentials or
+	// writes the cache. Its items carry no files, times or tags.
+	Listing(ctx context.Context) (*domain.Tree, error)
 }

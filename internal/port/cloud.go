@@ -30,6 +30,19 @@ type RootState struct {
 // Progress reports bytes done of a known total; total is -1 when unknown.
 type Progress func(done, total int64)
 
+// LoadObserver follows a load of the library that reads items: one whose
+// every item this run has read already tells it nothing. The calls of one
+// load come one at a time, though from several goroutines, and none of them
+// may block: the load waits for each.
+type LoadObserver interface {
+	// LoadProgress says done of the total records of the root are read. A
+	// load starts with done 0, then counts up one record at a time, items
+	// read before included, and reaches total only when it builds the tree.
+	LoadProgress(done, total int)
+	// LoadDone ends the load, whether it built the tree or failed.
+	LoadDone()
+}
+
 // RootStore reads and writes the root index.
 type RootStore interface {
 	Root(ctx context.Context) (RootState, error)

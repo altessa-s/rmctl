@@ -72,7 +72,7 @@ func newDu(env *cliutil.Env) *cobra.Command {
 			rmctl du --all --json
 		`),
 		Args:              cliutil.Args(cobra.MaximumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if depth < 0 {
@@ -173,7 +173,7 @@ func newDupes(env *cliutil.Env) *cobra.Command {
 			rmctl dupes /Books --json
 		`),
 		Args:              cliutil.Args(cobra.MaximumNArgs(1)),
-		ValidArgsFunction: cliutil.CompleteRemote(env, true),
+		ValidArgsFunction: cliutil.UpTo(1, cliutil.CompleteRemote(env, true)),
 		SilenceUsage:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, err := browser(cmd, env)

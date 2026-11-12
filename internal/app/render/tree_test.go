@@ -209,7 +209,7 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 		t.Fatal("no manifest")
 	}
 	// The defaults spelled out are the same options.
-	if r := draw(port.RenderOptions{Paper: port.PaperA4, Mode: port.PDFFresh}); r.Count(port.RenderUnchanged) != 2 {
+	if r := draw(port.RenderOptions{Paper: port.PaperA4, Mode: port.PDFFresh, Grain: port.PDFGrainMask}); r.Count(port.RenderUnchanged) != 2 {
 		t.Fatalf("%q", rows(r))
 	}
 	for _, c := range []struct {
@@ -219,6 +219,7 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 		{"paper", port.RenderOptions{Paper: port.PaperLetter}},
 		{"mode", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving}},
 		{"templates", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}},
+		{"grain", port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true, Grain: port.PDFGrainGroup}},
 	} {
 		if r := draw(c.opts); r.Count(port.RenderRendered) != 2 {
 			t.Fatalf("%s: %q", c.name, rows(r))
@@ -227,10 +228,10 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 			t.Fatalf("%s again: %q", c.name, rows(r))
 		}
 	}
-	if head, _ := f.written(t, "out/Deep.pdf"); head != "PDF d3aaaaaa preserving letter no-template" {
+	if head, _ := f.written(t, "out/Deep.pdf"); head != "PDF d3aaaaaa preserving letter grain-group no-template" {
 		t.Fatalf("%q", head)
 	}
-	last := port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true}
+	last := port.RenderOptions{Paper: port.PaperLetter, Mode: port.PDFPreserving, NoTemplates: true, Grain: port.PDFGrainGroup}
 	for name, damage := range map[string]func(){
 		"corrupt": func() { f.files.Write("out/"+render.ManifestName, []byte("{not json")) },
 		"version": func() { f.files.Write("out/"+render.ManifestName, []byte(`{"v":99,"documents":{}}`)) },
@@ -253,6 +254,54 @@ func TestRenderTreeIncrementalHonorsTheOptions(t *testing.T) {
 		f.cloud.Record(porttest.Doc{ID: "d3aaaaaa", Name: "Deep", Parent: "f2aaaaaa", Modified: porttest.Epoch.Add(time.Hour)}))
 	f.cloud.SetRoot(records)
 	if r := draw(last); r.Count(port.RenderRendered) != 1 || r.Count(port.RenderUnchanged) != 1 {
+		t.Fatalf("%q", rows(r))
+	}
+}
+
+// A PDF that holds a page that did not parse is never recorded, so an
+// incremental drawing draws it again, whatever the option for such pages,
+// which is no part of the record: a document without one is kept under any.
+func TestRenderTreeUnreadableIsNotRecorded(t *testing.T) {
+	t.Parallel()
+	f := treeSetup(t)
+	inc := port.RenderTreeOptions{Incremental: true}
+	draw := func(opts port.RenderOptions) port.RenderTreeReport {
+		t.Helper()
+		report, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", opts, inc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	f.renderer.Report = port.RenderReport{UnreadablePages: 1}
+	for range 2 {
+		if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 2 {
+			t.Fatalf("%q", rows(r))
+		}
+	}
+	if data, _ := f.files.File("out/" + render.ManifestName); strings.Contains(string(data), "Deep") {
+		t.Fatalf("recorded: %s", data)
+	}
+	// Once its pages read, the document is recorded and kept, under any
+	// option for the pages that do not.
+	f.renderer.Report = port.RenderReport{}
+	if r := draw(port.RenderOptions{Unreadable: port.UnreadableBlank}); r.Count(port.RenderRendered) != 2 {
+		t.Fatalf("%q", rows(r))
+	}
+	for _, u := range []port.Unreadable{port.UnreadablePlaceholder, port.UnreadableBlank, port.UnreadableStrict} {
+		if r := draw(port.RenderOptions{Unreadable: u}); r.Count(port.RenderUnchanged) != 2 {
+			t.Fatalf("%s: %q", u, rows(r))
+		}
+	}
+	// A recorded PDF drawn again with such a page loses its record.
+	if err := f.files.Remove("out/Deep.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	f.renderer.Report = port.RenderReport{UnreadablePages: 1}
+	if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 1 || r.Count(port.RenderUnchanged) != 1 {
+		t.Fatalf("%q", rows(r))
+	}
+	if r := draw(port.RenderOptions{}); r.Count(port.RenderRendered) != 1 {
 		t.Fatalf("%q", rows(r))
 	}
 }
@@ -314,12 +363,20 @@ func TestRenderTreeFailedDocumentsGoOn(t *testing.T) {
 			f.files.Fail["ModTime"] = errBoom
 		}},
 		{"set the modification time", func(f fixture) { f.files.Fail["SetModTime"] = errBoom }},
+		{"drawing partway", func(f fixture) { f.renderer.FailWritten = errBoom }},
 	} {
 		f := treeSetup(t)
 		c.set(f)
 		report, err := f.s.RenderTree(t.Context(), "/Books/Sub", "out", port.RenderOptions{}, port.RenderTreeOptions{Incremental: true})
 		if !errors.Is(err, render.ErrDocumentsFailed) || report.Count(port.RenderFailed) != 2 || !errors.Is(report.Documents[0].Err, errBoom) {
 			t.Fatalf("%s: %v %q", c.name, err, rows(report))
+		}
+		if c.name == "drawing partway" {
+			for _, d := range report.Documents {
+				if _, ok := f.files.File(d.Report.Path); ok {
+					t.Fatalf("%s: %s was written", c.name, d.Report.Path)
+				}
+			}
 		}
 	}
 }

@@ -352,24 +352,46 @@ func TestCandidates(t *testing.T) {
 	t.Parallel()
 	tree := testTree(t)
 	tests := []struct {
-		word        string
-		foldersOnly bool
-		want        []string
+		word    string
+		c       Completing
+		want    []string
+		noSpace bool
 	}{
-		{"d-", false, []string{"d-paper\tPaper"}},
-		{"", true, []string{"f-books\tBooks"}},
-		{"/", false, []string{"/Books/", "/Notes"}},
-		{"/B", false, []string{"/Books/"}},
-		{"/Books/", false, []string{"/Books/Paper"}},
-		{"/Books/", true, nil},
-		{"/Nowhere/", false, nil},
-		{"/Notes/", false, nil},
+		{"d-", Completing{}, []string{"d-paper\t/Books/Paper"}, false},
+		{"d-", Completing{Trash: TrashToo}, []string{"d-paper\t/Books/Paper", "d-old\t/Old"}, false},
+		{"D-O", Completing{Trash: TrashOnly}, []string{"d-old\t/Old"}, false},
+		{"", Completing{Folders: true}, []string{"/Books/\tfolder"}, true},
+		{"", Completing{}, []string{"/Books/\tfolder", "/Notes\tnotebook"}, true},
+		{"/", Completing{Trash: TrashOnly}, []string{"/Old\tnotebook, in the trash"}, false},
+		{"/b", Completing{}, []string{"/Books/\tfolder"}, true},
+		{"Bo", Completing{}, []string{"Books/\tfolder"}, true},
+		{"/Books/", Completing{}, []string{"/Books/Paper\tpdf"}, false},
+		{"/Books/", Completing{Folders: true}, nil, false},
+		{"/Nowhere/", Completing{}, nil, false},
+		{"/Notes/", Completing{}, nil, false},
+		{"/O", Completing{}, nil, false},
 	}
 	for _, tc := range tests {
-		got, _ := Candidates(tree, tc.word, tc.foldersOnly)
+		got, dir := Candidates(tree, tc.word, tc.c)
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-			t.Errorf("Candidates(%q, %v) = %q, want %q", tc.word, tc.foldersOnly, got, tc.want)
+			t.Errorf("Candidates(%q, %+v) = %q, want %q", tc.word, tc.c, got, tc.want)
 		}
+		if noSpace := dir&cobra.ShellCompDirectiveNoSpace != 0; noSpace != tc.noSpace || dir&cobra.ShellCompDirectiveNoFileComp == 0 {
+			t.Errorf("Candidates(%q, %+v) directive %v", tc.word, tc.c, dir)
+		}
+	}
+}
+
+func TestCandidatesSkipNamesAPathCannotHold(t *testing.T) {
+	t.Parallel()
+	tree := domain.NewTree(1, []domain.Item{
+		domain.NewListedItem("a", "A/B", domain.KindNotebook, "", false),
+		domain.NewListedItem("b", "", domain.KindNotebook, "", false),
+		domain.NewListedItem("c", "With space", domain.KindNotebook, "", false),
+	})
+	got, _ := Candidates(tree, "/", Completing{})
+	if strings.Join(got, ",") != "/With space\tnotebook" {
+		t.Fatalf("%q", got)
 	}
 }
 
@@ -387,24 +409,113 @@ func testTree(t *testing.T) *domain.Tree {
 	})
 }
 
+// completionCmd is a command with the persistent flags and --all.
+func completionCmd(t *testing.T, args ...string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "x"}
+	AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
+	cmd.Flags().BoolP(FlagAll, "a", false, "")
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
 func TestCompleteRemote(t *testing.T) {
 	t.Parallel()
 	tree := testTree(t)
-	svc := Services{Browser: treeBrowser{tree: tree}}
-	cmd := &cobra.Command{Use: "x"}
-	AddPersistentFlags(cmd, NewEnv(Streams{}, Fixed(Services{})))
-	got, dir := CompleteRemote(NewEnv(Streams{}, Fixed(svc)), false)(cmd, nil, "/B")
-	if strings.Join(got, ",") != "/Books/" || dir&cobra.ShellCompDirectiveNoSpace == 0 {
+	svc := Services{Completion: listing{tree: tree}}
+	got, dir := CompleteRemote(NewEnv(Streams{}, Fixed(svc)), false)(completionCmd(t), nil, "/B")
+	if strings.Join(got, ",") != "/Books/\tfolder" || dir&cobra.ShellCompDirectiveNoSpace == 0 {
 		t.Fatalf("%q %v", got, dir)
 	}
-	failing := Services{Browser: treeBrowser{err: errors.New("offline")}}
-	if got, _ := CompleteRemote(NewEnv(Streams{}, Fixed(failing)), false)(cmd, nil, "/"); got != nil {
+	got, _ = CompleteRemote(NewEnv(Streams{}, Fixed(svc)), false)(completionCmd(t, "--all"), nil, "/O")
+	if strings.Join(got, ",") != "/Old\tnotebook, in the trash" {
+		t.Fatalf("--all: %q", got)
+	}
+	failing := Services{Completion: listing{err: port.ErrNoListing}}
+	if got, _ := CompleteRemote(NewEnv(Streams{}, Fixed(failing)), false)(completionCmd(t), nil, "/"); got != nil {
 		t.Fatal(got)
 	}
-	if got, _ := CompleteRemote(NewEnv(Streams{}, Fixed(Services{})), false)(cmd, nil, "/"); got != nil {
+	if got, _ := CompleteRemote(NewEnv(Streams{}, Fixed(Services{})), false)(completionCmd(t), nil, "/"); got != nil {
+		t.Fatal(got)
+	}
+	broken := func(context.Context, Request) (Services, func() error, error) {
+		return svc, nil, errors.New("no config")
+	}
+	if got, _ := CompleteRemote(NewEnv(Streams{}, broken), false)(completionCmd(t), nil, "/"); got != nil {
 		t.Fatal(got)
 	}
 }
+
+func TestListingAsksForTheCompletionServicesOnce(t *testing.T) {
+	t.Parallel()
+	var reqs []Request
+	closed := 0
+	factory := func(_ context.Context, req Request) (Services, func() error, error) {
+		reqs = append(reqs, req)
+		return Services{Completion: listing{tree: testTree(t)}}, func() error { closed++; return nil }, nil
+	}
+	env := NewEnv(Streams{}, factory)
+	cmd := completionCmd(t, "--profile", "home", "--no-cache")
+	if env.Listing(cmd) == nil || env.Listing(cmd) == nil {
+		t.Fatal("no listing")
+	}
+	if len(reqs) != 1 || !reqs[0].Completion || !reqs[0].NoCache || reqs[0].Profile != "home" || !reqs[0].ReadOnly {
+		t.Fatalf("%+v", reqs)
+	}
+	if err := env.Close(); err != nil || closed != 1 {
+		t.Fatalf("closed %d: %v", closed, err)
+	}
+}
+
+func TestCompletionWrappers(t *testing.T) {
+	t.Parallel()
+	cmd := completionCmd(t)
+	some := func(*cobra.Command, []string, string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return []cobra.Completion{"/A/"}, cobra.ShellCompDirectiveNoSpace
+	}
+	if got, dir := OrFiles(some, "rmdoc")(cmd, nil, "/"); len(got) != 1 || dir != cobra.ShellCompDirectiveNoSpace {
+		t.Fatalf("%q %v", got, dir)
+	}
+	if got, dir := OrFiles(CompleteNothing, "rmdoc")(cmd, nil, "./"); strings.Join(got, ",") != "rmdoc" || dir != cobra.ShellCompDirectiveFilterFileExt {
+		t.Fatalf("%q %v", got, dir)
+	}
+	if got, dir := OrFiles(CompleteNothing)(cmd, nil, "./"); got != nil || dir != cobra.ShellCompDirectiveDefault {
+		t.Fatalf("%q %v", got, dir)
+	}
+	if got, dir := UpTo(1, some)(cmd, []string{"x"}, ""); got != nil || dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("%q %v", got, dir)
+	}
+	if _, dir := CompleteDirs(cmd, nil, ""); dir != cobra.ShellCompDirectiveFilterDirs {
+		t.Fatal(dir)
+	}
+	env := NewEnv(Streams{}, Fixed(Services{Completion: listing{tree: testTree(t)}}))
+	both := LocalThenRemote(env, 2, CompleteDirs)
+	if _, dir := both(cmd, nil, ""); dir != cobra.ShellCompDirectiveFilterDirs {
+		t.Fatal(dir)
+	}
+	if got, _ := both(cmd, []string{"dir"}, "/"); strings.Join(got, ",") != "/Books/\tfolder" {
+		t.Fatalf("%q", got)
+	}
+	if got, _ := both(cmd, []string{"dir", "/Books"}, "/"); got != nil {
+		t.Fatalf("%q", got)
+	}
+	CompleteFlags(cmd, map[string]cobra.CompletionFunc{FlagAll: CompleteNothing})
+	defer func() {
+		if recover() == nil {
+			t.Fatal("completing a flag the command lacks did not panic")
+		}
+	}()
+	CompleteFlags(cmd, map[string]cobra.CompletionFunc{"nowhere": CompleteNothing})
+}
+
+type listing struct {
+	tree *domain.Tree
+	err  error
+}
+
+func (l listing) Listing(context.Context) (*domain.Tree, error) { return l.tree, l.err }
 
 type treeBrowser struct {
 	port.Browser
@@ -447,5 +558,27 @@ func BenchmarkMaskJSON(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 	for b.Loop() {
 		_ = MaskJSON(data)
+	}
+}
+
+// BenchmarkCandidates completes in a library of 5,000 items: folders of
+// 50 documents, a path in one folder, an identifier prefix over all.
+func BenchmarkCandidates(b *testing.B) {
+	items := make([]domain.Item, 0, 5000)
+	for i := range 5000 {
+		if i%50 == 0 {
+			items = append(items, domain.NewListedItem(domain.ItemID(fmt.Sprintf("f%05d", i)), fmt.Sprintf("Folder %d", i/50), domain.KindFolder, "", false))
+			continue
+		}
+		items = append(items, domain.NewListedItem(domain.ItemID(fmt.Sprintf("d%05d-0000-4000-8000-000000000000", i)),
+			fmt.Sprintf("A document %d", i), domain.KindPDF, domain.ItemID(fmt.Sprintf("f%05d", i-i%50)), i%97 == 0))
+	}
+	tree := domain.NewTree(1, items)
+	for _, word := range []string{"/", "/Folder 42/A document 21", "d012"} {
+		b.Run(word, func(b *testing.B) {
+			for b.Loop() {
+				Candidates(tree, word, Completing{})
+			}
+		})
 	}
 }
