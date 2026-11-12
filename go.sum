@@ -12,6 +12,8 @@ github.com/altessa-s/rmcloud-go v1.0.0 h1:MnOWQqmtjlVznidkgZzRwO8/yAXCoN7ZX4K8CB
 github.com/altessa-s/rmcloud-go v1.0.0/go.mod h1:I3sW5FT5uuY5aayTnMbOGZJz5AJVNYNfxjDplkCVDqc=
 github.com/altessa-s/rmcloud-go v1.0.1 h1:jnpZkgg0Z8hO4BInsX7g71Ar3mt1AJMN6+1SOPS8Bn4=
 github.com/altessa-s/rmcloud-go v1.0.1/go.mod h1:I3sW5FT5uuY5aayTnMbOGZJz5AJVNYNfxjDplkCVDqc=
+github.com/altessa-s/rmcloud-go v1.0.2 h1:oR6x70FunDJzIt2Shn3XQTykmxkqRjWp7ZSATNrD0dI=
+github.com/altessa-s/rmcloud-go v1.0.2/go.mod h1:ew/4516WZXNawUA9FL3SAOsiA2V5aUquREOvDhVm0oA=
 github.com/altessa-s/rmdoc-go v1.1.0 h1:cdhkHB9PxXd0TRFakRIDNJwQRo2e+u9edt1Ox3e7WVM=
 github.com/altessa-s/rmdoc-go v1.1.0/go.mod h1:g/8YBALvTkPelp6lgnv5+rZvCd4FCFjTHPpfvZl3C1s=
 github.com/altessa-s/rmlines-go v1.1.2 h1:balGzQ6NS2d19OJgXPyOx8r0bznrazcid/wjASNCukw=
@@ -20,6 +22,8 @@ github.com/altessa-s/rmrender-go v1.4.2-0.20261108032415-0eb9209172e2 h1:3necZZh
 github.com/altessa-s/rmrender-go v1.4.2-0.20261108032415-0eb9209172e2/go.mod h1:UFMwIabChq9Q5CRnLQsDjSw+e3vG3TVvvAtSGTqRBk4=
 github.com/altessa-s/rmrender-go v1.4.2-0.20261112102652-23b03a815a64 h1:5+zhSPNh1fXz5c2wBxN/0n92mbE9D52ChHXrSajqzkQ=
 github.com/altessa-s/rmrender-go v1.4.2-0.20261112102652-23b03a815a64/go.mod h1:UFMwIabChq9Q5CRnLQsDjSw+e3vG3TVvvAtSGTqRBk4=
+github.com/altessa-s/rmrender-go v1.5.0 h1:ffTIHeui+ciGBaNgYwSoggAjuIDHUXw9c26xHovWq+M=
+github.com/altessa-s/rmrender-go v1.5.0/go.mod h1:UFMwIabChq9Q5CRnLQsDjSw+e3vG3TVvvAtSGTqRBk4=
 github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=
 github.com/clipperhouse/uax29/v2 v2.7.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
