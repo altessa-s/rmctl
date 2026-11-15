@@ -54,7 +54,7 @@ func TestFakeAnswersEveryPort(t *testing.T) {
 	if p, _ := f.Get(ctx, "x", "", progress); p != "p" || !progressed {
 		t.Fatal("Get")
 	}
-	if r, _ := f.Export(ctx, []string{"x", "z"}, "y"); r.Documents != 2 || r.Path != "p" {
+	if r, _ := f.Export(ctx, []string{"x", "z"}, "y", nil); r.Documents != 2 || r.Path != "p" {
 		t.Fatalf("Export %+v", r)
 	}
 	f.Imported = []port.ImportedDocument{{From: "a"}}

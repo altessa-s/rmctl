@@ -313,7 +313,10 @@ func newMput(env *cliutil.Env) *cobra.Command {
 			if err = cliutil.Confirm(cmd, env, fmt.Sprintf("Upload the documents below %s into %s?", args[0], dest)); err != nil {
 				return err
 			}
+			progress, done := cliutil.Transfer(env.ProgressStreams(cmd), "uploading")
+			opts.Progress = progress
 			report, err := w.Upload(cmd.Context(), args[0], dest, opts)
+			done()
 			if err != nil {
 				return fmt.Errorf("mput: %w", err)
 			}

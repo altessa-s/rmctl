@@ -52,6 +52,10 @@ func TestE2E_LoadingLine(t *testing.T) {
 			t.Fatalf("%v: stderr %q", args, errOut)
 		}
 	}
+	code, out, errOut := e.rmctl("ls", "--no-cache", "--quiet")
+	if code != 0 || out != piped || errOut != "" {
+		t.Fatalf("quiet: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
 	// A JSON answer is read by a program: no line, on either stream.
 	for _, args := range [][]string{{"ls", "--json", "--no-cache"}, {"ls", "--format", "json", "--no-cache"}} {
 		code, out, errOut := e.rmctl(args...)

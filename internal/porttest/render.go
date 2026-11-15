@@ -94,6 +94,9 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 	} else {
 		report.Pages = pages
 	}
+	if opts.Progress != nil {
+		opts.Progress(0, int64(report.Pages))
+	}
 	if opts.Grain != "" && opts.Grain != port.PDFGrainMask {
 		head += " grain-" + string(opts.Grain)
 	}
@@ -114,6 +117,9 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 	}
 	if _, err := w.Write(archive); err != nil {
 		return port.RenderReport{}, err
+	}
+	if opts.Progress != nil {
+		opts.Progress(int64(report.Pages), int64(report.Pages))
 	}
 	return report, nil
 }

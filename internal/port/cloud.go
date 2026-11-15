@@ -27,7 +27,8 @@ type RootState struct {
 	Records    []domain.Record
 }
 
-// Progress reports bytes done of a known total; total is -1 when unknown.
+// Progress reports units done of a known total; total is -1 when unknown.
+// Units are bytes unless the port explicitly reports pages or other counts.
 type Progress func(done, total int64)
 
 // LoadObserver follows a load of the library that reads items: one whose

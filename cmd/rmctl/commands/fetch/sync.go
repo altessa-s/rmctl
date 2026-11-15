@@ -99,7 +99,7 @@ func newSync(env *cliutil.Env) *cobra.Command {
 			if len(args) == 1 {
 				query = args[0]
 			}
-			update, done := cliutil.Transfer(env.Streams, "syncing")
+			update, done := cliutil.Transfer(env.ProgressStreams(cmd), "syncing")
 			opts.Progress = update
 			r, err := s.Sync(cmd.Context(), query, opts)
 			done()

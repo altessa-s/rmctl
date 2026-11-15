@@ -18,6 +18,7 @@ import (
 	"github.com/altessa-s/go-atlas-core/runtime/concurrency"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/transfer"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -90,6 +91,13 @@ func (s *Service) Backup(ctx context.Context, dir, query string, opts port.Backu
 	if err = s.files.MkdirAll(dir); err != nil {
 		return report, err
 	}
+	sizes := make([]int64, len(docs))
+	for i, it := range docs {
+		for _, f := range it.Files {
+			sizes[i] += f.Size
+		}
+	}
+	tracker := transfer.New(opts.Progress, sizes)
 	entries := make([]domain.BackupEntry, len(docs))
 	var written, skipped atomic.Int64
 	jobs := opts.Jobs
@@ -101,11 +109,12 @@ func (s *Service) Backup(ctx context.Context, dir, query string, opts port.Backu
 		indexes[i] = i
 	}
 	err = concurrency.Process(ctx, indexes, func(ctx context.Context, i int) error {
-		e, wrote, berr := s.backupOne(ctx, tree, docs[i], filepath.Join(dir, names[i]), names[i], old)
+		e, wrote, berr := s.backupOne(ctx, tree, docs[i], filepath.Join(dir, names[i]), names[i], old, tracker.File(i))
 		if berr != nil {
 			return fmt.Errorf("%s: %w", tree.Path(docs[i].ID), berr)
 		}
 		entries[i] = e
+		tracker.Finish(i)
 		if wrote {
 			written.Add(1)
 		} else {
@@ -186,7 +195,7 @@ func (s *Service) backupNames(docs []domain.Item) ([]string, error) {
 // backupOne writes the archive of one document unless the manifest records
 // its record hash and the archive is there with the size it recorded.
 func (s *Service) backupOne(
-	ctx context.Context, tree *domain.Tree, it domain.Item, path, name string, old domain.BackupManifest,
+	ctx context.Context, tree *domain.Tree, it domain.Item, path, name string, old domain.BackupManifest, progress port.Progress,
 ) (domain.BackupEntry, bool, error) {
 	if e, ok := old.Entry(it.ID); ok && e.Hash == it.Hash && e.File == name {
 		size, isDir, exists, err := s.files.Stat(path)
@@ -197,7 +206,11 @@ func (s *Service) backupOne(
 			return domain.NewBackupEntry(tree, it, name, size), false, nil
 		}
 	}
-	if _, err := s.pack(ctx, []domain.Item{it}, path); err != nil {
+	if _, err := s.pack(ctx, []domain.Item{it}, path, func(p port.SyncProgress) {
+		if progress != nil {
+			progress(p.Bytes, p.BytesTotal)
+		}
+	}); err != nil {
 		return domain.BackupEntry{}, false, err
 	}
 	size, _, _, err := s.files.Stat(path)

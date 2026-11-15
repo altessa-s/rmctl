@@ -59,7 +59,9 @@ type SyncOptions struct {
 	Progress func(SyncProgress)
 }
 
-// SyncProgress is what a sync has fetched of what it fetches.
+// SyncProgress reports completed files and source bytes of a transfer.
+// Archive operations count documents as files; unchanged and cached inputs
+// count as completed work. Sync reports the bytes its cache fetches.
 type SyncProgress struct {
 	Files, FilesTotal int
 	Bytes, BytesTotal int64

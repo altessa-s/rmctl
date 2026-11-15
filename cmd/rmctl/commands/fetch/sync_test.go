@@ -126,7 +126,7 @@ func TestSyncProgressOnlyOnATerminal(t *testing.T) {
 	// The first drawing, then the finished line; the one between comes
 	// within a tenth of a second and is skipped.
 	if !strings.HasPrefix(r.Err, "\r\x1b[Ksyncing [>                   ]   0%  0 B/2.0 KiB  0/2 files") ||
-		!strings.Contains(r.Err, "\r\x1b[Ksyncing [====================] 100%  2.0 KiB/2.0 KiB  2/2 files") || !strings.HasSuffix(r.Err, "\n") {
+		!strings.Contains(r.Err, "\r\x1b[Ksyncing [====================] 100%  2.0 KiB/2.0 KiB  2/2 files") || !strings.HasSuffix(r.Err, "\r\x1b[K") {
 		t.Fatalf("%q", r.Err)
 	}
 	r = run(t, &clitest.Fake{Synced: synced, SyncSteps: steps}, clitest.Options{Terminal: true, Env: map[string]string{"TERM": "dumb"}}, "sync")

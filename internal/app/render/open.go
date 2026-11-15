@@ -66,7 +66,7 @@ func (v *Viewer) Open(ctx context.Context, query string, opts port.RenderOptions
 		}
 	}
 	key := previewKey(opts, v.version, "library", string(it.ID), it.Hash)
-	return v.show(ctx, key, it, opts, func() ([]byte, error) { return v.svc.download(ctx, it) })
+	return v.show(ctx, key, it, opts, func() ([]byte, error) { return v.svc.download(ctx, it, opts.DownloadProgress) })
 }
 
 // OpenFile implements port.Viewing.

@@ -17,6 +17,7 @@ import (
 	"github.com/altessa-s/go-atlas-core/runtime/concurrency"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/transfer"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -80,7 +81,7 @@ func (s *Service) Get(ctx context.Context, query, dest string, progress port.Pro
 // directory and the archive is written from there, so no file and no
 // archive is held in memory whole; the archive reaches dest only when it is
 // complete.
-func (s *Service) Export(ctx context.Context, queries []string, dest string) (port.ExportReport, error) {
+func (s *Service) Export(ctx context.Context, queries []string, dest string, progress func(port.SyncProgress)) (port.ExportReport, error) {
 	tree, _, err := s.lib.Load(ctx)
 	if err != nil {
 		return port.ExportReport{}, err
@@ -107,7 +108,7 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (po
 	}
 	// An archive in place is reported even when its staging directory
 	// could not be removed.
-	files, err := s.pack(ctx, docs, path)
+	files, err := s.pack(ctx, docs, path, progress)
 	if err != nil && files == 0 {
 		return port.ExportReport{}, err
 	}
@@ -117,7 +118,7 @@ func (s *Service) Export(ctx context.Context, queries []string, dest string) (po
 // pack writes the files of docs into the archive at path and returns how
 // many it holds, also when only the removal of the staging directory
 // failed. The archive reaches path only when it is complete.
-func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n int, err error) {
+func (s *Service) pack(ctx context.Context, docs []domain.Item, path string, progress func(port.SyncProgress)) (n int, err error) {
 	stage, remove, err := s.files.Stage()
 	if err != nil {
 		return 0, err
@@ -127,7 +128,7 @@ func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n 
 			err = errors.Join(err, fmt.Errorf("remove the staging directory %s: %w", stage, rerr))
 		}
 	}()
-	archive, n, err := Pack(ctx, s.blobs, s.files, s.archives, docs, stage)
+	archive, n, err := Pack(ctx, s.blobs, s.files, s.archives, docs, stage, progress)
 	if err != nil {
 		return 0, err
 	}
@@ -153,19 +154,34 @@ func (s *Service) pack(ctx context.Context, docs []domain.Item, path string) (n 
 // is held in memory whole; the caller owns stage and removes it.
 func Pack(
 	ctx context.Context, blobs port.BlobStore, files port.LocalFiles, archives port.ArchiveWriter,
-	docs []domain.Item, stage string,
+	docs []domain.Item, stage string, progress func(port.SyncProgress),
 ) (string, int, error) {
 	var sources []port.ArchiveSource
-	for _, it := range docs {
+	sizes := make([]int64, len(docs))
+	for i, it := range docs {
+		for _, f := range it.Files {
+			sizes[i] += f.Size
+		}
+	}
+	tracker := transfer.New(progress, sizes)
+	for i, it := range docs {
+		var offset int64
+		update := tracker.File(i)
 		for _, f := range it.Files {
 			// The record name may hold a slash: the file is named by its count.
 			local := filepath.Join(stage, strconv.Itoa(len(sources)))
-			derr := files.Produce(ctx, local, func(w io.Writer) error { return blobs.Download(ctx, f, w, nil) })
+			var fileProgress port.Progress
+			if update != nil {
+				fileProgress = func(n, _ int64) { update(offset+n, sizes[i]) }
+			}
+			derr := files.Produce(ctx, local, func(w io.Writer) error { return blobs.Download(ctx, f, w, fileProgress) })
 			if derr != nil {
 				return "", 0, fmt.Errorf("download %s: %w", f.Name, derr)
 			}
 			sources = append(sources, port.ArchiveSource{Name: f.Name, Path: local})
+			offset += f.Size
 		}
+		tracker.Finish(i)
 	}
 	archive := filepath.Join(stage, "archive.rmdoc")
 	if err := archives.WriteArchive(archive, sources); err != nil {
@@ -186,20 +202,32 @@ func (s *Service) Mirror(ctx context.Context, query, dir string, opts port.Mirro
 			return report, err
 		}
 	}
+	sizes := make([]int64, len(p.Files))
+	for i, pf := range p.Files {
+		sizes[i] = pf.File.Size
+	}
+	tracker := transfer.New(opts.Progress, sizes)
+	indexes := make([]int, len(p.Files))
+	for i := range indexes {
+		indexes[i] = i
+	}
 	var written, skipped atomic.Int64
 	jobs := opts.Jobs
 	if jobs < 1 {
 		jobs = DefaultJobs
 	}
-	err = concurrency.Process(ctx, p.Files, func(ctx context.Context, pf PlannedFile) error {
-		wrote, ferr := s.mirrorFile(ctx, pf, opts.Incremental)
+	err = concurrency.Process(ctx, indexes, func(ctx context.Context, i int) error {
+		wrote, ferr := s.mirrorFile(ctx, p.Files[i], opts.Incremental, tracker.File(i))
 		if wrote {
 			written.Add(1)
 		} else if ferr == nil {
 			skipped.Add(1)
 		}
+		if ferr == nil {
+			tracker.Finish(i)
+		}
 		return ferr
-	}, concurrency.WithConcurrency[PlannedFile](jobs), concurrency.WithStopOnError[PlannedFile]())
+	}, concurrency.WithConcurrency[int](jobs), concurrency.WithStopOnError[int]())
 	report.Written = int(written.Load())
 	report.Skipped += int(skipped.Load())
 	if err != nil {
@@ -233,7 +261,7 @@ func (s *Service) plan(ctx context.Context, query, dir string) (MirrorPlan, erro
 
 // mirrorFile downloads one planned file. wrote false with no error is a
 // skip: incremental found the file there with the size the cloud names.
-func (s *Service) mirrorFile(ctx context.Context, pf PlannedFile, incremental bool) (bool, error) {
+func (s *Service) mirrorFile(ctx context.Context, pf PlannedFile, incremental bool, progress port.Progress) (bool, error) {
 	if incremental {
 		size, isDir, exists, err := s.files.Stat(pf.Path)
 		if err != nil {
@@ -244,7 +272,7 @@ func (s *Service) mirrorFile(ctx context.Context, pf PlannedFile, incremental bo
 		}
 	}
 	err := s.files.Produce(ctx, pf.Path, func(w io.Writer) error {
-		return s.blobs.Download(ctx, pf.File, w, nil)
+		return s.blobs.Download(ctx, pf.File, w, progress)
 	})
 	if err != nil {
 		return false, fmt.Errorf("download %s: %w", pf.Path, err)

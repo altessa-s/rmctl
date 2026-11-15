@@ -103,6 +103,7 @@ func (s *Service) RenderTree(
 		return port.RenderTreeReport{}, err
 	}
 	plan := TreePlan(lib, top, dir, tree.All)
+	progress := newTreeProgress(opts, plan)
 	options := fingerprint(opts)
 	recorded, dropped := outdir.Pruned(outdir.Read(s.files, dir, ManifestName), dir, plan, options)
 	if dropped {
@@ -119,7 +120,10 @@ func (s *Service) RenderTree(
 		// What is left recorded of the plan was drawn from the document as it
 		// is now, with these options: only its PDF's time is left to check.
 		_, known := recorded[outdir.Key(dir, plan[i].Path)]
-		d := s.renderOne(ctx, plan[i], opts, tree.Incremental && known)
+		d := s.renderOne(ctx, plan[i], progress.options(i), tree.Incremental && known)
+		if d.Err == nil {
+			progress.bytes.Finish(i)
+		}
 		if d.Err != nil && ctx.Err() != nil {
 			return d, ctx.Err()
 		}
@@ -190,7 +194,7 @@ func (s *Service) renderOne(ctx context.Context, p Planned, opts port.RenderOpti
 	if err := s.files.MkdirAll(filepath.Dir(p.Path)); err != nil {
 		return fail(err)
 	}
-	archive, err := s.download(ctx, p.Document)
+	archive, err := s.download(ctx, p.Document, opts.DownloadProgress)
 	if err != nil {
 		return fail(err)
 	}

@@ -5,6 +5,7 @@
 package render
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,6 +19,42 @@ import (
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
+
+func TestProgressOptionsKeepBothConcurrentPhases(t *testing.T) {
+	t.Parallel()
+	for _, term := range []string{"xterm", "dumb"} {
+		t.Run(term, func(t *testing.T) {
+			var out bytes.Buffer
+			env := cliutil.NewEnv(cliutil.Streams{Err: &out, IsTerminal: true, Getenv: func(string) string { return term }}, nil)
+			opts, done := progressOptions(&cobra.Command{}, env, port.RenderOptions{})
+			opts.DownloadProgress(12<<20, 40<<20)
+			opts.Progress(3, 10)
+			opts.DownloadProgress(20<<20, 40<<20)
+			opts.Progress(4, 10)
+			var lines []string
+			for line := range strings.SplitSeq(out.String(), "\r") {
+				line = strings.TrimPrefix(line, "\x1b[K")
+				if strings.Contains(line, "drawing pages") {
+					lines = append(lines, strings.TrimSpace(line))
+				}
+			}
+			want := []string{
+				"drawing pages 3/10 · downloading 12.0 MiB/40.0 MiB",
+				"drawing pages 3/10 · downloading 20.0 MiB/40.0 MiB",
+				"drawing pages 4/10 · downloading 20.0 MiB/40.0 MiB",
+			}
+			if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("interleaved callbacks lost a phase:\ngot %q\nwant %q", lines, want)
+			}
+			done()
+			before := out.String()
+			done()
+			if out.String() != before || !strings.HasSuffix(before, "\r") && !strings.HasSuffix(before, "\r\x1b[K") {
+				t.Fatalf("progress not cleared idempotently: %q", out.String())
+			}
+		})
+	}
+}
 
 func build(env *cliutil.Env) []*cobra.Command {
 	return []*cobra.Command{cliutil.WithAccess(New(env), cliutil.AccessOffline)}

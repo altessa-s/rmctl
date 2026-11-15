@@ -64,7 +64,7 @@ func TestExportKeepsALargeFileOutOfMemory(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	report, err := s.Export(t.Context(), []string{"d1aaaaaa"}, dest)
+	report, err := s.Export(t.Context(), []string{"d1aaaaaa"}, dest, nil)
 	runtime.ReadMemStats(&after)
 	if err != nil || report.Files != 3 {
 		t.Fatalf("%+v %v", report, err)

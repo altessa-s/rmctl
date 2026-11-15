@@ -346,12 +346,22 @@ type named struct {
 }
 
 func (s *Service) uploadAll(ctx context.Context, list []named) ([]domain.File, error) {
+	return s.uploadAllProgress(ctx, list, nil)
+}
+
+// uploadAllProgress reports cumulative payload bytes for one document.
+func (s *Service) uploadAllProgress(ctx context.Context, list []named, progress port.Progress) ([]domain.File, error) {
 	files := make([]domain.File, 0, len(list))
+	var offset int64
 	for _, n := range list {
 		var f domain.File
 		var err error
 		if n.path != "" {
-			f, err = s.blobs.UploadFile(ctx, n.path, n.name, nil)
+			var update port.Progress
+			if progress != nil {
+				update = func(n, _ int64) { progress(offset+n, 0) }
+			}
+			f, err = s.blobs.UploadFile(ctx, n.path, n.name, update)
 		} else {
 			f, err = s.blobs.Upload(ctx, n.name, n.body)
 		}
@@ -359,6 +369,10 @@ func (s *Service) uploadAll(ctx context.Context, list []named) ([]domain.File, e
 			return nil, fmt.Errorf("upload %s: %w", n.name, err)
 		}
 		files = append(files, f)
+		offset += f.Size
+		if progress != nil {
+			progress(offset, 0)
+		}
 	}
 	return files, nil
 }

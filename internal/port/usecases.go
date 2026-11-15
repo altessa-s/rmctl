@@ -66,6 +66,9 @@ type MirrorOptions struct {
 	// Delete removes local files the cloud no longer holds.
 	Delete bool
 	Jobs   int
+	// Progress reports completed original files and bytes, including unchanged files.
+	// Calls are serialized, including when Jobs runs concurrent workers.
+	Progress func(SyncProgress)
 }
 
 // MirrorReport is what a recursive transfer did.
@@ -80,8 +83,9 @@ type Fetcher interface {
 	Get(ctx context.Context, query, dest string, progress Progress) (string, error)
 	// Export writes documents whole into one .rmdoc archive. A folder
 	// stands for every document below it; each document is in the archive
-	// once, with every file of its index.
-	Export(ctx context.Context, queries []string, dest string) (ExportReport, error)
+	// once, with every file of its index. Progress counts documents prepared
+	// and source bytes downloaded; archive writing has no byte callback.
+	Export(ctx context.Context, queries []string, dest string, progress func(SyncProgress)) (ExportReport, error)
 	// Mirror downloads a folder's documents into dir, keeping the tree.
 	Mirror(ctx context.Context, query, dir string, opts MirrorOptions) (MirrorReport, error)
 	// Backup writes every document below the folder query names into dir,
@@ -110,6 +114,8 @@ type BackupOptions struct {
 	// are moved to the removed directory; nothing is deleted.
 	Rescope bool
 	Jobs    int
+	// Progress reports completed document archives and source bytes; calls are serialized.
+	Progress func(SyncProgress)
 }
 
 // BackupReport is what a backup did: Documents is how many the manifest
@@ -243,6 +249,8 @@ type RestoreOptions struct {
 	// DryRun works out the restore against the current library and
 	// uploads nothing.
 	DryRun bool
+	// Progress reports documents placed and source bytes, once across commit retries.
+	Progress func(SyncProgress)
 }
 
 // RestoreReport is what a restore did, or would do.
@@ -278,6 +286,9 @@ type UploadOptions struct {
 	// Incremental skips a file whose name the folder already holds.
 	Incremental bool
 	Jobs        int
+	// Progress reports completed original files and bytes, including unchanged files.
+	// Calls are serialized across concurrent workers.
+	Progress func(SyncProgress)
 }
 
 // Watcher follows the notification socket.

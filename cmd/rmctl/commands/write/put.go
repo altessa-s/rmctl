@@ -58,7 +58,8 @@ type putFlags struct {
 	notebook bool
 	device   string
 	// plan is what --content-only will do, found before the question.
-	plan *port.ContentPlan
+	plan     *port.ContentPlan
+	progress port.Progress
 }
 
 // split separates the files from the destination folder. --to names the
@@ -282,12 +283,17 @@ func runPut(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 	errOut := cmd.ErrOrStderr()
 	results := make([]putResult, 0, len(files))
 	failed := 0
-	for _, file := range files {
+	next, complete, finish := putProgress(env.ProgressStreams(cmd), files, f.opts.DryRun)
+	defer finish()
+	for i, file := range files {
 		if err := cmd.Context().Err(); err != nil {
 			return cliutil.Interrupted(cmd.Context(), err)
 		}
+		finish()
 		f.warnOnReplace(errOut, file)
+		f.progress = next(i)
 		r, err := putFile(cmd, env, svc, f, file, dest)
+		finish()
 		if err != nil {
 			switch {
 			case cmd.Context().Err() != nil:
@@ -302,6 +308,8 @@ func runPut(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 			results = append(results, putResult{File: file, Error: err.Error()})
 			continue
 		}
+		complete(i)
+		finish()
 		results = append(results, r)
 		for _, row := range putRows(f, r, dest) {
 			if err := stream.Row(output.Row{Cells: row}); err != nil {
@@ -429,7 +437,10 @@ func putOne(cmd *cobra.Command, env *cliutil.Env, svc cliutil.Services, f *putFl
 		}
 		return svc.Pages.Notebook(cmd.Context(), file, dest, opts)
 	}
-	progress, done := cliutil.Progress(env.Streams, "uploading "+filepath.Base(file))
+	if f.progress != nil {
+		return svc.Writer.Put(cmd.Context(), file, dest, f.opts, f.progress)
+	}
+	progress, done := cliutil.Progress(env.ProgressStreams(cmd), "uploading "+filepath.Base(file))
 	defer done()
 	return svc.Writer.Put(cmd.Context(), file, dest, f.opts, progress)
 }

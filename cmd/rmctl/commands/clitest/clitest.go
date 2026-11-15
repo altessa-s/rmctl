@@ -159,7 +159,7 @@ func Exec(t testing.TB, svc cliutil.Services, opts Options, build func(env *cliu
 	root := &cobra.Command{Use: "rmctl", SilenceUsage: true, SilenceErrors: true}
 	root.SetIn(streams.In)
 	root.SetOut(&out)
-	root.SetErr(&errOut)
+	root.SetErr(env.Streams.Err)
 	root.SetFlagErrorFunc(cliutil.FlagError)
 	cliutil.AddPersistentFlags(root, env)
 	for _, c := range build(env) {

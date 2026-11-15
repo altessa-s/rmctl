@@ -361,3 +361,43 @@ func inked(t *testing.T, data []byte) int {
 	}
 	return n
 }
+
+func TestPageProgressUsesDocumentCounts(t *testing.T) {
+	t.Parallel()
+	for _, opts := range []port.RenderOptions{{}, {Page: 1, Format: port.FormatSVG}} {
+		var steps [][2]int64
+		opts.Progress = func(n, total int64) { steps = append(steps, [2]int64{n, total}) }
+		_, report, err := draw(t.Context(), New(), notes(t), "", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(steps) != 2 || steps[0] != ([2]int64{0, int64(report.Pages)}) || steps[1] != ([2]int64{int64(report.Pages), int64(report.Pages)}) {
+			t.Fatalf("pages %+v, progress %v", report, steps)
+		}
+	}
+}
+
+func TestPageProgressCompletesWhenOutputOmitsPages(t *testing.T) {
+	t.Parallel()
+	r := New()
+	f, err := r.fonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := rmrender.OpenDocument(notes(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = doc.Close() }()
+	var done, total int64
+	opts := port.RenderOptions{Progress: func(n, all int64) { done, total = n, all }}
+	// The native page limit deterministically exercises a successful export
+	// with fewer output pages than the document announced at the start.
+	report, err := writePDF(t.Context(), doc, opts, &rmrender.Options{Fonts: f, MaximumPages: 2}, io.Discard)
+	if err != nil || report.Pages != 2 || doc.Len() != 3 {
+		t.Fatalf("limited export: %+v, document pages %d, error %v", report, doc.Len(), err)
+	}
+	if done != 3 || total != 3 {
+		t.Fatalf("progress completed at %d/%d; want the original total 3/3", done, total)
+	}
+}

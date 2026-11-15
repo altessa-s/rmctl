@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	coreclock "github.com/altessa-s/go-atlas-core/time/clock"
-
 	"github.com/altessa-s/rmctl/internal/adapter/blobcache"
 	"github.com/altessa-s/rmctl/internal/adapter/clock"
+
+	coreclock "github.com/altessa-s/go-atlas-core/time/clock"
 )
 
 var errWrite = errors.New("write failed")
