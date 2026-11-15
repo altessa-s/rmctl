@@ -94,7 +94,12 @@ func (e *Engine) Watch(ctx context.Context, spec port.MirrorSpec, opts port.Mirr
 	var watched atomic.Bool
 	wg.Go(func() { e.listen(ctx, trigger) })
 	wg.Go(func() { e.watchDir(ctx, spec.Dir, rescan, &watched, trigger) })
-	wg.Go(func() { e.poll(ctx, spec.Dir, poll, rescan, &watched, trigger) })
+	// The directory as it is before the first pass: looked at here, not by
+	// the polling goroutine once it gets to run, a change made right after
+	// that pass would already be part of what the polling compares with,
+	// and go unseen until the next rescan.
+	seen := e.look(spec.Dir)
+	wg.Go(func() { e.poll(ctx, spec.Dir, seen, poll, rescan, &watched, trigger) })
 	backoff := time.Duration(0)
 	for {
 		p := e.pass(ctx, spec, opts)
@@ -210,16 +215,9 @@ func (e *Engine) watchDir(ctx context.Context, dir string, rescan time.Duration,
 // poll calls trigger when a look at the clock comes much later than due
 // (the machine slept, and the socket and the watcher may have missed
 // events), and every rescan; while watched is false it also looks at the
-// directory every interval, and calls trigger when its files changed.
-func (e *Engine) poll(ctx context.Context, dir string, interval, rescan time.Duration, watched *atomic.Bool, trigger func()) {
-	look := func() string {
-		l, err := scan(e.disk, dir)
-		if err != nil {
-			return "unreadable: " + err.Error()
-		}
-		return signature(l)
-	}
-	last := look()
+// directory every interval, and calls trigger when its files are not what
+// last, and then its own previous look, saw.
+func (e *Engine) poll(ctx context.Context, dir, last string, interval, rescan time.Duration, watched *atomic.Bool, trigger func()) {
 	// Wall time, not the monotonic clock, which stops while the machine
 	// sleeps.
 	tick := e.timer.Now().Round(0)
@@ -234,9 +232,19 @@ func (e *Engine) poll(ctx context.Context, dir string, interval, rescan time.Dur
 		if watched.Load() {
 			continue
 		}
-		if sig := look(); sig != last {
+		if sig := e.look(dir); sig != last {
 			last = sig
 			trigger()
 		}
 	}
+}
+
+// look is what the files below dir are now, as a string that differs when
+// they do.
+func (e *Engine) look(dir string) string {
+	l, err := scan(e.disk, dir)
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	return signature(l)
 }
