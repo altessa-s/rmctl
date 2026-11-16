@@ -11,14 +11,15 @@ import (
 	"github.com/altessa-s/rmctl/internal/port"
 )
 
-// treeProgress reports each worker's bytes against the whole plan. Page
-// totals become known as the renderer opens documents; counts are serialized
+// treeProgress reports each worker's pages and bytes against the whole plan.
+// Page totals become known before drawing; counts are serialized
 // across workers and include pages the renderer processed but omitted.
 type treeProgress struct {
 	mu            sync.Mutex
 	opts          port.RenderOptions
 	bytes         *transfer.Tracker
 	pages, totals []int64
+	done, total   int64
 }
 
 func newTreeProgress(opts port.RenderOptions, plan []Planned) *treeProgress {
@@ -54,11 +55,11 @@ func (p *treeProgress) options(i int) port.RenderOptions {
 func (p *treeProgress) drawn(i int, n, total int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.pages[i], p.totals[i] = max(p.pages[i], n), max(p.totals[i], total)
-	var done, all int64
-	for j := range p.pages {
-		done += p.pages[j]
-		all += p.totals[j]
-	}
-	p.opts.Progress(done, all)
+	// Only add new work: retries may repeat earlier counts. Keep this O(1)
+	// because native per-page callbacks wait for the observer to return.
+	n, total = max(p.pages[i], n), max(p.totals[i], total)
+	p.done += n - p.pages[i]
+	p.total += total - p.totals[i]
+	p.pages[i], p.totals[i] = n, total
+	p.opts.Progress(p.done, p.total)
 }

@@ -17,6 +17,7 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -364,15 +365,46 @@ func inked(t *testing.T, data []byte) int {
 
 func TestPageProgressUsesDocumentCounts(t *testing.T) {
 	t.Parallel()
-	for _, opts := range []port.RenderOptions{{}, {Page: 1, Format: port.FormatSVG}} {
+	for _, opts := range []port.RenderOptions{
+		{Mode: port.PDFFresh}, {Mode: port.PDFPreserving}, {Mode: port.PDFRecomposed},
+		{Page: 1, Format: port.FormatSVG}, {Page: 1, Format: port.FormatPNG, Scale: 0.25},
+		{Page: 1, Format: port.FormatJPEG, Scale: 0.25},
+	} {
 		var steps [][2]int64
 		opts.Progress = func(n, total int64) { steps = append(steps, [2]int64{n, total}) }
 		_, report, err := draw(t.Context(), New(), notes(t), "", opts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(steps) != 2 || steps[0] != ([2]int64{0, int64(report.Pages)}) || steps[1] != ([2]int64{int64(report.Pages), int64(report.Pages)}) {
-			t.Fatalf("pages %+v, progress %v", report, steps)
+		want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 3}}
+		if opts.Page > 0 {
+			want = [][2]int64{{0, 1}, {1, 1}}
+		}
+		if !slices.Equal(steps, want) || report.Pages != int(want[len(want)-1][1]) {
+			t.Fatalf("mode %s page %d: pages %+v, progress %v; want %v", opts.Mode, opts.Page, report, steps, want)
+		}
+	}
+}
+
+func TestPageProgressCancellation(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed} {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cause := errors.New("stop after first settled page")
+		var steps [][2]int64
+		opts := port.RenderOptions{Mode: mode, Progress: func(n, total int64) {
+			steps = append(steps, [2]int64{n, total})
+			if n == 1 {
+				cancel(cause)
+			}
+		}}
+		_, _, err := draw(ctx, New(), notes(t), "", opts)
+		cancel(nil)
+		if !errors.Is(err, cause) {
+			t.Fatalf("mode %s: error %v; want %v", mode, err, cause)
+		}
+		if want := [][2]int64{{0, 3}, {1, 3}}; !slices.Equal(steps, want) {
+			t.Fatalf("mode %s: progress after cancellation %v; want %v", mode, steps, want)
 		}
 	}
 }

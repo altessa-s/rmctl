@@ -107,6 +107,8 @@ refused pages   0
 links dropped   0
 ```
 
+`render` shows `drawing pages` progress on a terminal, advancing once per settled page in every PDF mode. Folder workers share one monotonic page count; see [rendering](docs/rendering.md) for details.
+
 ```sh
 rmctl find --text 'release notes'                           # search the typed text and highlights
 rmctl text /Meetings/Retro --format markdown                # a notebook's typed text as Markdown

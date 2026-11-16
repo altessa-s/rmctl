@@ -63,18 +63,14 @@ func (r *Renderer) Render(ctx context.Context, archive []byte, id domain.ItemID,
 		return port.RenderReport{}, fmt.Errorf("open the document: %w", err)
 	}
 	defer func() { _ = doc.Close() }()
-	total := int64(doc.Len())
-	if opts.Page > 0 {
-		total = 1
-	}
-	if opts.Progress != nil {
-		opts.Progress(0, total)
-	}
 	o := &rmrender.Options{Fonts: f, Paper: paper(opts.Paper), PDFGrain: grain(opts.Grain), Unreadable: unreadable(opts.Unreadable)}
 	if opts.NoTemplates {
 		o.Templates = rmrender.NoTemplates()
 	}
 	if opts.Page > 0 {
+		if opts.Progress != nil {
+			opts.Progress(0, 1)
+		}
 		if opts.Page > doc.Len() {
 			return port.RenderReport{}, fmt.Errorf("page %d of %d: %w", opts.Page, doc.Len(), domain.ErrNoSuchPage)
 		}
@@ -108,6 +104,12 @@ func writePDF(ctx context.Context, doc *rmrender.Document, opts port.RenderOptio
 	limits := rmrender.DefaultLimits()
 	limits.MaximumPDFBytes = MaxPDFBytes
 	o.Limits = &limits
+	if opts.Progress != nil {
+		// With no MaximumPages cap, the native output total matches doc.Len(),
+		// including blank/placeholder pages and refused source references.
+		// Forward only counts: this callback must not call back into rmrender.
+		o.Progress = func(completed, total int) { opts.Progress(int64(completed), int64(total)) }
+	}
 	report, err := doc.WritePDF(ctx, w, mode(opts.Mode), o)
 	if err != nil {
 		return port.RenderReport{}, fmt.Errorf("draw the PDF: %w", explained(err))
