@@ -376,7 +376,7 @@ func TestPageProgressUsesDocumentCounts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 3}}
+		want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
 		if opts.Page > 0 {
 			want = [][2]int64{{0, 1}, {1, 1}}
 		}
@@ -403,7 +403,7 @@ func TestPageProgressCancellation(t *testing.T) {
 		// Reports lag drawing, so pages that settled before the cancellation
 		// can still be reported after it, and a cancellation arriving after
 		// the last page may let the export finish.
-		full := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 3}}
+		full := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
 		if err == nil {
 			if !slices.Equal(steps, full) {
 				t.Fatalf("mode %s: finished with progress %v; want %v", mode, steps, full)
@@ -431,15 +431,16 @@ func TestPageProgressCompletesWhenOutputOmitsPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = doc.Close() }()
-	var done, total int64
-	opts := port.RenderOptions{Progress: func(n, all int64) { done, total = n, all }}
+	var steps [][2]int64
+	opts := port.RenderOptions{Progress: func(n, total int64) { steps = append(steps, [2]int64{n, total}) }}
 	// The native page limit deterministically exercises a successful export
 	// with fewer output pages than the document announced at the start.
 	report, err := writePDF(t.Context(), doc, opts, &rmrender.Options{Fonts: f, MaximumPages: 2}, io.Discard)
 	if err != nil || report.Pages != 2 || doc.Len() != 3 {
 		t.Fatalf("limited export: %+v, document pages %d, error %v", report, doc.Len(), err)
 	}
-	if done != 3 || total != 3 {
-		t.Fatalf("progress completed at %d/%d; want the original total 3/3", done, total)
+	want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
+	if !slices.Equal(steps, want) {
+		t.Fatalf("progress %v; want %v", steps, want)
 	}
 }

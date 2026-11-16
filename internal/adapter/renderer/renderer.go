@@ -104,19 +104,24 @@ func writePDF(ctx context.Context, doc *rmrender.Document, opts port.RenderOptio
 	limits := rmrender.DefaultLimits()
 	limits.MaximumPDFBytes = MaxPDFBytes
 	o.Limits = &limits
+	total := doc.Len()
+	capped := o.MaximumPages > 0 && o.MaximumPages < total
 	if opts.Progress != nil {
-		// With no MaximumPages cap, the native output total matches doc.Len(),
-		// including blank/placeholder pages and refused source references.
-		// Forward only counts: this callback must not call back into rmrender.
-		o.Progress = func(completed, total int) { opts.Progress(int64(completed), int64(total)) }
+		o.Progress = func(completed, all int) {
+			if capped {
+				all = total
+			}
+			opts.Progress(int64(completed), int64(all))
+		}
 	}
 	report, err := doc.WritePDF(ctx, w, mode(opts.Mode), o)
 	if err != nil {
 		return port.RenderReport{}, fmt.Errorf("draw the PDF: %w", explained(err))
 	}
-	if opts.Progress != nil {
-		total := int64(doc.Len())
-		opts.Progress(total, total)
+	if opts.Progress != nil && capped {
+		// rmrender reports only up to MaximumPages; the port counts pages
+		// omitted by that cap too, against the original document total.
+		opts.Progress(int64(total), int64(total))
 	}
 	return port.RenderReport{
 		Pages: report.RenderedPages, SkippedBlocks: report.SkippedBlocks,
