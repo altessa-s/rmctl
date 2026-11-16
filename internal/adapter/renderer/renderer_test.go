@@ -400,11 +400,21 @@ func TestPageProgressCancellation(t *testing.T) {
 		}}
 		_, _, err := draw(ctx, New(), notes(t), "", opts)
 		cancel(nil)
+		// Reports lag drawing, so pages that settled before the cancellation
+		// can still be reported after it, and a cancellation arriving after
+		// the last page may let the export finish.
+		full := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 3}}
+		if err == nil {
+			if !slices.Equal(steps, full) {
+				t.Fatalf("mode %s: finished with progress %v; want %v", mode, steps, full)
+			}
+			continue
+		}
 		if !errors.Is(err, cause) {
 			t.Fatalf("mode %s: error %v; want %v", mode, err, cause)
 		}
-		if want := [][2]int64{{0, 3}, {1, 3}}; !slices.Equal(steps, want) {
-			t.Fatalf("mode %s: progress after cancellation %v; want %v", mode, steps, want)
+		if len(steps) < 2 || len(steps) > 4 || !slices.Equal(steps, full[:len(steps)]) {
+			t.Fatalf("mode %s: progress after cancellation %v; want an ordered prefix of %v from %v", mode, steps, full[:4], full[:2])
 		}
 	}
 }
