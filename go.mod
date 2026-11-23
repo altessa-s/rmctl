@@ -10,8 +10,8 @@ require (
 	github.com/altessa-s/go-slogx v0.1.1
 	github.com/altessa-s/rmcloud-go v1.0.2
 	github.com/altessa-s/rmdoc-go v1.1.2
-	github.com/altessa-s/rmlines-go v1.1.4
-	github.com/altessa-s/rmrender-go v1.6.0
+	github.com/altessa-s/rmlines-go v1.2.0
+	github.com/altessa-s/rmrender-go v1.6.1
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/keybase/go-keychain v0.0.1
