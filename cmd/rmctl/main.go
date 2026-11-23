@@ -47,6 +47,8 @@ func run(args []string, in *os.File, out, errOut io.Writer, exit func(int), extr
 
 // runWith is run with the parts of the machine a test replaces.
 func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), s seams, extra ...rmcloud.Option) int {
+	terminal := isTerminal(in) && isTerminal(errOut)
+	errOut = cliutil.ProgressOutput(errOut)
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt)
 	defer signal.Stop(sigs)
@@ -57,7 +59,7 @@ func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), 
 		In:         in,
 		Out:        out,
 		Err:        errOut,
-		IsTerminal: isTerminal(in) && isTerminal(errOut),
+		IsTerminal: terminal,
 		Renders:    wiring.Renders(),
 	}
 	if f, ok := out.(*os.File); ok && isTerminal(f) {
@@ -75,8 +77,8 @@ func runWith(args []string, in *os.File, out, errOut io.Writer, exit func(int), 
 	loads := cliutil.Loading(streams)
 	factory := func(ctx context.Context, req commands.Request) (commands.Services, func() error, error) {
 		observer := loads
-		if req.JSON {
-			// A JSON answer is for a program, whatever it is run from.
+		if req.JSON || req.Quiet {
+			// JSON answers and --quiet suppress every progress line.
 			observer = nil
 		}
 		return build(ctx, req, errOut, observer, s, extra...)

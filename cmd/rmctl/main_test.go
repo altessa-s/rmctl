@@ -53,8 +53,11 @@ func TestRunWithStreams(t *testing.T) {
 	var seen *commands.Streams
 	s := seams{streams: func(st *commands.Streams) { st.IsTerminal = true; seen = st }}
 	code := runWith([]string{"version"}, nil, &out, &errOut, func(int) { t.Error("exited") }, s)
-	if code != 0 || seen == nil || seen.Err != &errOut || errOut.Len() != 0 {
+	if code != 0 || seen == nil || seen.Err == nil || errOut.Len() != 0 {
 		t.Fatalf("code %d, streams %+v, stderr %q", code, seen, errOut.String())
+	}
+	if _, err := seen.Err.Write([]byte("check")); err != nil || errOut.String() != "check" {
+		t.Fatalf("stderr wrapper did not preserve the supplied writer: %q %v", errOut.String(), err)
 	}
 }
 

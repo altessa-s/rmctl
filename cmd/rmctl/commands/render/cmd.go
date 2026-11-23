@@ -184,8 +184,11 @@ func New(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			opts, finish := progressOptions(cmd, env, opts)
+			defer finish()
 			if local {
 				report, rerr := r.RenderFile(cmd.Context(), args[0], f.dest, opts)
+				finish()
 				return f.answer(cmd, env, report, rerr)
 			}
 			folder, err := r.Folder(cmd.Context(), args[0])
@@ -193,12 +196,13 @@ func New(env *cliutil.Env) *cobra.Command {
 				return cliutil.PagesErr("render", err)
 			}
 			if folder {
-				return f.renderTree(cmd, env, r, args[0], opts)
+				return f.renderTree(cmd, env, r, args[0], opts, finish)
 			}
 			if err = f.onlyFolder(cmd, "a document"); err != nil {
 				return err
 			}
 			report, err := r.Render(cmd.Context(), args[0], f.dest, opts)
+			finish()
 			return f.answer(cmd, env, report, err)
 		},
 	}
@@ -282,7 +286,7 @@ func (f *flags) onlyFolder(cmd *cobra.Command, what string) error {
 // renderTree draws every document below the folder query names. The
 // answer is written also when some documents failed; the command then
 // fails after it.
-func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Rendering, query string, opts port.RenderOptions) error {
+func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Rendering, query string, opts port.RenderOptions, finish func()) error {
 	changed := cmd.Flags().Changed
 	switch {
 	case changed("page"):
@@ -291,6 +295,7 @@ func (f *flags) renderTree(cmd *cobra.Command, env *cliutil.Env, r port.Renderin
 		return cliutil.Usagef("%s: %s is a folder: -o names the directory its PDFs go into, not a file such as %s", f.name, query, f.dest)
 	}
 	report, err := r.RenderTree(cmd.Context(), query, f.dest, opts, f.tree)
+	finish()
 	if err != nil && (len(report.Documents) == 0 || cmd.Context().Err() != nil) {
 		return cliutil.PagesErr("render", err)
 	}
@@ -471,4 +476,12 @@ func notes(w io.Writer, prefix string, r port.RenderReport, unreadable port.Unre
 	if r.LinksDropped > 0 {
 		cliutil.Notef(w, "%s%d links of the original PDF could not be carried over; --mode preserving or recomposed keeps them", prefix, r.LinksDropped)
 	}
+}
+
+// progressOptions shares one stderr line between downloading and drawing,
+// including when folder workers reach those phases concurrently.
+func progressOptions(cmd *cobra.Command, env *cliutil.Env, opts port.RenderOptions) (port.RenderOptions, func()) {
+	pages, download, done := cliutil.RenderProgress(env.ProgressStreams(cmd))
+	opts.Progress, opts.DownloadProgress = pages, download
+	return opts, done
 }

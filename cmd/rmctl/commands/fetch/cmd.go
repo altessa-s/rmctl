@@ -65,7 +65,7 @@ func newGet(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			progress, done := cliutil.Progress(env.Streams, "downloading")
+			progress, done := cliutil.Progress(env.ProgressStreams(cmd), "downloading")
 			path, err := f.Get(cmd.Context(), args[0], dest, progress)
 			done()
 			if err != nil {
@@ -111,7 +111,9 @@ func newExport(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := f.Export(cmd.Context(), args, dest)
+			progress, done := cliutil.Transfer(env.ProgressStreams(cmd), "exporting")
+			report, err := f.Export(cmd.Context(), args, dest, progress)
+			done()
 			if err != nil {
 				return cliutil.PagesErr("export", err)
 			}
@@ -153,7 +155,10 @@ func newMget(env *cliutil.Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			progress, done := cliutil.Transfer(env.ProgressStreams(cmd), "downloading")
+			opts.Progress = progress
 			report, err := f.Mirror(cmd.Context(), args[0], dir, opts)
+			done()
 			if err != nil {
 				return fmt.Errorf("mget: %w", err)
 			}

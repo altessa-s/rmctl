@@ -107,6 +107,8 @@ refused pages   0
 links dropped   0
 ```
 
+`render` shows a `drawing pages` line on a terminal. It advances page by page and may lag drawing slightly. Folder workers share one page count; see [rendering](docs/rendering.md) for details.
+
 ```sh
 rmctl find --text 'release notes'                           # search the typed text and highlights
 rmctl text /Meetings/Retro --format markdown                # a notebook's typed text as Markdown
@@ -129,13 +131,13 @@ More examples: [docs/examples.md](docs/examples.md).
 | Writing | `mkdir <path> [-p]`, `put <file\|file.rmdoc>... [folder] [--to folder] [--name] [--tag]... [--cover first\|last] [--current-page N] [--replace \| --content-only [--drop-annotations]] [--dry-run] [--notebook --device rm2\|pure\|pro\|move]`, `unmark <path\|id> [--page N]...`, `mv <src> <dst>`, `rename <path\|id> <name>`, `pin <path\|id>...`, `unpin <path\|id>...`, `tag add\|rm <path\|id>... --tag t...`, `trash <path\|id>...`, `restore <path\|id>... [--to folder]`, `rm <path\|id>...`, `mput <dir> [folder] [--incremental] [--jobs N]`, `backup restore <dir> [--to folder] [--id id]... [--dry-run]`, `mirror add <name> <dir> <folder> [--pull-new] [--no-delete]`, `mirror ls`, `mirror rm <name>`, `mirror run [name...] [--all] [--watch] [--dry-run] [--force-delete] [--dir D --folder F] [--service]`, `mirror service install\|uninstall\|status\|logs [-n N] [-f]` |
 | Diagnostics | `debug root`, `debug blob <hash> [--name] [-o file]`, `debug files <path\|id> [--raw]`, `debug page <path\|id> [--page N]... [--raw]`, `debug hashes`, `debug checkfiles`, `debug sweep`, `debug cache status [--all]`, `debug cache clear [--all]` |
 | Other | `version [--full] [--output text\|json]`, `completion bash\|zsh\|fish\|powershell` |
-| Global flags | `--format table\|plain\|json`, `--json`, `--color auto\|always\|never`, `--offline`, `--no-cache`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--version` |
+| Global flags | `--format table\|plain\|json`, `--json`, `--color auto\|always\|never`, `--offline`, `--no-cache`, `--yes/-y`, `--profile/-P`, `--verbose/-v`, `--quiet`, `--version` |
 
 Items are named by a path from the top (`/Books/Go.pdf`) or by an identifier or a unique prefix of one (`3f2a`). A name that two items share in one folder is ambiguous: the error lists the candidates, and their identifiers resolve them.
 
 ## Behavior
 
-- **Answers go to standard output, everything else to standard error**, so a pipe gets the answer and not the progress.
+- **Answers go to standard output, everything else to standard error**, so a pipe gets the answer and not the progress. Long transfers, backups, exports and rendering show progress on a terminal; JSON answers and `--quiet` suppress it. See [Behavior and output](docs/output.md).
 - **Writing commands ask first.** On a terminal they ask for confirmation; elsewhere they need `--yes`. Each change is one new root, replayed when the library moved meanwhile.
 - **Exit codes:** 0 success, 1 failure, 2 usage error or a writing command without `--yes`, 3 not registered, 4 the library kept changing under a write, 130 interrupted.
 

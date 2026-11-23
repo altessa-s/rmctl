@@ -102,7 +102,7 @@ type Fake struct {
 	Removal     port.ProfileRemoval
 	RemoveErr   error
 	// Synced is what Sync answers, after it reports SyncSteps to the
-	// progress it was given.
+	// progress it was given. Bulk transfers replay SyncSteps too.
 	Synced    port.SyncReport
 	SyncSteps []port.SyncProgress
 	// NoListing makes Completion answer port.ErrNoListing, as a cache
@@ -269,7 +269,8 @@ func (f *Fake) Get(_ context.Context, query, dest string, progress port.Progress
 	return f.answerPath(dest), f.record("Get", query, dest)
 }
 
-func (f *Fake) Export(_ context.Context, queries []string, dest string) (port.ExportReport, error) {
+func (f *Fake) Export(_ context.Context, queries []string, dest string, progress func(port.SyncProgress)) (port.ExportReport, error) {
+	f.transfer(progress)
 	err := f.record("Export", append(slices.Clone(queries), dest)...)
 	return port.ExportReport{Path: f.answerPath(dest), Documents: len(queries), Files: filesPerDocument * len(queries)}, err
 }
@@ -338,11 +339,13 @@ func (f *Fake) answerPath(dest string) string {
 }
 
 func (f *Fake) Mirror(_ context.Context, query, dir string, o port.MirrorOptions) (port.MirrorReport, error) {
+	f.transfer(o.Progress)
 	return f.Report, f.record("Mirror", query, dir, opt(o.Incremental, "incremental"), opt(o.Delete, "delete"))
 }
 
 // Backup implements port.Fetcher.
 func (f *Fake) Backup(_ context.Context, dir, query string, o port.BackupOptions) (port.BackupReport, error) {
+	f.transfer(o.Progress)
 	err := f.record("Backup", dir, query, "profile="+o.Profile, opt(o.All, "all"), opt(o.Prune, "prune"),
 		opt(o.Force, "force"), opt(o.Rescope, "rescope"), "jobs="+strconv.Itoa(o.Jobs))
 	r := f.Backed
@@ -375,6 +378,8 @@ func (f *Fake) Folder(_ context.Context, query string) (bool, error) {
 
 // RenderTree implements port.Rendering.
 func (f *Fake) RenderTree(_ context.Context, query, dir string, o port.RenderOptions, t port.RenderTreeOptions) (port.RenderTreeReport, error) {
+	f.progress(o.DownloadProgress)
+	f.progress(o.Progress)
 	args := append(renderArgs(query, dir, o), opt(t.All, "all"), opt(t.Incremental, "incremental"), "jobs="+strconv.Itoa(t.Jobs))
 	if err := f.record("RenderTree", args...); err != nil {
 		return port.RenderTreeReport{}, err
@@ -417,6 +422,8 @@ func renderArgs(from, dest string, o port.RenderOptions) []string {
 }
 
 func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.RenderReport, error) {
+	f.progress(o.DownloadProgress)
+	f.progress(o.Progress)
 	if err := f.record(method, renderArgs(from, dest, o)...); err != nil {
 		return port.RenderReport{}, err
 	}
@@ -434,6 +441,9 @@ func (f *Fake) rendered(method, from, dest string, o port.RenderOptions) (port.R
 
 // RestoreBackup implements port.Writer.
 func (f *Fake) RestoreBackup(_ context.Context, dir string, o port.RestoreOptions) (port.RestoreReport, error) {
+	if !o.DryRun {
+		f.transfer(o.Progress)
+	}
 	args := append([]string{dir, "to=" + o.To}, o.IDs...)
 	if err := f.record("RestoreBackup", append(args, opt(o.DryRun, "dry-run"))...); err != nil {
 		return port.RestoreReport{}, err
@@ -529,6 +539,7 @@ func (f *Fake) Tag(_ context.Context, queries []string, add, remove []string) ([
 }
 
 func (f *Fake) Upload(_ context.Context, dir, dest string, o port.UploadOptions) (port.MirrorReport, error) {
+	f.transfer(o.Progress)
 	return f.Report, f.record("Upload", dir, dest, opt(o.Incremental, "incremental"))
 }
 
@@ -783,4 +794,13 @@ func (f *Fake) opened(method, from string, o port.RenderOptions) (port.OpenRepor
 		r.Path = "rendered/" + path.Base(from) + ".pdf"
 	}
 	return r, f.OpenErr
+}
+
+// transfer replays SyncSteps for each bulk command's progress callback.
+func (f *Fake) transfer(update func(port.SyncProgress)) {
+	if update != nil {
+		for _, step := range f.SyncSteps {
+			update(step)
+		}
+	}
 }

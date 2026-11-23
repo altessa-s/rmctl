@@ -7,6 +7,7 @@ package render_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -344,7 +345,7 @@ func TestNormalized(t *testing.T) {
 		if c.want.Unreadable == "" {
 			c.want.Unreadable = port.UnreadablePlaceholder
 		}
-		if got, err := render.Normalized(c.in); err != nil || got != c.want {
+		if got, err := render.Normalized(c.in); err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%+v: %+v %v", c.in, got, err)
 		}
 	}
@@ -399,7 +400,7 @@ func TestFileName(t *testing.T) {
 		{"Paper.pdf", svg, "Paper-p3.svg"},
 		{"Notes", port.RenderOptions{Format: port.FormatPDF}, "Notes-rendered.pdf"},
 	} {
-		if got := render.FileName(c.name, c.opts); got != c.want {
+		if got := render.FileName(c.name, c.opts); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%q: %q, want %q", c.name, got, c.want)
 		}
 	}

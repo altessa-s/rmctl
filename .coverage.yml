@@ -13,6 +13,7 @@ packages:
   - internal/app/library
   - internal/app/account
   - internal/app/browse
+  - internal/app/transfer
   - internal/app/fetch
   - internal/app/write
   - internal/app/watch

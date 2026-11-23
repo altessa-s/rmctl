@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/transfer"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -105,7 +106,7 @@ func (s *Service) RestoreBackup(ctx context.Context, dir string, opts port.Resto
 		report.Documents = s.plannedRestore(work, plan, state)
 		return report, nil
 	}
-	report.Documents, err = s.commitRestore(ctx, work, plan)
+	report.Documents, err = s.commitRestore(ctx, work, plan, opts.Progress)
 	if err != nil {
 		return port.RestoreReport{}, err
 	}
@@ -196,7 +197,18 @@ func (s *Service) plannedRestore(work []restoring, plan folderPlan, state port.R
 // commitRestore places every document in its folder in one commit with the
 // new folders. An existing folder they go into that is gone or in the trash
 // by then stops the restore.
-func (s *Service) commitRestore(ctx context.Context, work []restoring, plan folderPlan) ([]port.RestoredDocument, error) {
+func (s *Service) commitRestore(ctx context.Context, work []restoring, plan folderPlan, progress func(port.SyncProgress)) ([]port.RestoredDocument, error) {
+	var sizes []int64
+	for _, w := range work {
+		for _, d := range w.docs {
+			var size int64
+			for _, n := range d.sizes {
+				size += n
+			}
+			sizes = append(sizes, size)
+		}
+	}
+	tracker := transfer.New(progress, sizes)
 	uploaded := map[placement]placed{}
 	chosen := map[domain.ItemID]domain.ItemID{}
 	var result []port.RestoredDocument
@@ -215,6 +227,7 @@ func (s *Service) commitRestore(ctx context.Context, work []restoring, plan fold
 		}
 		records := slices.Concat(state.Records, plan.records)
 		result = result[:0]
+		index := 0
 		for _, w := range work {
 			target := plan.ids[w.folder]
 			for _, d := range w.docs {
@@ -223,11 +236,13 @@ func (s *Service) commitRestore(ctx context.Context, work []restoring, plan fold
 				p, ok := uploaded[key]
 				if !ok {
 					var perr error
-					if p, perr = s.place(ctx, d, id, target); perr != nil {
+					if p, perr = s.placeProgress(ctx, d, id, target, tracker.File(index)); perr != nil {
 						return nil, perr
 					}
 					uploaded[key] = p
 				}
+				tracker.Finish(index)
+				index++
 				records = append(records, p.rec)
 				result = append(result, port.RestoredDocument{
 					Item: domain.NewItem(p.rec, p.files, p.meta, d.tags), From: d.id, File: w.entry.File, Folder: w.folder,

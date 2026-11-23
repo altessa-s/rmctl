@@ -40,7 +40,7 @@ func archived(t *testing.T, files *porttest.MemFiles, path string) ([]string, ma
 func TestExportOneDocument(t *testing.T) {
 	t.Parallel()
 	s, _, files := setup(t)
-	report, err := s.Export(t.Context(), []string{"d1"}, "")
+	report, err := s.Export(t.Context(), []string{"d1"}, "", nil)
 	if err != nil || report.Path != "Paper.rmdoc" || report.Documents != 1 || report.Files != 3 {
 		t.Fatalf("%+v %v", report, err)
 	}
@@ -55,7 +55,7 @@ func TestExportFoldersAndSeveralQueries(t *testing.T) {
 	s, _, files := setup(t)
 	// The folder stands for its documents, the trashed one left out; d1
 	// named again is in the archive once.
-	report, err := s.Export(t.Context(), []string{"/Books", "d1"}, "out.rmdoc")
+	report, err := s.Export(t.Context(), []string{"/Books", "d1"}, "out.rmdoc", nil)
 	if err != nil || report.Documents != 4 {
 		t.Fatalf("%+v %v", report, err)
 	}
@@ -73,12 +73,12 @@ func TestExportFoldersAndSeveralQueries(t *testing.T) {
 		t.Fatalf("a trashed document or a folder was exported: %v", names)
 	}
 	// The top level is every document outside the trash.
-	top, err := s.Export(t.Context(), []string{"/"}, "all.rmdoc")
+	top, err := s.Export(t.Context(), []string{"/"}, "all.rmdoc", nil)
 	if err != nil || top.Documents != 5 {
 		t.Fatalf("%+v %v", top, err)
 	}
 	// A trashed document named itself is exported.
-	if r, err := s.Export(t.Context(), []string{"d5"}, "old.rmdoc"); err != nil || r.Documents != 1 {
+	if r, err := s.Export(t.Context(), []string{"d5"}, "old.rmdoc", nil); err != nil || r.Documents != 1 {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
@@ -92,10 +92,10 @@ func TestExportTrashedFolderNamedItself(t *testing.T) {
 	)
 	files := porttest.NewMemFiles()
 	s := fetch.New(library.New(c, c, c), c, files, porttest.NewArchiver(files), porttest.NewClock(porttest.Epoch))
-	if r, err := s.Export(t.Context(), []string{"f1"}, "x.rmdoc"); err != nil || r.Documents != 1 {
+	if r, err := s.Export(t.Context(), []string{"f1"}, "x.rmdoc", nil); err != nil || r.Documents != 1 {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if _, err := s.Export(t.Context(), []string{"/"}, "x.rmdoc"); !errors.Is(err, fetch.ErrNothingToExport) {
+	if _, err := s.Export(t.Context(), []string{"/"}, "x.rmdoc", nil); !errors.Is(err, fetch.ErrNothingToExport) {
 		t.Fatalf("the trash was exported from the top: %v", err)
 	}
 }
@@ -108,36 +108,36 @@ func TestExportRefusals(t *testing.T) {
 	empty := c.Record(porttest.Doc{ID: "emptyfol", Name: "Empty", Folder: true})
 	c.SetRoot(append(c.Records(), bad, dup, empty))
 	// Load the tree first: its metadata reads are not the export's.
-	if _, err := s.Export(t.Context(), []string{"/Nope"}, ""); err == nil {
+	if _, err := s.Export(t.Context(), []string{"/Nope"}, "", nil); err == nil {
 		t.Fatal("a missing path exported")
 	}
 	reads := c.Count("Read") + c.Count("Download")
-	if _, err := s.Export(t.Context(), []string{"bad"}, ""); !errors.Is(err, porttest.ErrBadArchiveName) {
+	if _, err := s.Export(t.Context(), []string{"bad"}, "", nil); !errors.Is(err, porttest.ErrBadArchiveName) {
 		t.Errorf("bad: %v", err)
 	}
-	if _, err := s.Export(t.Context(), []string{"dup"}, ""); !errors.Is(err, fetch.ErrRepeatedEntry) {
+	if _, err := s.Export(t.Context(), []string{"dup"}, "", nil); !errors.Is(err, fetch.ErrRepeatedEntry) {
 		t.Errorf("dup: %v", err)
 	}
 	if c.Count("Read")+c.Count("Download") != reads {
 		t.Fatal("a refused export downloaded files")
 	}
 	for _, q := range [][]string{nil, {"/Nope"}, {"emptyfol"}} {
-		if _, err := s.Export(t.Context(), q, ""); err == nil {
+		if _, err := s.Export(t.Context(), q, "", nil); err == nil {
 			t.Errorf("%v exported", q)
 		}
 	}
 	arc := porttest.NewArchiver(files)
 	arc.Fail["WriteArchive"] = errBoom
 	packer := fetch.New(library.New(c, c, c), c, files, arc, porttest.NewClock(porttest.Epoch))
-	if _, err := packer.Export(context.Background(), []string{"d1"}, "p.rmdoc"); !errors.Is(err, errBoom) {
+	if _, err := packer.Export(context.Background(), []string{"d1"}, "p.rmdoc", nil); !errors.Is(err, errBoom) {
 		t.Fatalf("got %v", err)
 	}
 	files.Fail["Stat"] = errBoom
-	if _, err := s.Export(t.Context(), []string{"d1"}, "x"); !errors.Is(err, errBoom) {
+	if _, err := s.Export(t.Context(), []string{"d1"}, "x", nil); !errors.Is(err, errBoom) {
 		t.Fatalf("got %v", err)
 	}
 	c.Fail["Root"] = errBoom
-	if _, err := s.Export(t.Context(), []string{"d1"}, "x"); !errors.Is(err, errBoom) {
+	if _, err := s.Export(t.Context(), []string{"d1"}, "x", nil); !errors.Is(err, errBoom) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -154,11 +154,11 @@ func TestExportStagesAndCleansUp(t *testing.T) {
 	t.Parallel()
 	s, c, files := setup(t)
 	// Load the tree first: its metadata reads are not the export's.
-	if _, err := s.Export(t.Context(), []string{"/Nope"}, ""); err == nil {
+	if _, err := s.Export(t.Context(), []string{"/Nope"}, "", nil); err == nil {
 		t.Fatal("a missing path exported")
 	}
 	reads := c.Count("Read")
-	if _, err := s.Export(t.Context(), []string{"d1"}, "ok.rmdoc"); err != nil {
+	if _, err := s.Export(t.Context(), []string{"d1"}, "ok.rmdoc", nil); err != nil {
 		t.Fatal(err)
 	}
 	// Every file streams down; none is read whole into memory.
@@ -188,7 +188,7 @@ func TestExportStagesAndCleansUp(t *testing.T) {
 			if tc.archive != "" {
 				arc.Fail[tc.archive] = errBoom
 			}
-			if _, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc"); !errors.Is(err, errBoom) {
+			if _, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc", nil); !errors.Is(err, errBoom) {
 				t.Fatalf("got %v", err)
 			}
 			if _, ok := files.File("x.rmdoc"); ok {
@@ -205,14 +205,14 @@ func TestExportStagingFailures(t *testing.T) {
 	t.Parallel()
 	s, c, files := setup(t)
 	files.Fail["Stage"] = errBoom
-	if _, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc"); !errors.Is(err, errBoom) || c.Count("Download") != 0 {
+	if _, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc", nil); !errors.Is(err, errBoom) || c.Count("Download") != 0 {
 		t.Fatalf("%v", err)
 	}
 	delete(files.Fail, "Stage")
 	// The archive is in place; the staging directory that could not be
 	// removed is said, and named.
 	files.Fail["Unstage"] = errBoom
-	r, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc")
+	r, err := s.Export(t.Context(), []string{"d1"}, "x.rmdoc", nil)
 	if !errors.Is(err, errBoom) || !strings.Contains(err.Error(), "staging directory stage-") || r.Files != 3 {
 		t.Fatalf("%+v %v", r, err)
 	}

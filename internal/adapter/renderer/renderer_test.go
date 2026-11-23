@@ -17,6 +17,7 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -360,4 +361,86 @@ func inked(t *testing.T, data []byte) int {
 		}
 	}
 	return n
+}
+
+func TestPageProgressUsesDocumentCounts(t *testing.T) {
+	t.Parallel()
+	for _, opts := range []port.RenderOptions{
+		{Mode: port.PDFFresh}, {Mode: port.PDFPreserving}, {Mode: port.PDFRecomposed},
+		{Page: 1, Format: port.FormatSVG}, {Page: 1, Format: port.FormatPNG, Scale: 0.25},
+		{Page: 1, Format: port.FormatJPEG, Scale: 0.25},
+	} {
+		var steps [][2]int64
+		opts.Progress = func(n, total int64) { steps = append(steps, [2]int64{n, total}) }
+		_, report, err := draw(t.Context(), New(), notes(t), "", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
+		if opts.Page > 0 {
+			want = [][2]int64{{0, 1}, {1, 1}}
+		}
+		if !slices.Equal(steps, want) || report.Pages != int(want[len(want)-1][1]) {
+			t.Fatalf("mode %s page %d: pages %+v, progress %v; want %v", opts.Mode, opts.Page, report, steps, want)
+		}
+	}
+}
+
+func TestPageProgressCancellation(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []port.PDFMode{port.PDFFresh, port.PDFPreserving, port.PDFRecomposed} {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cause := errors.New("stop after first settled page")
+		var steps [][2]int64
+		opts := port.RenderOptions{Mode: mode, Progress: func(n, total int64) {
+			steps = append(steps, [2]int64{n, total})
+			if n == 1 {
+				cancel(cause)
+			}
+		}}
+		_, _, err := draw(ctx, New(), notes(t), "", opts)
+		cancel(nil)
+		// Reports lag drawing, so pages that settled before the cancellation
+		// can still be reported after it, and a cancellation arriving after
+		// the last page may let the export finish.
+		full := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
+		if err == nil {
+			if !slices.Equal(steps, full) {
+				t.Fatalf("mode %s: finished with progress %v; want %v", mode, steps, full)
+			}
+			continue
+		}
+		if !errors.Is(err, cause) {
+			t.Fatalf("mode %s: error %v; want %v", mode, err, cause)
+		}
+		if len(steps) < 2 || len(steps) > 4 || !slices.Equal(steps, full[:len(steps)]) {
+			t.Fatalf("mode %s: progress after cancellation %v; want an ordered prefix of %v from %v", mode, steps, full[:4], full[:2])
+		}
+	}
+}
+
+func TestPageProgressCompletesWhenOutputOmitsPages(t *testing.T) {
+	t.Parallel()
+	r := New()
+	f, err := r.fonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := rmrender.OpenDocument(notes(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = doc.Close() }()
+	var steps [][2]int64
+	opts := port.RenderOptions{Progress: func(n, total int64) { steps = append(steps, [2]int64{n, total}) }}
+	// The native page limit deterministically exercises a successful export
+	// with fewer output pages than the document announced at the start.
+	report, err := writePDF(t.Context(), doc, opts, &rmrender.Options{Fonts: f, MaximumPages: 2}, io.Discard)
+	if err != nil || report.Pages != 2 || doc.Len() != 3 {
+		t.Fatalf("limited export: %+v, document pages %d, error %v", report, doc.Len(), err)
+	}
+	want := [][2]int64{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
+	if !slices.Equal(steps, want) {
+		t.Fatalf("progress %v; want %v", steps, want)
+	}
 }

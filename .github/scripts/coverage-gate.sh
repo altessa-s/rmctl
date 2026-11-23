@@ -30,7 +30,9 @@ if [[ ! -f "$CONFIG" ]]; then
     exit 1
 fi
 
-MODULE=$(go list -m)
+# In workspace mode, go list -m names every workspace module. Select the
+# current package's module so the gate still checks this repository's profile.
+MODULE=$(go list -f '{{.Module.Path}}' .)
 
 THRESHOLD=$(awk -F':[[:space:]]*' '/^threshold:/ { print $2; exit }' "$CONFIG")
 if [[ -z "$THRESHOLD" ]]; then

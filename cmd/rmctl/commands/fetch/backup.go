@@ -83,7 +83,10 @@ func newBackup(env *cliutil.Env) *cobra.Command {
 				query = args[1]
 			}
 			opts.Profile = cliutil.ProfileName(cmd)
+			progress, done := cliutil.Transfer(env.ProgressStreams(cmd), "backing up")
+			opts.Progress = progress
 			r, err := f.Backup(cmd.Context(), args[0], query, opts)
+			done()
 			if err != nil {
 				return cliutil.PagesErr("backup", err)
 			}
@@ -173,7 +176,10 @@ func newBackupRestore(env *cliutil.Env) *cobra.Command {
 				return err
 			}
 			opts.DryRun = false
+			progress, finish := cliutil.Transfer(env.ProgressStreams(cmd), "restoring")
+			opts.Progress = progress
 			done, err := w.RestoreBackup(cmd.Context(), args[0], opts)
+			finish()
 			if err != nil {
 				return cliutil.PagesErr("backup restore", err)
 			}

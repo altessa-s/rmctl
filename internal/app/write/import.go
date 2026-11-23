@@ -170,6 +170,10 @@ func (s *Service) identifier(from domain.ItemID, chosen map[domain.ItemID]domain
 // place uploads one document under id with its .metadata filed under
 // parent, and stores its index.
 func (s *Service) place(ctx context.Context, d archived, id, parent domain.ItemID) (placed, error) {
+	return s.placeProgress(ctx, d, id, parent, nil)
+}
+
+func (s *Service) placeProgress(ctx context.Context, d archived, id, parent domain.ItemID, progress port.Progress) (placed, error) {
 	meta := d.meta.ImportedUnder(parent)
 	list := make([]named, len(d.files))
 	for i, f := range d.files {
@@ -180,7 +184,7 @@ func (s *Service) place(ctx context.Context, d archived, id, parent domain.ItemI
 		}
 		list[i] = n
 	}
-	files, err := s.uploadAll(ctx, list)
+	files, err := s.uploadAllProgress(ctx, list, progress)
 	if err != nil {
 		return placed{}, err
 	}

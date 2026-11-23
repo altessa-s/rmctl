@@ -214,7 +214,7 @@ func (s *Service) Render(ctx context.Context, query, dest string, opts port.Rend
 	if err != nil {
 		return port.RenderReport{}, err
 	}
-	archive, err := s.download(ctx, it)
+	archive, err := s.download(ctx, it, opts.DownloadProgress)
 	if err != nil {
 		return port.RenderReport{}, err
 	}
@@ -290,7 +290,7 @@ func (s *Service) document(ctx context.Context, query string) (domain.Item, erro
 
 // download packs the document's files into an archive in a staging
 // directory and reads it back; the directory is removed after.
-func (s *Service) download(ctx context.Context, it domain.Item) (data []byte, err error) {
+func (s *Service) download(ctx context.Context, it domain.Item, progress port.Progress) (data []byte, err error) {
 	stage, remove, err := s.files.Stage()
 	if err != nil {
 		return nil, err
@@ -300,7 +300,11 @@ func (s *Service) download(ctx context.Context, it domain.Item) (data []byte, er
 			err = errors.Join(err, fmt.Errorf("remove the staging directory %s: %w", stage, rerr))
 		}
 	}()
-	archive, _, err := fetch.Pack(ctx, s.blobs, s.files, s.writer, []domain.Item{it}, stage)
+	archive, _, err := fetch.Pack(ctx, s.blobs, s.files, s.writer, []domain.Item{it}, stage, func(p port.SyncProgress) {
+		if progress != nil {
+			progress(p.Bytes, p.BytesTotal)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}

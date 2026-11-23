@@ -103,7 +103,7 @@ func TestPutProgress(t *testing.T) {
 	t.Parallel()
 	f := &clitest.Fake{Progress: [2]int64{10, -1}}
 	r := run(t, f, clitest.Options{Terminal: true, Stdin: "y\n"}, "put", "a.pdf")
-	if !strings.Contains(r.Err, "\ruploading a.pdf 10 B\n") {
+	if !strings.Contains(r.Err, "\r\x1b[Kuploading a.pdf 10 B\r\x1b[K") {
 		t.Fatalf("%q", r.Err)
 	}
 }

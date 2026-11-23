@@ -15,3 +15,5 @@ Back to the [README](../README.md).
 - **No document of that name, or one that is not a PDF:** refused. With nothing to keep, `--content-only` is most likely a mistake; upload without it.
 
 It takes one PDF, asks first ("Replace the PDF of /Books/Paper, keeping its annotations on N pages?"), and is one commit like any write. `--dry-run` prints the plan — the old and new page counts, the pages kept, appended and dropped, and the annotated pages affected — and the JSON answer carries it as `content_plan`. It excludes `--replace`, `--notebook`, `--tag` and `--cover`.
+
+On a terminal, `mput` and multi-file PDF/EPUB `put` show one overall files-and-bytes bar. A mixed `put` with archives or text notebooks shows files completed instead; single-file PDF/EPUB `put` keeps its percent line. Dry runs transfer nothing. JSON answers and `--quiet` show no progress, and the answer on standard output is unchanged.

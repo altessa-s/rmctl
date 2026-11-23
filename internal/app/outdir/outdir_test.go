@@ -129,7 +129,9 @@ func TestRecord(t *testing.T) {
 		t.Fatalf("%s", data)
 	}
 	got := outdir.Read(files, "out", ".rec.json")
-	if !maps.EqualFunc(got, docs, func(a, b outdir.Entry) bool { return a.ID == b.ID && a.Modified.Equal(b.Modified) && a.Options == b.Options && a.Empty == b.Empty }) {
+	if !maps.EqualFunc(got, docs, func(a, b outdir.Entry) bool {
+		return a.ID == b.ID && a.Modified.Equal(b.Modified) && a.Options == b.Options && a.Empty == b.Empty
+	}) {
 		t.Fatalf("%v", got)
 	}
 	if !got["Sub/A.md"].Matches(it, "opts") || got["Sub/A.md"].Matches(it, "other") || got["Sub/A.md"].Matches(domain.Item{ID: "d1"}, "opts") {

@@ -24,6 +24,7 @@ const ProfileEnv = "RMCTL_PROFILE"
 const (
 	FlagProfile = "profile"
 	FlagJSON    = "json"
+	FlagQuiet   = "quiet"
 	FlagVerbose = "verbose"
 	FlagYes     = "yes"
 	FlagFormat  = "format"
@@ -75,16 +76,18 @@ type Services struct {
 // "version --full" reports: false in rmctl-lite and in a build without cgo;
 // the composition root asks the renderer.
 type Streams struct {
-	In          io.Reader
-	Out, Err    io.Writer
-	IsTerminal  bool
-	OutTerminal bool
-	OutColor    bool
-	Width       int
-	Getenv      func(string) string
-	Now         func() time.Time
-	After       func(d time.Duration, f func()) (stop func())
-	Renders     bool
+	In         io.Reader
+	Out, Err   io.Writer
+	IsTerminal bool
+	// eraseProgress clears command progress before warnings and answers.
+	eraseProgress bool
+	OutTerminal   bool
+	OutColor      bool
+	Width         int
+	Getenv        func(string) string
+	Now           func() time.Time
+	After         func(d time.Duration, f func()) (stop func())
+	Renders       bool
 }
 
 // Request is what the command line asks of the services: the profile, the
@@ -103,6 +106,8 @@ type Request struct {
 	// JSON says the answer is JSON: a program reads it, and the line of a
 	// slow load is not drawn for one, even at a terminal.
 	JSON bool
+	// Quiet suppresses progress, including slow library loads.
+	Quiet bool
 	// Completion asks for Services.Completion alone, for shell completion:
 	// nothing that reaches the cloud, reads a token or writes the cache.
 	Completion bool
@@ -130,6 +135,7 @@ type Env struct {
 
 // NewEnv returns an environment that builds its services with factory.
 func NewEnv(streams Streams, factory Factory) *Env {
+	streams.Err = ProgressOutput(streams.Err)
 	return &Env{Streams: streams, factory: factory}
 }
 
@@ -150,6 +156,7 @@ func (e *Env) Services(cmd *cobra.Command) (Services, error) {
 	e.built = true
 	access := AccessOf(cmd)
 	req := Request{Profile: Profile(cmd), ReadOnly: access != AccessLive, JSON: e.JSON(cmd)}
+	req.Quiet, _ = cmd.Flags().GetBool(FlagQuiet)     //nolint:errcheck // persistent flag
 	req.Verbose, _ = cmd.Flags().GetBool(FlagVerbose) //nolint:errcheck // the flag is persistent on the root
 	req.NoCache, _ = cmd.Flags().GetBool(FlagNoCache) //nolint:errcheck // the flag is persistent on the root
 	if f := cmd.Flags().Lookup(FlagOffline); f != nil && f.Changed {
@@ -250,6 +257,7 @@ func Need[T any](cmd *cobra.Command, env *Env, pick func(Services) T) (T, error)
 func AddPersistentFlags(root *cobra.Command, env *Env) {
 	flags := root.PersistentFlags()
 	flags.StringP(FlagProfile, "P", "", "account profile (or "+ProfileEnv+")")
+	flags.Bool(FlagQuiet, false, "hide progress lines")
 	flags.Bool(FlagJSON, false, "print answers as JSON (the same as --format json)")
 	flags.String(FlagFormat, "", "answer format: table, plain or json (or "+FormatEnv+"; default: table on a terminal, plain otherwise)")
 	flags.String(FlagColor, ColorAuto, "color a table: auto, always or never")
@@ -266,4 +274,14 @@ func AddPersistentFlags(root *cobra.Command, env *Env) {
 		_, err := env.Output(cmd)
 		return err
 	}
+}
+
+// ProgressStreams applies the command's output policy to progress only.
+// It preserves confirmation prompts and clears progress before commentary.
+func (e *Env) ProgressStreams(cmd *cobra.Command) Streams {
+	s := e.Streams
+	quiet, _ := cmd.Flags().GetBool(FlagQuiet) //nolint:errcheck // persistent flag
+	s.IsTerminal = s.IsTerminal && !e.JSON(cmd) && !quiet
+	s.eraseProgress = true
+	return s
 }

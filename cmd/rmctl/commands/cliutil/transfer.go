@@ -37,7 +37,7 @@ func Transfer(streams Streams, label string) (update func(port.SyncProgress), do
 	if !streams.IsTerminal {
 		return nil, func() {}
 	}
-	t := &transfer{line: newStatusLine(streams), label: label, now: streams.clock()}
+	t := &transfer{line: newStatusLine(streams), label: label, now: streams.clock(), erase: streams.eraseProgress}
 	return t.update, t.done
 }
 
@@ -50,6 +50,7 @@ func (s Streams) clock() func() time.Time {
 }
 
 type transfer struct {
+	erase bool
 	mu    sync.Mutex
 	line  statusLine
 	label string
@@ -67,19 +68,21 @@ type statusLine struct {
 	dumb   bool
 	width  int
 	inLine bool
+	output *progressOutput
 }
 
 func newStatusLine(streams Streams) statusLine {
-	return statusLine{w: streams.Err, dumb: streams.getenv("TERM") == "dumb"}
+	out, _ := streams.Err.(*progressOutput)
+	return statusLine{w: streams.Err, dumb: streams.getenv("TERM") == "dumb", output: out}
 }
 
 // draw writes text over what the line showed.
 func (l *statusLine) draw(text string) {
 	if l.dumb {
 		pad := max(l.width-len(text), 0)
-		_, _ = fmt.Fprintf(l.w, "\r%s%s", text, strings.Repeat(" ", pad)) //nolint:errcheck // progress
+		l.write(fmt.Sprintf("\r%s%s", text, strings.Repeat(" ", pad)), len(text), true)
 	} else {
-		_, _ = fmt.Fprintf(l.w, "\r\x1b[K%s", text) //nolint:errcheck // progress
+		l.write("\r\x1b[K"+text, len(text), true)
 	}
 	l.width = len(text)
 	l.inLine = true
@@ -88,7 +91,7 @@ func (l *statusLine) draw(text string) {
 // finish keeps what the line shows and moves to the next one.
 func (l *statusLine) finish() {
 	if l.inLine {
-		_, _ = fmt.Fprintln(l.w) //nolint:errcheck // progress
+		l.write("\n", 0, false)
 		l.inLine = false
 	}
 }
@@ -100,12 +103,20 @@ func (l *statusLine) erase() {
 		return
 	}
 	if l.dumb {
-		_, _ = fmt.Fprintf(l.w, "\r%s\r", strings.Repeat(" ", l.width)) //nolint:errcheck // progress
+		l.write("\r"+strings.Repeat(" ", l.width)+"\r", 0, false)
 	} else {
-		_, _ = fmt.Fprint(l.w, "\r\x1b[K") //nolint:errcheck // progress
+		l.write("\r\x1b[K", 0, false)
 	}
 	l.width = 0
 	l.inLine = false
+}
+
+func (l *statusLine) write(text string, width int, active bool) {
+	if l.output != nil {
+		l.output.status(text, width, active, l.dumb)
+		return
+	}
+	_, _ = io.WriteString(l.w, text) //nolint:errcheck // progress
 }
 
 func (t *transfer) update(p port.SyncProgress) {
@@ -127,7 +138,11 @@ func (t *transfer) update(p port.SyncProgress) {
 func (t *transfer) done() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.line.finish()
+	if t.erase {
+		t.line.erase()
+	} else {
+		t.line.finish()
+	}
 }
 
 // TransferLine is one line of a transfer's progress after elapsed:
@@ -166,4 +181,19 @@ func clockTime(d time.Duration) string {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+// TransferBytes adapts one file's byte callback to the transfer bar.
+func TransferBytes(streams Streams, label string) (port.Progress, func()) {
+	update, done := Transfer(streams, label)
+	if update == nil {
+		return nil, done
+	}
+	return func(n, total int64) {
+		files := 0
+		if total > 0 && n >= total {
+			files = 1
+		}
+		update(port.SyncProgress{Bytes: n, BytesTotal: total, Files: files, FilesTotal: 1})
+	}, done
 }

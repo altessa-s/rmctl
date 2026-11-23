@@ -16,6 +16,7 @@ import (
 	"github.com/altessa-s/go-atlas-core/runtime/concurrency"
 
 	"github.com/altessa-s/rmctl/internal/app/library"
+	"github.com/altessa-s/rmctl/internal/app/transfer"
 	"github.com/altessa-s/rmctl/internal/domain"
 	"github.com/altessa-s/rmctl/internal/port"
 )
@@ -369,23 +370,42 @@ func (s *Service) Upload(ctx context.Context, dir, dest string, opts port.Upload
 	if tree, _, err = s.lib.Load(ctx); err != nil {
 		return port.MirrorReport{}, err
 	}
+	sizes := make([]int64, len(uploads))
+	if opts.Progress != nil {
+		for i, rel := range uploads {
+			n, _, _, serr := s.files.Stat(filepath.Join(dir, rel))
+			// Sizing is best effort: Put must report an inaccessible file
+			// when its turn comes, after any preceding uploads.
+			if serr == nil {
+				sizes[i] = n
+			}
+		}
+	}
+	tracker := transfer.New(opts.Progress, sizes)
+	indexes := make([]int, len(uploads))
+	for i := range indexes {
+		indexes[i] = i
+	}
 	var written, skipped atomic.Int64
 	jobs := opts.Jobs
 	if jobs < 1 {
 		jobs = DefaultJobs
 	}
-	err = concurrency.Process(ctx, uploads, func(ctx context.Context, rel string) error {
+	err = concurrency.Process(ctx, indexes, func(ctx context.Context, i int) error {
+		rel := uploads[i]
 		folder := folders[filepath.Dir(rel)]
 		if opts.Incremental && holds(tree, folder, rel) {
 			skipped.Add(1)
+			tracker.Finish(i)
 			return nil
 		}
-		if _, perr := s.Put(ctx, filepath.Join(dir, rel), string(folder), port.PutOptions{}, nil); perr != nil {
+		if _, perr := s.Put(ctx, filepath.Join(dir, rel), string(folder), port.PutOptions{}, tracker.File(i)); perr != nil {
 			return perr
 		}
 		written.Add(1)
+		tracker.Finish(i)
 		return nil
-	}, concurrency.WithConcurrency[string](jobs), concurrency.WithStopOnError[string]())
+	}, concurrency.WithConcurrency[int](jobs), concurrency.WithStopOnError[int]())
 	return port.MirrorReport{Written: int(written.Load()), Skipped: int(skipped.Load())}, err
 }
 

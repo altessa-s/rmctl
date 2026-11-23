@@ -38,7 +38,7 @@ func TestIntegration_ExportInspectImport(t *testing.T) {
 		clouddouble.Item{ID: id, Name: "Notes", Kind: clouddouble.Notebook, PageBodies: [][]byte{tabletPage(t, "Bold_Heading_Bullet_Normal.rm")}},
 	)
 	path := filepath.Join(t.TempDir(), "notes.rmdoc")
-	report, err := svc.Fetcher.Export(t.Context(), []string{"/Notes"}, path)
+	report, err := svc.Fetcher.Export(t.Context(), []string{"/Notes"}, path, nil)
 	if err != nil || report.Documents != 1 || report.Path != path {
 		t.Fatalf("%+v %v", report, err)
 	}

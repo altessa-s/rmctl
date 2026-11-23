@@ -120,6 +120,14 @@ type RenderOptions struct {
 	// Document names the document of a local archive that holds several:
 	// an identifier or a unique prefix of one.
 	Document string
+	// Progress reports pages processed, including pages omitted from the output.
+	// Whole documents report their total before drawing, then each settled
+	// page in order; reports may lag drawing by a pipeline window. Successful
+	// rendering completes at that same total. Calls are synchronous: observers
+	// must be quick and must not call back into the renderer.
+	Progress Progress
+	// DownloadProgress reports source bytes downloaded before drawing.
+	DownloadProgress Progress
 }
 
 // RenderReport is what a rendering wrote, and what it could not keep.

@@ -41,7 +41,7 @@ func TestGetProgressOnlyOnATerminal(t *testing.T) {
 		t.Fatalf("progress off a terminal: %q", r.Err)
 	}
 	f = &clitest.Fake{Path: "x", Progress: [2]int64{50, 100}}
-	if r := run(t, f, clitest.Options{Terminal: true}, "get", "x"); r.Err != "\rdownloading  50%\n" {
+	if r := run(t, f, clitest.Options{Terminal: true}, "get", "x"); r.Err != "\r\x1b[Kdownloading  50%\r\x1b[K" {
 		t.Fatalf("%q", r.Err)
 	}
 }

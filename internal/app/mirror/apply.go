@@ -445,7 +445,7 @@ func (r *run) draw(ctx context.Context, id domain.ItemID, e entry, c cloudDoc, f
 	if r.e.renders {
 		_, a.Err = r.e.rendering.Render(ctx, string(id), target, port.RenderOptions{})
 	} else {
-		_, a.Err = r.e.fetcher.Export(ctx, []string{string(id)}, target)
+		_, a.Err = r.e.fetcher.Export(ctx, []string{string(id)}, target, nil)
 	}
 	if a.Err == nil {
 		if !c.item.Modified.IsZero() {

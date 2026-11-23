@@ -60,11 +60,12 @@ endif
 .PHONY: all
 all: help
 
+# Tool installs use the devtools module independently of a local go.work.
 # The formatters and their gci sections live in .golangci.yml, so fmt and
 # lint cannot disagree.
 .PHONY: fmt
 fmt: tidy  ## Run go fmt on all go files
-	@cd devtools && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+	@cd devtools && GOWORK=off go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	@for m in $(MODULES); do (cd $$m && golangci-lint fmt ./...) || exit 1; done
 
 .PHONY: lint
@@ -72,13 +73,13 @@ lint: tidy fmt golangci ## Tidy, format and run the linter
 
 .PHONY: golangci
 golangci: ## Run golangci-lint without rewriting files (as CI does)
-	@cd devtools && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+	@cd devtools && GOWORK=off go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	@for m in $(MODULES); do (cd $$m && golangci-lint run ./...) || exit 1; done
 
 # rmctl-lite's files: the norender tag swaps the renderer for its stub.
 .PHONY: golangci-lite
 golangci-lite: ## Run golangci-lint on the rmctl-lite build (-tags integration,norender)
-	@cd devtools && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+	@cd devtools && GOWORK=off go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	@for m in $(MODULES); do (cd $$m && golangci-lint run --build-tags integration,norender ./...) || exit 1; done
 
 .PHONY: tidy
@@ -328,13 +329,13 @@ endef
 
 .PHONY: dupl
 dupl: ## Run dupl (ignoring generated files)
-	@cd devtools && go install github.com/mibk/dupl
+	@cd devtools && GOWORK=off go install github.com/mibk/dupl
 	@$(dupl-scan); \
 	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi
 
 .PHONY: dupl-check
 dupl-check: ## Fail if dupl finds duplicates (ignoring generated files)
-	@cd devtools && go install github.com/mibk/dupl
+	@cd devtools && GOWORK=off go install github.com/mibk/dupl
 	@$(dupl-scan); \
 	if [ -n "$$out" ]; then \
 		printf '%s\n' "$$out"; \
@@ -352,7 +353,7 @@ clean: ## Remove generated artifacts (coverage.out, bench.txt, bin/)
 .PHONY: copyright
 copyright: ## Add copyright header to all files
 	@echo "Updating copyright header to all go files"
-	@cd devtools && go install github.com/altessa-s/go-copyright-checker
+	@cd devtools && GOWORK=off go install github.com/altessa-s/go-copyright-checker
 	go-copyright-checker check --fix .
 
 .PHONY: release
@@ -375,18 +376,18 @@ release-macos: ## Build, sign and notarize the macOS archives of a published rel
 
 .PHONY: gosec
 gosec: ## Run gosec static security scanner (see GOSEC_EXCLUDED_RULES)
-	@cd devtools && go install github.com/securego/gosec/v2/cmd/gosec
+	@cd devtools && GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec
 	@for m in $(MODULES); do (cd $$m && gosec -quiet -exclude-generated -exclude=$(GOSEC_EXCLUDED_RULES) ./...) || exit 1; done
 
 .PHONY: govulncheck
 govulncheck: ## Run govulncheck
-	@cd devtools && go install golang.org/x/vuln/cmd/govulncheck
+	@cd devtools && GOWORK=off go install golang.org/x/vuln/cmd/govulncheck
 	@for m in $(MODULES); do (cd $$m && govulncheck ./...) || exit 1; done
 
 .PHONY: security-scan
 security-scan: ## Security checks - run vulnerability and security scanners
-	@cd devtools && go install golang.org/x/vuln/cmd/govulncheck
-	@cd devtools && go install github.com/securego/gosec/v2/cmd/gosec
+	@cd devtools && GOWORK=off go install golang.org/x/vuln/cmd/govulncheck
+	@cd devtools && GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec
 	@# Run every scanner even when an earlier one reports findings, then fail
 	@# if any did, so one report never hides the other.
 	@status=0; \
